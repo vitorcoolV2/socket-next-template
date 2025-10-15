@@ -2,6 +2,9 @@
 
 /** @type {import('ts-jest').JestConfigWithTsJest} */
 export default {
+  roots: [
+    '<rootDir>/src/__tests__', // Default test directory
+  ],
   preset: 'ts-jest/presets/default-esm',
   //testEnvironment: 'node',
 
@@ -54,7 +57,6 @@ export default {
     '**/__tests__/**/*.?(m)[jt]s?(x)',
     '**/?(*.)+(spec|test).?(m)[jt]s?(x)',
     '**/__tests__/**/*(*.)@(test|spec).mjs',
-
   ],
 
 
