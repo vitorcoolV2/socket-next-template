@@ -1,0 +1,25 @@
+{
+  "keys": [
+    {
+      "kty": "RSA",
+      "use": "sig",
+      "kid": "test-key-123",
+      "alg": "RS256",
+      "n": "xhrv0jLzHig9HI0XRNnFg87on3PWmldWa47y_JLU_ngLs76IsHB0mRXYfmam3-5xVyD4eCyClgOX7r870xFngbmcMJkMDENlmAm1jfN8Pcx3MzPbQ2T0NXxnkku53PacHBxfk2mH4FPe6gf_oRchCwU3tj3OhLzwEAkxIkq_pqfknt2SPTz15zH-gHvPYRTw_f8urBKiKA6zNDvQVFEQA-N1prMzf8YFI1c0BtlqIX7nx8HvbRTV5aocrlXeuIhvVOBdeiOmMbgWBBNd-LMVnNPcWanWQ4sYeO-DFM76w22fyJB5f6u4Qp2hSLfOoVpls_9qTpI24I4vKC6oiFyQdw",
+      "e": "AQAB"
+    }
+  ],
+  "roles": [
+    "user",
+    "admin"
+  ],
+  "iss": "https://com-socket.dev",
+  "aud": [
+    "http://localhost:3001"
+  ],
+  "algorithms": [
+    "RS256"
+  ],
+  "ignoreNotBefore": false,
+  "ignoreExpiration": false
+}
