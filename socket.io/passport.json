@@ -1,0 +1,10 @@
+{
+  "roles": [
+    "user"
+  ],
+  "iss": "https://enabling-glider-13.clerk.accounts.dev",
+  "ignoreExpiration": true,
+  "algorithms": [
+    "RS256"
+  ]
+}

@@ -10,7 +10,7 @@ import {
   debug,
   PUBLIC_MESSAGE_USER_ID,
   PUBLIC_MESSAGE_EXPIRE_DAYS,
-} from './config.mjs';
+} from '../config.mjs';
 
 // Import schemas
 import {
@@ -26,7 +26,9 @@ import {
   getMessageHistoryOptionsSchema,
   getMessagesOptionsSchema,
   activeUserSchema,
-  userQuerySchema
+  userQuerySchema,
+  statusSchema,
+  MESSAGE_STATUS_ORDERED
 } from './schemas.mjs';
 
 
@@ -35,19 +37,27 @@ const connectionString = process.env.DATABASE_URL;
 console.log("NODE_ENV", process.env.NODE_ENV,)
 
 function sanitizeObject(obj) {
-  const seen = new WeakSet();
-  return JSON.parse(
-    JSON.stringify(obj, (key, value) => {
-      if (typeof value === 'function') return;
-      if (typeof value === "object" && value !== null) {
+  const seen = new WeakSet(); // To track circular references
+
+  try {
+    // Step 1: Serialize the object
+    const serialized = JSON.stringify(obj, (key, value) => {
+      if (typeof value === 'function') return undefined; // Exclude functions
+      if (typeof value === 'object' && value !== null) {
         if (seen.has(value)) {
-          return; // Skip circular references
+          return '[Circular]'; // Handle circular references gracefully
         }
         seen.add(value);
       }
       return value;
-    })
-  );
+    });
+
+    // Step 2: Parse the sanitized object
+    return JSON.parse(serialized);
+  } catch (error) {
+    console.error('Error sanitizing object:', error.message);
+    throw new Error(`Failed to sanitize object: ${error.message}`);
+  }
 }
 
 const getPoolOptions = (connectionString) => {
@@ -158,8 +168,8 @@ export class PostgresPersistence extends PersistenceInterface {
       await this.pool.query(`
             CREATE TABLE IF NOT EXISTS user_sessions (
                 user_id VARCHAR(100) PRIMARY KEY,
-                user_name VARCHAR(255) NOT NULL,
-                sockets JSONB DEFAULT '{}',  -- {sessionId,socketId,connectedAt,lastActivity}   
+                user_name VARCHAR(255) NOT NULL, 
+                sockets JSONB DEFAULT '[]',  -- [{sessionId,socketId,connectedAt,lastActivity}]
                 stored_at TIMESTAMP DEFAULT NOW(), 
                 connected_at TIMESTAMP DEFAULT NOW(),
                 last_activity TIMESTAMP DEFAULT NOW(),
@@ -218,7 +228,7 @@ export class PostgresPersistence extends PersistenceInterface {
   }
 
 
-  async addUser(user) {
+  async storeUser(user) {
     await this.ensureInitialized(); // Ensure the database is initialized
 
     try {
@@ -244,7 +254,7 @@ export class PostgresPersistence extends PersistenceInterface {
       ON CONFLICT (user_id) 
       DO UPDATE SET 
         user_name = EXCLUDED.user_name,
-        sockets = COALESCE(user_sessions.sockets, '{}'::JSONB) || EXCLUDED.sockets, -- Merge sockets array
+        sockets = EXCLUDED.sockets, --- do not >>>>>COALESCE(user_sessions.sockets, '[]'::JSONB), ---- never merge || EXCLUDED.sockets, -- Merge sockets array
         last_activity = EXCLUDED.last_activity,
         state = EXCLUDED.state,
         metadata = EXCLUDED.metadata
@@ -263,6 +273,8 @@ export class PostgresPersistence extends PersistenceInterface {
         })
       ];
 
+
+      if (debug) console.log('storeUser', query, values);
       // Execute the query
       await this.pool.query(query, values);
 
@@ -272,7 +284,7 @@ export class PostgresPersistence extends PersistenceInterface {
       // Return the user object
       return user;
     } catch (error) {
-      console.error('Error in addUser:', error.message);
+      console.error('Error in storeUser:', error.message);
       throw error; // Re-throw the error for upstream handling
     }
   }
@@ -366,24 +378,36 @@ export class PostgresPersistence extends PersistenceInterface {
   }
 
 
-
-  async onUserDisconnected(user) {
+  /*
+  schema
+              CREATE TABLE IF NOT EXISTS user_sessions (
+                  user_id VARCHAR(100) PRIMARY KEY,
+                  user_name VARCHAR(255) NOT NULL,
+                  sockets JSONB DEFAULT '[]',  -- [{sessionId,socketId,connectedAt,lastActivity}]
+                  stored_at TIMESTAMP DEFAULT NOW(), 
+                  connected_at TIMESTAMP DEFAULT NOW(),
+                  last_activity TIMESTAMP DEFAULT NOW(),
+                  state VARCHAR(20) DEFAULT 'connected',
+                  metadata JSONB DEFAULT '{}'
+              );
+  */
+  async onUserDisconnected(uSession) {
     await this.ensureInitialized(); // Ensure the database is initialized
     try {
       // select user_sessions sockets as [{sessionId,state,connectedAt,sessionId}] where user_id = ${user.userId}
       await this.pool.query(
         `UPDATE user_sessions 
-         SET socket_ids = array_remove(socket_ids, $1),
+         SET sockets = array_remove(sockets, (socket)=> socket.socketId $1), // !!! to GPT pseudo code
              last_activity = $2
          WHERE user_id = $3`,
-        [user.socketId, new Date(), user.userId]
+        [uSession.socketId, new Date(), uSession.userId]
       );
 
-      // Remove user if no more socket connections
+      // Remove user if no more socket connections. never delete user_session. update user_session.sockets, by removing
       await this.pool.query(
         `DELETE FROM user_sessions 
-         WHERE user_id = $1 AND array_length(socket_ids, 1) IS NULL`,
-        [user.userId]
+         WHERE user_id = $1 AND array_length(socket_i, 1) IS NULL`,
+        [uSession.userId]
       );
     } catch (error) {
       console.error('Error in onUserDisconnected:', error);
@@ -412,11 +436,15 @@ export class PostgresPersistence extends PersistenceInterface {
     await this.ensureInitialized(); // Ensure the database is initialized
 
     try {
-      const { messageId, sender, recipientId, content, type, status, direction, timestamp, readAt } = message;
+      const { messageId, sender, recipientId, content, type, status, readAt } = message;
 
       // Ensure metadata is serializable
       const sanitizedMetadata = sanitizeObject(message.metadata || {});
 
+      const direction =
+        (userId === recipientId) ? 'incoming' :
+          (userId === sender.userId) ? 'outgoing' : '--NONE--'
+      sender.userId
       // Construct the query for upserting the message
       const query = `
       INSERT INTO messages (
@@ -536,7 +564,7 @@ export class PostgresPersistence extends PersistenceInterface {
     try {
       const result = await this.pool.query(`
         SELECT user_id as "userId", user_name as "userName", 
-               socket_ids as "socketIds", session_id as "sessionId",
+               sockets, session_id as "sessionId",
                connected_at as "connectedAt", last_activity as "lastActivity",
                state, metadata
         FROM user_sessions         
@@ -547,7 +575,7 @@ export class PostgresPersistence extends PersistenceInterface {
       const ret = result.rows.map(row => ({
         userId: row.userId,
         userName: row.userName,
-        socketIds: row.socketIds || [],
+        sockets: row.sockets || [],
         sessionId: row.sessionId,
         connectedAt: row.connectedAt,
         lastActivity: row.lastActivity,
@@ -561,6 +589,222 @@ export class PostgresPersistence extends PersistenceInterface {
     }
   }
 
+
+  /**
+   * Query methods for user management
+   */
+
+
+  async getUsers(options = {}) {
+    await this.ensureInitialized();
+    try {
+      const { error: optionsError, value: validOptions } = userQuerySchema.validate(options);
+      if (optionsError) {
+        console.error({ error: optionsError }, 'Invalid options');
+        return [];
+      }
+
+      const { states = null, limit = 10, offset = 0, include = [] } = validOptions;
+
+      // Build the WHERE clause dynamically and prepare parameters
+      const whereClauses = [];
+      const queryParams = [];
+      let paramIndex = 1;
+
+      if (states && states.length > 0) {
+        whereClauses.push(`state = ANY($${paramIndex})`);
+        queryParams.push(states);
+        paramIndex++;
+      }
+
+      queryParams.push(limit, offset);
+
+      // Build the SELECT fields dynamically
+      const selectFields = [
+        'user_id as "userId"',
+        'user_name as "userName"',
+        'sockets',
+        'session_id as "sessionId"',
+        'connected_at as "connectedAt"',
+        'last_activity as "lastActivity"',
+        'state'
+      ];
+
+      if (include.includes('metadata')) {
+        selectFields.push('metadata');
+      }
+
+      // Build the query
+      const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      const query = `
+      SELECT ${selectFields.join(', ')}
+      FROM user_sessions
+      ${whereClause}
+      ORDER BY last_activity DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+      // Execute the query
+      if (debug) console.log(query, queryParams);
+      const result = await this.pool.query(query, queryParams);
+      //if (debug) console.log(result.rows);
+
+      // Map the results
+      return result.rows.map(row => ({
+        userId: row.userId,
+        userName: row.userName,
+        sockets: row.sockets,
+        sessionId: row.sessionId,
+        connectedAt: new Date(row.connectedAt).getTime(), // Convert to Unix epoch milliseconds
+        lastActivity: new Date(row.lastActivity).getTime(), // Convert to Unix epoch milliseconds
+        state: row.state,
+        ...(typeof row.metadata !== 'string' ? null : { metadata: row.metadata }),
+      }));
+    } catch (error) {
+      console.error({ error }, 'Error in getUsers');
+      return [];
+    }
+  }
+
+
+  async getUserConversations(userId, options = {}) {
+    await this.ensureInitialized(); // Ensure the database connection is ready
+    try {
+      const { error: optionsError, value: validOptions } = conversationQuerySchema.validate(options);
+      if (optionsError) {
+        console.error({ error: optionsError }, 'Invalid options');
+        return [];
+      }
+
+      const { limit = 10, offset = 0, include = [] } = validOptions;
+
+      // Build the WHERE clause dynamically and prepare parameters
+      const whereClauses = [];
+      const queryParams = [];
+      let paramIndex = 1;
+
+      // Add userId as a parameter for filtering conversations
+      whereClauses.push(`(sender_id = $${paramIndex} OR recipient_id = $${paramIndex})`);
+      queryParams.push(userId);
+      paramIndex++;
+
+      // Build the SELECT fields dynamically
+      const selectFields = [
+        'DISTINCT CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END AS "userId"',
+        'CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS "otherPartyId"',
+        'MAX(created_at) AS "lastMessageAt"' // Latest message timestamp
+      ];
+
+      if (include.includes('metadata')) {
+        selectFields.push('metadata');
+      }
+
+      // Build the query
+      const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      const query = `
+      SELECT ${selectFields.join(', ')}
+      FROM messages
+      ${whereClause}
+      GROUP BY 
+        CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END,
+        CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END
+      ORDER BY "lastMessageAt" DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+      // Add pagination parameters
+      queryParams.push(limit, offset);
+
+      // Execute the query
+      if (debug) console.log(query, queryParams);
+      const result = await this.pool.query(query, queryParams);
+
+      // Map the results
+      return result.rows.map(row => ({
+        userId: row.userId,
+        otherPartyId: row.otherPartyId,
+        lastMessageAt: new Date(row.lastMessageAt).getTime(), // Convert to Unix epoch milliseconds
+        ...(typeof row.metadata !== 'string' ? null : { metadata: row.metadata }),
+      }));
+    } catch (error) {
+      console.error({ error }, 'Error in getUserConversations');
+      return [];
+    }
+  }
+  /**
+   * get user conversation with messages state counts
+   */
+
+  async getUserConversationsWithStateCounts(userId, options = {}) {
+    await this.ensureInitialized(); // Ensure the database connection is ready
+    try {
+      const { error: optionsError, value: validOptions } = conversationQuerySchema.validate(options);
+      if (optionsError) {
+        console.error({ error: optionsError }, 'Invalid options');
+        return [];
+      }
+
+      const { limit = 10, offset = 0, include = [] } = validOptions;
+
+      // Build the WHERE clause dynamically and prepare parameters
+      const whereClauses = [];
+      const queryParams = [];
+      let paramIndex = 1;
+
+      // Add userId as a parameter for filtering conversations
+      whereClauses.push(`(sender_id = $${paramIndex} OR recipient_id = $${paramIndex})`);
+      queryParams.push(userId);
+      paramIndex++;
+
+      // Build the SELECT fields dynamically
+      const selectFields = [
+        'CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END AS "userId"',
+        'CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS "otherPartyId"',
+        'MAX(created_at) AS "lastMessageAt"', // Latest message timestamp
+        'COUNT(*) FILTER (WHERE state = \'sent\') AS "sentCount"',
+        'COUNT(*) FILTER (WHERE state = \'delivered\') AS "deliveredCount"',
+        'COUNT(*) FILTER (WHERE state = \'read\') AS "readCount"'
+      ];
+
+      if (include.includes('metadata')) {
+        selectFields.push('metadata');
+      }
+
+      // Build the query
+      const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
+      const query = `
+      SELECT ${selectFields.join(', ')}
+      FROM messages
+      ${whereClause}
+      GROUP BY 
+        CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END,
+        CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END
+      ORDER BY "lastMessageAt" DESC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+    `;
+
+      // Add pagination parameters
+      queryParams.push(limit, offset);
+
+      // Execute the query
+      if (debug) console.log(query, queryParams);
+      const result = await this.pool.query(query, queryParams);
+
+      // Map the results
+      return result.rows.map(row => ({
+        userId: row.userId,
+        otherPartyId: row.otherPartyId,
+        lastMessageAt: new Date(row.lastMessageAt).getTime(), // Convert to Unix epoch milliseconds
+        sentCount: parseInt(row.sentCount),
+        deliveredCount: parseInt(row.deliveredCount),
+        readCount: parseInt(row.readCount),
+        ...(typeof row.metadata !== 'string' ? null : { metadata: row.metadata }),
+      }));
+    } catch (error) {
+      console.error({ error }, 'Error in getUserConversationsWithStateCounts');
+      return [];
+    }
+  }
 
   /**
    * Retrieve all messages for a user from the database
@@ -580,6 +824,7 @@ export class PostgresPersistence extends PersistenceInterface {
       since = null,
       until = null,
       type = null,
+      messageIds = null,
       direction = null,
       unreadOnly = false,
       otherPartyId = null,
@@ -724,29 +969,50 @@ export class PostgresPersistence extends PersistenceInterface {
     }
   }
 
-  async setMessagesStatus(userId, messageIds, status) {
+  async updateMessageStatus(userId, messageId, status, fromStatus) {
     await this.ensureInitialized(); // Ensure the database is initialized
-    try {
-      const query = `
-      UPDATE messages
+
+    // Update both sender and recipient copies of the message
+    const query = `
+    UPDATE messages
       SET status = $1
-      WHERE user_id = $2 AND message_id = ANY($3)
-      RETURNING message_id;
+      WHERE (status = $2 AND message_id = $3)
+        AND (
+          sender_id = $4 OR
+          recipient_id = $4
+        )
+      RETURNING *;
     `;
-      const result = await this.pool.query(query, [status, userId, messageIds]);
+    const values = [status, fromStatus, messageId, userId];
 
-      const updatedMessageIds = result.rows.map(row => row.message_id);
+    if (debug) console.log('Executing query:', query, values);
 
+    try {
+      const result = await this.pool.query(query, values);
+
+      // Check if any rows were updated
+      if (result.rowCount === 0) {
+        console.warn(
+          `No rows updated for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus}, toStatus: ${status}`
+        );
+        return null; // Indicate that no rows were updated
+      }
+
+      // Log updated rows
       if (debug) {
         console.log(
-          `Updated status to "${status}" for messages: ${updatedMessageIds.join(', ')} for userId: ${userId}`
+          `Updated status from "${fromStatus}" to "${status}" for message: ${messageId}, userId: ${userId}`,
+          result.rows
         );
       }
 
-      return updatedMessageIds;
+      return result.rows; // Return all updated rows for visibility
     } catch (error) {
-      console.error(`Failed to update message status for userId: ${userId}`, error.message);
-      throw error;
+      console.error(
+        `Failed to update message status for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus}, toStatus: ${status}`,
+        error.message
+      );
+      throw error; // Re-throw the error for upstream handling
     }
   }
 

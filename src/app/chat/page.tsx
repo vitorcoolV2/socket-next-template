@@ -1,7 +1,7 @@
 // app/chat/page.tsx
 'use client';
 
-import ChatWrapper from '../ChatWrapper';
+import ChatWrapper from '../components/ChatWrapper';
 
 export const dynamic = 'force-dynamic';
 

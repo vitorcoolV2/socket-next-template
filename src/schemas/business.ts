@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BaseSchema } from './base';
+import { string } from 'joi';
 
 export const categoryList = [
   'ELECTRONICS',
@@ -59,9 +60,10 @@ export const CustomerSchema = createResourceSchema(customerFields);
 
 // API Request Schemas
 export const ResourceSchemas = {
-  product: ProductSchema,
-  order: OrderSchema,
-  customer: CustomerSchema,
+  //product: ProductSchema,
+  //order: OrderSchema,
+  //customer: CustomerSchema,
+  url: string,
 } as const;
 
 export type ResourceTypes = keyof typeof ResourceSchemas;

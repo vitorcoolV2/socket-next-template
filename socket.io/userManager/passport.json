@@ -1,7 +1,0 @@
-{
-  "roles": ["user"],
-  "iss": "https://enabling-glider-13.clerk.accounts.dev",
-  "aud": ["http://localhost:3001", "api.example.com"],
-  "ignoreExpiration": false,
-  "algorithms": ["RS256"]
-}
