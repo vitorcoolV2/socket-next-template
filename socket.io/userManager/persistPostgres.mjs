@@ -1,6 +1,6 @@
 
 import { PersistenceInterface } from './PersistenceInterface.mjs'
-
+import { validateOptions, buildDefaultConversation, processConversationRow, getMessageStats } from './persistPostgres-helpers.mjs'
 // userPersistent.mjs
 import pg from 'pg';
 const { Pool } = pg;
@@ -23,11 +23,12 @@ import {
   markMessagesAsReadOptionsSchema,
   markMessagesAsReadResultSchema,
   typingSchema,
-  getMessageHistoryOptionsSchema,
-  getMessagesOptionsSchema,
+  getUserConversationUOptionsSchema,
+  getMessagesUOptionsSchema,
   activeUserSchema,
   userQuerySchema,
   statusSchema,
+  getConversationsListPOptionsSchema,
   MESSAGE_STATUS_ORDERED
 } from './schemas.mjs';
 
@@ -166,56 +167,67 @@ export class PostgresPersistence extends PersistenceInterface {
   async initializeTables() {
     try {
       await this.pool.query(`
-            CREATE TABLE IF NOT EXISTS user_sessions (
-                user_id VARCHAR(100) PRIMARY KEY,
-                user_name VARCHAR(255) NOT NULL, 
-                sockets JSONB DEFAULT '[]',  -- [{sessionId,socketId,connectedAt,lastActivity}]
-                stored_at TIMESTAMP DEFAULT NOW(), 
-                connected_at TIMESTAMP DEFAULT NOW(),
-                last_activity TIMESTAMP DEFAULT NOW(),
-                state VARCHAR(20) DEFAULT 'connected',
-                metadata JSONB DEFAULT '{}'
-            );
-        `);
+          CREATE TABLE IF NOT EXISTS user_sessions (
+              user_id VARCHAR(100) PRIMARY KEY,
+              user_name VARCHAR(255) NOT NULL, 
+              sockets JSONB DEFAULT '[]',  -- [{sessionId,socketId,connectedAt,lastActivity}]
+              created_at TIMESTAMPTZ DEFAULT NOW(), 
+              connected_at TIMESTAMPTZ DEFAULT NOW(),
+              last_activity TIMESTAMPTZ DEFAULT NOW(),
+              state VARCHAR(20) DEFAULT 'disconnected',
+              metadata JSONB DEFAULT '{}'
+          );
+      `);
+      await this.pool.query(`
+          -- users
+          CREATE INDEX IF NOT EXISTS idx_user_sessions_state ON user_sessions(state);
+          CREATE INDEX IF NOT EXISTS idx_user_sessions_activity ON user_sessions(last_activity);
+          
+      `);
 
       await this.pool.query(`
-            CREATE TABLE IF NOT EXISTS messages (
-              id SERIAL PRIMARY KEY,
-              message_id VARCHAR(100) NOT NULL,
-              sender_id VARCHAR(100) NOT NULL,
-              sender_name VARCHAR(255) NOT NULL,
-              recipient_id VARCHAR(100),
-              content TEXT NOT NULL,
-              message_type VARCHAR(20) NOT NULL,
-              direction VARCHAR(10) NOT NULL DEFAULT 'outgoing',
-              status VARCHAR(20) NOT NULL DEFAULT 'sent',
-              timestamp TIMESTAMP WITH TIME ZONE NOT NULL, 
-              read_at TIMESTAMP WITH TIME ZONE NULL,     
-              stored_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-              metadata JSONB DEFAULT '{}' NULL,          
-              CONSTRAINT messages_message_id_direction_unique UNIQUE (message_id, direction)
-          );
-            
-        `);
+        CREATE TABLE IF NOT EXISTS messages (
+            id SERIAL PRIMARY KEY,
+            message_id VARCHAR(100) NOT NULL,
+            sender_id VARCHAR(100) NOT NULL,
+            sender_name VARCHAR(255) NOT NULL,
+            recipient_id VARCHAR(100) NOT NULL,
+            content TEXT NOT NULL,
+            message_type VARCHAR(50) DEFAULT 'private',
+            direction VARCHAR(10) NOT NULL CHECK (direction IN ('incoming', 'outgoing')),
+            status VARCHAR(10) DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'delivered', 'read', 'failed')),
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            updated_at TIMESTAMPTZ DEFAULT NOW(),
+            read_at TIMESTAMPTZ NULL,
+            metadata JSONB DEFAULT '{}' NULL,
+            CONSTRAINT idx_messages_unique_entry UNIQUE (message_id, direction)
+        )
+    `);
 
 
       // Create indexes if they don't exist
       await this.pool.query(`
-            -- messages
+            -- Core indexes for WHERE clause
             CREATE INDEX IF NOT EXISTS idx_messages_sender ON messages(sender_id);
             CREATE INDEX IF NOT EXISTS idx_messages_recipient ON messages(recipient_id);
-            CREATE INDEX IF NOT EXISTS idx_messages_status ON messages (status);
-            CREATE INDEX IF NOT EXISTS idx_messages_message_type ON messages (message_type);
-            CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
-            -- messages multi keys
-            CREATE INDEX IF NOT EXISTS idx_messages_message_id_timestamp ON messages (message_id, direction, timestamp DESC);
-            CREATE INDEX IF NOT EXISTS idx_messages_composite_lookup ON messages(sender_id, recipient_id, timestamp);
-
-            -- users
-            CREATE INDEX IF NOT EXISTS idx_user_sessions_state ON user_sessions(state);
-            CREATE INDEX IF NOT EXISTS idx_user_sessions_activity ON user_sessions(last_activity);
+            CREATE INDEX IF NOT EXISTS idx_messages_message_id ON messages(message_id);
+            CREATE INDEX IF NOT EXISTS idx_messages_direction ON messages(direction);
+            CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(status);
             
-        `);
+            -- Critical for ORDER BY performance
+            CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at DESC);
+            
+            -- Composite index for conversation lookups
+            CREATE INDEX IF NOT EXISTS idx_messages_conversation_lookup 
+              ON messages(sender_id, recipient_id, created_at DESC);
+
+            -- CREATE INDEX IF NOT EXISTS idx_messages_message_id_updated_at 
+              -- ON messages (message_id, direction, updated_at DESC);
+
+            -- CREATE INDEX IF NOT EXISTS idx_messages_composite_lookup 
+              -- ON messages(sender_id, recipient_id, updated_at);
+      `);
+
 
       if (debug) console.log('✅ Database tables initialized');
 
@@ -378,19 +390,7 @@ export class PostgresPersistence extends PersistenceInterface {
   }
 
 
-  /*
-  schema
-              CREATE TABLE IF NOT EXISTS user_sessions (
-                  user_id VARCHAR(100) PRIMARY KEY,
-                  user_name VARCHAR(255) NOT NULL,
-                  sockets JSONB DEFAULT '[]',  -- [{sessionId,socketId,connectedAt,lastActivity}]
-                  stored_at TIMESTAMP DEFAULT NOW(), 
-                  connected_at TIMESTAMP DEFAULT NOW(),
-                  last_activity TIMESTAMP DEFAULT NOW(),
-                  state VARCHAR(20) DEFAULT 'connected',
-                  metadata JSONB DEFAULT '{}'
-              );
-  */
+
   async onUserDisconnected(uSession) {
     await this.ensureInitialized(); // Ensure the database is initialized
     try {
@@ -442,34 +442,36 @@ export class PostgresPersistence extends PersistenceInterface {
       const sanitizedMetadata = sanitizeObject(message.metadata || {});
 
       const direction =
-        (userId === recipientId) ? 'incoming' :
-          (userId === sender.userId) ? 'outgoing' : '--NONE--'
-      sender.userId
+        (sender.userId === recipientId && userId === recipientId) ? message.direction // can only specify outter message.direction when msg sender=recipient
+          : (userId === recipientId) ? 'incoming'      // case recipient <status> incoming message
+            : (userId === sender.userId) ? 'outgoing'    // case sender <status> outgoing message
+              : '--NONE--'; // should never occur with input data validation
+
       // Construct the query for upserting the message
       const query = `
-      INSERT INTO messages (
-        -- insert
-        message_id, 
-        direction,         
-        sender_id, 
-        sender_name,
-        recipient_id, 
-        message_type,           
-        content, 
-        -- mutatatable status, timestamp, read_at, metadata. can not mutate new message head logic properties               
-        status,       
-        timestamp, 
-        read_at, 
-        metadata
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-      ON CONFLICT (message_id, direction) 
-      DO UPDATE SET         
-        status = EXCLUDED.status,
-        timestamp = EXCLUDED.timestamp,
-        read_at = EXCLUDED.read_at,
-        metadata = EXCLUDED.metadata
-    `;
+        INSERT INTO messages (
+          -- insert
+          message_id, 
+          direction,         
+          sender_id, 
+          sender_name,
+          recipient_id, 
+          message_type,           
+          content, 
+          -- mutatatable status, updated_at, read_at, metadata. can not mutate new message head logic properties               
+          status,       
+          updated_at, 
+          read_at, 
+          metadata
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        ON CONFLICT (message_id, direction) 
+        DO UPDATE SET         
+          status = EXCLUDED.status,
+          updated_at = EXCLUDED.updated_at,
+          read_at = EXCLUDED.read_at,
+          metadata = EXCLUDED.metadata
+      `;
 
 
       // Prepare the values for the query
@@ -482,7 +484,7 @@ export class PostgresPersistence extends PersistenceInterface {
         type,
         content,
         status,
-        new Date(message.timestamp), // Convert to Date object,
+        new Date(), // updated_at updated each input on message
         readAt ? new Date(readAt) : null, // Handle null readAt
         JSON.stringify({
           ...sanitizedMetadata,
@@ -517,7 +519,7 @@ export class PostgresPersistence extends PersistenceInterface {
         message_type AS "type",
         direction,
         status,
-        timestamp,
+        updated_at,
         read_at AS "readAt",
         metadata
     FROM messages
@@ -568,7 +570,7 @@ export class PostgresPersistence extends PersistenceInterface {
                connected_at as "connectedAt", last_activity as "lastActivity",
                state, metadata
         FROM user_sessions         
-        WHERE state IN ('authenticated', 'connected')
+        WHERE state IN ('authenticated')
         ORDER BY last_activity DESC
       `);
 
@@ -580,7 +582,7 @@ export class PostgresPersistence extends PersistenceInterface {
         connectedAt: row.connectedAt,
         lastActivity: row.lastActivity,
         state: row.state,
-        ...row.metadata
+        //       ...row.metadata
       }));
       return ret;
     } catch (error) {
@@ -593,8 +595,6 @@ export class PostgresPersistence extends PersistenceInterface {
   /**
    * Query methods for user management
    */
-
-
   async getUsers(options = {}) {
     await this.ensureInitialized();
     try {
@@ -619,12 +619,13 @@ export class PostgresPersistence extends PersistenceInterface {
 
       queryParams.push(limit, offset);
 
+
       // Build the SELECT fields dynamically
       const selectFields = [
         'user_id as "userId"',
         'user_name as "userName"',
         'sockets',
-        'session_id as "sessionId"',
+        //  'session_id as "sessionId"',
         'connected_at as "connectedAt"',
         'last_activity as "lastActivity"',
         'state'
@@ -654,7 +655,7 @@ export class PostgresPersistence extends PersistenceInterface {
         userId: row.userId,
         userName: row.userName,
         sockets: row.sockets,
-        sessionId: row.sessionId,
+        //     sessionId: row.sessionId,
         connectedAt: new Date(row.connectedAt).getTime(), // Convert to Unix epoch milliseconds
         lastActivity: new Date(row.lastActivity).getTime(), // Convert to Unix epoch milliseconds
         state: row.state,
@@ -667,141 +668,172 @@ export class PostgresPersistence extends PersistenceInterface {
   }
 
 
-  async getUserConversations(userId, options = {}) {
-    await this.ensureInitialized(); // Ensure the database connection is ready
+
+  /**
+   * Get user names from messages for the given user IDs 
+   * @param {string[]} senderIds - Array of user IDs to get names for
+   * @returns {Promise<Object>} Map of userId to userName (will include all senderIds as keys)
+   */
+  async _getUserNamesFromMessages(senderIds) {
+    await this.ensureInitialized();
+
+    if (!senderIds || senderIds.length === 0) {
+      return {};
+    }
+
     try {
-      const { error: optionsError, value: validOptions } = conversationQuerySchema.validate(options);
-      if (optionsError) {
-        console.error({ error: optionsError }, 'Invalid options');
-        return [];
-      }
-
-      const { limit = 10, offset = 0, include = [] } = validOptions;
-
-      // Build the WHERE clause dynamically and prepare parameters
-      const whereClauses = [];
-      const queryParams = [];
-      let paramIndex = 1;
-
-      // Add userId as a parameter for filtering conversations
-      whereClauses.push(`(sender_id = $${paramIndex} OR recipient_id = $${paramIndex})`);
-      queryParams.push(userId);
-      paramIndex++;
-
-      // Build the SELECT fields dynamically
-      const selectFields = [
-        'DISTINCT CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END AS "userId"',
-        'CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS "otherPartyId"',
-        'MAX(created_at) AS "lastMessageAt"' // Latest message timestamp
-      ];
-
-      if (include.includes('metadata')) {
-        selectFields.push('metadata');
-      }
-
-      // Build the query
-      const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
       const query = `
-      SELECT ${selectFields.join(', ')}
-      FROM messages
-      ${whereClause}
-      GROUP BY 
-        CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END,
-        CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END
-      ORDER BY "lastMessageAt" DESC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+        SELECT DISTINCT sender_id, sender_name 
+        FROM messages 
+        WHERE 
+          (direction = 'incoming' AND sender_id = ANY($1)) 
+        OR
+          (direction = 'outgoing' AND recipient_id = ANY($1)) 
     `;
+      const values = [senderIds];
 
-      // Add pagination parameters
-      queryParams.push(limit, offset);
+      const result = await this.pool.query(query, values);
 
-      // Execute the query
-      if (debug) console.log(query, queryParams);
-      const result = await this.pool.query(query, queryParams);
+      // Create initial map with all senderIds as keys with null values
+      const userMap = senderIds.reduce((map, senderId) => {
+        map[senderId] = null;
+        return map;
+      }, {});
 
-      // Map the results
-      return result.rows.map(row => ({
-        userId: row.userId,
-        otherPartyId: row.otherPartyId,
-        lastMessageAt: new Date(row.lastMessageAt).getTime(), // Convert to Unix epoch milliseconds
-        ...(typeof row.metadata !== 'string' ? null : { metadata: row.metadata }),
-      }));
+      // Update with found names from database
+      result.rows.forEach(row => {
+        if (userMap.hasOwnProperty(row.sender_id)) {
+          userMap[row.sender_id] = row.sender_name;
+        }
+      });
+
+      return userMap;
     } catch (error) {
-      console.error({ error }, 'Error in getUserConversations');
-      return [];
+      console.error({ error, userIds: senderIds }, 'Error in getUserNamesFromMessages');
+
+      // Even in error case, return object with all senderIds as keys
+      return senderIds.reduce((map, senderId) => {
+        map[senderId] = null;
+        return map;
+      }, {});
     }
   }
+
   /**
-   * get user conversation with messages state counts
+   * Fetches a list of conversations for a user, ensuring each conversation's userId matches options.userId.
+   * @param {Object} options - Input options (e.g., userId, limit, offset, include).
+   * @returns {Promise<Array>} List of conversation objects where each element's userId === options.userId.
    */
-
-  async getUserConversationsWithStateCounts(userId, options = {}) {
-    await this.ensureInitialized(); // Ensure the database connection is ready
+  async getUserConversationsList(options = {}) {
     try {
-      const { error: optionsError, value: validOptions } = conversationQuerySchema.validate(options);
-      if (optionsError) {
-        console.error({ error: optionsError }, 'Invalid options');
-        return [];
-      }
+      // Validate input options
+      const validOptions = validateOptions(options, getConversationsListPOptionsSchema);
+      const { userId, limit = 10, offset = 0, include = [] } = validOptions;
 
-      const { limit = 10, offset = 0, include = [] } = validOptions;
-
-      // Build the WHERE clause dynamically and prepare parameters
-      const whereClauses = [];
-      const queryParams = [];
-      let paramIndex = 1;
-
-      // Add userId as a parameter for filtering conversations
-      whereClauses.push(`(sender_id = $${paramIndex} OR recipient_id = $${paramIndex})`);
-      queryParams.push(userId);
-      paramIndex++;
-
-      // Build the SELECT fields dynamically
-      const selectFields = [
-        'CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END AS "userId"',
-        'CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END AS "otherPartyId"',
-        'MAX(created_at) AS "lastMessageAt"', // Latest message timestamp
-        'COUNT(*) FILTER (WHERE state = \'sent\') AS "sentCount"',
-        'COUNT(*) FILTER (WHERE state = \'delivered\') AS "deliveredCount"',
-        'COUNT(*) FILTER (WHERE state = \'read\') AS "readCount"'
+      // Build SQL query
+      const whereClauses = [
+        // critical to correct model results
+        // '(sender_id = $1 AND direction = \'outgoing\') OR (recipient_id = $1 AND direction = \'incoming\')'
+        'sender_id = $1 OR recipient_id = $1',
       ];
+      const params = [userId];
+
+      const selectFields = `
+        CASE 
+          WHEN sender_id = $1 THEN sender_id 
+          ELSE recipient_id 
+        END AS "userId",
+        CASE 
+          WHEN sender_id = $1 AND recipient_id = $1 THEN $1
+          WHEN sender_id = $1 THEN recipient_id 
+          ELSE sender_id 
+        END AS "otherPartyId",
+        ARRAY_AGG(DISTINCT message_type) AS types,
+        MIN(created_at) AS "firstMessageAt",
+        MAX(created_at) AS "lastMessageAt",
+        -- outgoing stats: filter by sender_id = 'sender' AND direction = 'outgoing'
+        ${getMessageStats('sender_id', 'out_', 'outgoing').join(', ')}, 
+        --  Incoming stats: filter by recipient_id = 'sender' AND direction = 'incoming'  
+        ${getMessageStats('recipient_id', 'in_', 'incoming').join(', ')}
+      `;
 
       if (include.includes('metadata')) {
         selectFields.push('metadata');
       }
 
-      // Build the query
       const whereClause = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : '';
       const query = `
-      SELECT ${selectFields.join(', ')}
+      SELECT ${selectFields}
       FROM messages
       ${whereClause}
       GROUP BY 
-        CASE WHEN sender_id = $1 THEN sender_id ELSE recipient_id END,
-        CASE WHEN sender_id = $1 THEN recipient_id ELSE sender_id END
+        CASE 
+          WHEN sender_id = $1 THEN sender_id 
+          ELSE recipient_id 
+        END,
+        CASE 
+          WHEN sender_id = $1 AND recipient_id = $1 THEN $1
+          WHEN sender_id = $1 THEN recipient_id 
+          ELSE sender_id 
+        END
       ORDER BY "lastMessageAt" DESC
-      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
+      LIMIT $2 OFFSET $3
     `;
 
-      // Add pagination parameters
-      queryParams.push(limit, offset);
+      console.log('Outgoing stats SQL:', getMessageStats('sender_id', 'out_', 'outgoing').join(', '));
+      console.log('Incoming stats SQL:', getMessageStats('recipient_id', 'in_', 'incoming').join(', '));
+      params.push(limit, offset);
 
-      // Execute the query
-      if (debug) console.log(query, queryParams);
-      const result = await this.pool.query(query, queryParams);
+      console.log(query, params);
+      // Execute query
+      const result = await this.pool.query(query, params);
 
-      // Map the results
-      return result.rows.map(row => ({
-        userId: row.userId,
-        otherPartyId: row.otherPartyId,
-        lastMessageAt: new Date(row.lastMessageAt).getTime(), // Convert to Unix epoch milliseconds
-        sentCount: parseInt(row.sentCount),
-        deliveredCount: parseInt(row.deliveredCount),
-        readCount: parseInt(row.readCount),
-        ...(typeof row.metadata !== 'string' ? null : { metadata: row.metadata }),
-      }));
+      // Get other party names
+      const conversationPartyIds = [
+        ...new Set(result.rows.flatMap(row => [row.userId, row.otherPartyId])),
+      ];
+      const conversationPartyNamesMap = await this._getUserNamesFromMessages(conversationPartyIds);
+
+      // Map results to structured conversation objects
+      const conversations = result.rows
+        .map(row => {
+          const _metadata = include.includes('metadata') && row.metadata ? { meta: row.metadata } : {};
+          return {
+            userId: row.userId,
+            userName: conversationPartyNamesMap[row.userId] || null,
+            otherPartyId: row.otherPartyId,
+            otherPartyName: conversationPartyNamesMap[row.otherPartyId] || null,
+            types: row.types || [],
+            startedAt: row.firstMessageAt ? new Date(row.firstMessageAt).getTime() : null,
+            lastMessageAt: row.lastMessageAt ? new Date(row.lastMessageAt).getTime() : null,
+            outgoing: {
+              firstMessageAt: row.firstMessageAt ? new Date(row.firstMessageAt).getTime() : null,
+              lastMessageAt: row.out_lastMessageAt ? new Date(row.out_lastMessageAt).getTime() : null,
+              sent: parseInt(row.out_sentCount) || 0,
+              pending: parseInt(row.out_pendingCount) || 0,
+              delivered: parseInt(row.out_deliveredCount) || 0,
+              unread: parseInt(row.out_unreadCount) || 0,
+              read: parseInt(row.out_readCount) || 0,
+            },
+            incoming: {
+              firstMessageAt: row.firstMessageAt ? new Date(row.firstMessageAt).getTime() : null,
+              lastMessageAt: row.in_lastMessageAt ? new Date(row.in_lastMessageAt).getTime() : null,
+              sent: parseInt(row.in_sentCount) || 0,
+              unread: parseInt(row.in_unreadCount) || 0,
+              pending: parseInt(row.in_pendingCount) || 0,
+              delivered: parseInt(row.in_deliveredCount) || 0,
+              read: parseInt(row.in_readCount) || 0,
+            },
+            ...(_metadata),
+          };
+        })
+        // Filter conversations to ensure each element's userId === options.userId
+        .filter(conversation => conversation.userId === userId);
+
+      console.log(`Generated ${conversations.length} conversations for userId: ${userId}`);
+      return conversations;
     } catch (error) {
-      console.error({ error }, 'Error in getUserConversationsWithStateCounts');
+      console.error({ error }, 'Error in getUserConversationsList');
       return [];
     }
   }
@@ -809,11 +841,11 @@ export class PostgresPersistence extends PersistenceInterface {
   /**
    * Retrieve all messages for a user from the database
    */
-  async getMessages(userId, options = {}) {
+  async getMessages(_userId, options = {}) {
     await this.ensureInitialized(); // Ensure the database is initialized
 
     // Validate options against the schema
-    const { error, value: validOps } = getMessagesOptionsSchema.validate(options);
+    const { error, value: validOps } = getMessagesUOptionsSchema.validate(options);
     if (error) {
       throw new Error(`Invalid options: ${error.message}`);
     }
@@ -827,13 +859,14 @@ export class PostgresPersistence extends PersistenceInterface {
       messageIds = null,
       direction = null,
       unreadOnly = false,
-      otherPartyId = null,
+      senderId = null,
+      recipientId = null,
       status = null,
     } = validOps;
 
     try {
       // Determine the recipientId for the query
-      const recipientId = type === 'public' ? PUBLIC_MESSAGE_USER_ID : userId;
+      //const recipientId = type === 'public' ? PUBLIC_MESSAGE_USER_ID : _userId;
 
       // Construct the base query
       let query = `
@@ -846,7 +879,7 @@ export class PostgresPersistence extends PersistenceInterface {
         message_type AS "type",
         direction,
         status,
-        timestamp,
+        updated_at,
         read_at AS "readAt",
         metadata
       FROM messages
@@ -875,35 +908,44 @@ export class PostgresPersistence extends PersistenceInterface {
       }
 
       if (since) {
-        query += ` AND timestamp >= $${params.length + 1}`;
+        query += ` AND updated_at >= $${params.length + 1}`;
         params.push(new Date(since).toISOString());
       }
 
       if (until) {
-        query += ` AND timestamp <= $${params.length + 1}`;
+        query += ` AND updated_at <= $${params.length + 1}`;
         params.push(new Date(until).toISOString());
       }
 
+      if (senderId) {
+        query += ` AND sender_id >= $${params.length + 1}`;
+        params.push(senderId);
+      }
+      if (recipientId) {
+        query += ` AND recipient_id >= $${params.length + 1}`;
+        params.push(recipientId);
+      }
+
       // For public messages, apply the expiration filter
-      if (type === 'public') {
-        const expireDate = new Date();
-        expireDate.setDate(expireDate.getDate() - PUBLIC_MESSAGE_EXPIRE_DAYS);
-        query += ` AND timestamp >= $${params.length + 1}`;
-        params.push(expireDate.toISOString());
-      }
-      // Ignore otherPartyId for public messages
-      if (type !== 'public' && otherPartyId) {
-        query += ` AND (sender_id = $${params.length + 1} OR recipient_id = $${params.length + 2})`;
-        params.push(otherPartyId, otherPartyId);
-      }
-
-
+      /*      if (type === 'public') {
+              const expireDate = new Date();
+              expireDate.setDate(expireDate.getDate() - PUBLIC_MESSAGE_EXPIRE_DAYS);
+              query += ` AND updated_at >= $${params.length + 1}`;
+              params.push(expireDate.toISOString());
+            } else if (type !== 'public' && otherPartyId) {
+              // Ignore otherPartyId for public messages
+              query += ` AND (sender_id = $${params.length + 1} OR recipient_id = $${params.length + 2})`;
+              params.push(otherPartyId, otherPartyId);
+            }
+      
+      */
 
       // Add sorting and pagination
-      query += ` ORDER BY timestamp DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      query += ` ORDER BY updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
       params.push(limit, offset);
 
       // Execute the query
+      console.log(query, params);
       const result = await this.pool.query(query, params);
 
       // Transform the rows into the desired format
@@ -918,7 +960,7 @@ export class PostgresPersistence extends PersistenceInterface {
         type: row.type,
         direction: row.direction,
         status: row.status,
-        timestamp: row.timestamp,
+        updated_at: row.updated_at,
         readAt: row.readAt,
         metadata: row.metadata || {},
       }));
@@ -930,7 +972,7 @@ export class PostgresPersistence extends PersistenceInterface {
         hasMore: result.rowCount > limit,
       };
     } catch (error) {
-      console.error(`Failed to fetch messages for userId: ${userId}`, error.message);
+      console.error(`Failed to fetch messages for userId: ${_userId}`, error.message);
       throw error; // Propagate the error
     }
   }
@@ -959,7 +1001,7 @@ export class PostgresPersistence extends PersistenceInterface {
     try {
       const cutoff = new Date(Date.now() - maxAge);
       const result = await this.pool.query(
-        'DELETE FROM messages WHERE timestamp < $1',
+        'DELETE FROM messages WHERE updated_at < $1',
         [cutoff]
       );
       return result.rowCount;
@@ -973,21 +1015,29 @@ export class PostgresPersistence extends PersistenceInterface {
     await this.ensureInitialized(); // Ensure the database is initialized
 
     // Update both sender and recipient copies of the message
-    const query = `
-    UPDATE messages
-      SET status = $1
-      WHERE (status = $2 AND message_id = $3)
-        AND (
-          sender_id = $4 OR
-          recipient_id = $4
-        )
-      RETURNING *;
-    `;
-    const values = [status, fromStatus, messageId, userId];
-
-    if (debug) console.log('Executing query:', query, values);
 
     try {
+      const query = `
+        UPDATE messages
+        SET status = $1, updated_at = $5
+        WHERE status = $2 
+          AND message_id = $3
+          AND sender_id = $4 
+        RETURNING   
+          message_id AS "messageId",
+          sender_id AS "senderId",
+          sender_name AS "senderName",
+          recipient_id AS "recipientId",
+          content,
+          message_type AS "type",
+          direction,
+          status,
+          updated_at,
+          read_at AS "readAt";
+      `;
+      const values = [status, fromStatus, messageId, userId, new Date()];
+
+      if (debug) console.log('Executing query:', query, values);
       const result = await this.pool.query(query, values);
 
       // Check if any rows were updated
@@ -996,6 +1046,10 @@ export class PostgresPersistence extends PersistenceInterface {
           `No rows updated for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus}, toStatus: ${status}`
         );
         return null; // Indicate that no rows were updated
+      } else if (result.rowCount < 2) {
+        console.warn(
+          `Unless some sent message deleted, it is expected to update both incoming and outgoing messages for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus}, toStatus: ${status}`
+        );
       }
 
       // Log updated rows

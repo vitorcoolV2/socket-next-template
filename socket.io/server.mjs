@@ -1,7 +1,7 @@
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import pTimeout from 'p-timeout';
-import { userManager } from 'a-socket/userManager/index.mjs';
+import { userManager } from './userManager/index.mjs';
 import {
   SOCKET_MIDDLEWARE,
   INACTIVITY_CHECK_INTERVAL,
@@ -9,6 +9,8 @@ import {
   MESSAGE_ACKNOWLEDGEMENT_TIMEOUT,
   PUBLIC_MESSAGE_USER_ID
 } from './config.mjs';
+
+import { typingSchema } from 'a-socket/userManager/schemas.mjs';
 
 import authMiddleware from 'a-socket/middleware-auth.mjs';
 
@@ -213,59 +215,86 @@ io.on('connection', (socket) => {
   socket.on('disconnect', (reason) => {
     console.log(`User ${socket.id} disconnected: ${reason}`);
     users.disconnectUser(socket.id).then((user) => {
-      console.log(`User ${user?.userName} (${user?.userId}) disconnected`);
+      console.log(`User ${socket.user?.userName} (${socket.user?.userId}) disconnected`);
     }).catch((error) => {
       console.error(`Error during disconnect: ${error.message}`);
     });
   });
 
+  const TEST_DISABLE_ACK = process.env.NODE_ENV === 'test';
+  // Helper function to update message status
+
 
   const handlers = {
     sendMessage: async (socket, { recipientId, content }) => {
+      let msg;
       try {
         // Step 1: Validate input
         if (!recipientId || !content) {
           throw new Error('Recipient ID and message content are required.');
         }
 
-        // Step 2: Create and persist the message
-        const message = await users.sendMessage(socket.id, recipientId, content);
-        const { emitSockets, ...msg } = message;
+        // Step 2: define support for inner functions
+        // Create | persisted message with "sent" status
+        msg = await users.sendMessage(socket.id, recipientId, content);
+        // Normalize emitSockets for notify* func*
+        const emitSockets = (await users.getUserSockets(recipientId)) || [];
 
-        // Helper function to update message status
-        const updateMessageStatus = async (status) => {
-          console.log(`Updating message status to "${status}" for messageId: ${msg.messageId}`);
-          await users.updateMessageStatus(recipientId, msg.messageId, status);
-          msg.status = status;
-          io.to(socket.id).emit('messageStatusUpdate', msg);
+
+
+        // Notify sender and recipient of the "sent" message
+        // only the sender sends a message. 
+        //          - the sender upon sending he has a new "outgoing" message. 
+        //          - the receiver, receive the "incoming" message.
+        const notifyMessage = (emitName, status) => {
+          io.to(socket.id).emit(emitName, { ...msg, status, direction: "outgoing" });
+          emitSockets.forEach(sock => {
+            io.to(sock.socketId).emit(emitName, { ...msg, status, direction: "incoming" });
+          });
         };
 
-        // If no sockets to emit to, mark as pending and return
-        if (!emitSockets || emitSockets.length === 0) {
-          console.log(`No active sockets for recipient ${recipientId}, marking as pending`);
-          await updateMessageStatus('pending');
+        /// >>>>>>>> ACTION START HEAR
+
+        // 1. Notify "sent" status
+        notifyMessage('receivedMessage', 'sent');  //+ means server receive message and persisted for async delivery
+
+        const updateMessageAndNotify = async (status) => {
+          console.log(status);
+          console.log(`Updating message status to "${status}" for messageId: ${msg.messageId}`);
+          const updateMsg = await users.updateMessageStatus(socket.id, msg.messageId, status);
+
+          notifyMessage('updateMessageStatus', updateMsg.status);
+          return updateMsg;
+        };
+
+        // 2: Update message status to "pending"
+        try {
+          msg = await updateMessageAndNotify('pending');
+        } catch (error) {
+          notifyMessage('updateMessageStatus', 'error');
           return msg;
         }
 
-        // Simple timeout function
-        const withTimeout = (promise, timeoutMs = 10000) => {
+
+        // 3: Attempt delivery with timeout handling
+        const withTimeout = (promise, timeoutMs = MESSAGE_ACKNOWLEDGEMENT_TIMEOUT) => {
           return Promise.race([
             promise,
             new Promise((_, reject) =>
               setTimeout(() => reject(new Error('timeout')), timeoutMs)
-            )
+            ),
           ]);
         };
 
-        // Attempt delivery with simple timeout handling
         console.log(`Attempting delivery to ${emitSockets.length} socket(s)`);
 
         const deliveryAttempts = emitSockets.map(async (sockId) => {
           try {
             const result = await withTimeout(
-              new Promise((resolve, reject) => {
-                io.to(sockId).emit('receiveMessage', msg, (ack) => {
-                  if (ack === 'received') {
+              new Promise((resolve) => {
+                const deliveryMsg = { ...msg, direction: 'incoming', status: 'delivery' };
+                io.to(sockId).emit('receiveMessage', deliveryMsg, (ack) => {
+                  if (!TEST_DISABLE_ACK && ack === 'received') {
                     console.log(`Acknowledgment received from socket ${sockId}`);
                     resolve(sockId);
                   } else {
@@ -273,8 +302,7 @@ io.on('connection', (socket) => {
                     resolve({ sockId, success: false });
                   }
                 });
-              }),
-              10000 // 10 second timeout
+              })
             );
             return result;
           } catch (error) {
@@ -283,245 +311,145 @@ io.on('connection', (socket) => {
           }
         });
 
-        // Wait for all attempts
         const results = await Promise.all(deliveryAttempts);
+        const successfulDeliveries = results.filter(result => typeof result === 'string');
 
-        const successfulSockets = results.filter(result =>
-          typeof result === 'string' // successful deliveries return socket ID string
-        );
+        console.log(`Delivery completed: ${successfulDeliveries.length}/${emitSockets.length} successful`);
 
-        console.log(`Delivery completed: ${successfulSockets.length}/${emitSockets.length} successful`);
-
-        if (successfulSockets.length > 0) {
-          await updateMessageStatus('delivered');
+        // Step 5: Update message status based on delivery results
+        if (successfulDeliveries.length > 0) {
+          msg = await updateMessageAndNotify('delivered');
         } else {
-          await updateMessageStatus('pending');
+          // not persisting invalid server state. but can notify the client of a error on delivering with ACK          
+          notifyMessage('updateMessageStatus', 'error');
         }
 
         return msg;
-
       } catch (error) {
         console.error('Error in sendMessage:', error.message);
-        // Only throw for critical errors
+
+        // Handle critical errors (e.g., missing recipient ID or content)
         if (error.message.includes('Recipient ID') || error.message.includes('content')) {
-          throw error;
+          throw error; // Re-throw critical errors
         }
-        // For delivery errors, return gracefully
+
+        // For non-critical errors (e.g., delivery failures), return gracefully
         console.error('Delivery error, returning message as pending');
         return { ...msg, status: 'pending', error: error.message };
       }
     },
-    sendMessage3: async (socket, { recipientId, content }) => {
-      try {
-        // Step 1: Validate input
-        if (!recipientId || !content) {
-          throw new Error('Recipient ID and message content are required.');
-        }
 
-        // Step 2: Create and persist the message
-        const message = await users.sendMessage(socket.id, recipientId, content);
-        const { emitSockets, ...msg } = message;
 
-        // Helper function to update message status
-        const updateMessageStatus = async (status) => {
-          console.log(`Updating message status to "${status}" for messageId: ${msg.messageId}`);
-          await users.updateMessageStatus(recipientId, msg.messageId, status);
-          msg.status = status;
-
-          // Notify the sender about the status update
-          io.to(socket.id).emit('messageStatusUpdate', msg);
-        };
-
-        const acknowledgmentPromises = emitSockets.map((sockId) =>
-          pTimeout(
-            new Promise((resolve, reject) => {
-              io.to(sockId).emit('receiveMessage', msg, (ack) => {
-                if (ack === 'received') {
-                  resolve(sockId); // Resolve with the socket ID
-                } else {
-                  console.error(new Error(`Acknowledgment failed for socket ${sockId} - ${ack.message}`));
-                  resolve(null);
-                }
-              });
-            }),
-            MESSAGE_ACKNOWLEDGEMENT_TIMEOUT,
-            `Acknowledgment timed out for socket ${sockId}`
-          )
-        );
-
-        const [successfulSockets, errors] = await Promise.allSettled(acknowledgmentPromises).then((results) => {
-          const successes = results
-            .filter((result) => result.status === 'fulfilled')
-            .map((result) => result.value);
-          const failures = results
-            .filter((result) => result.status === 'rejected')
-            .map((result) => result.reason);
-          return [successes, failures];
-        });
-
-        if (successfulSockets.length > 0) {
-          console.log(`Acknowledgments received from sockets: ${successfulSockets.join(', ')}`);
-          await updateMessageStatus('delivered');
-        } else {
-          console.error('All acknowledgments failed or timed out:', errors.map((err) => err.message));
-          await updateMessageStatus('pending');
-        }
-
-        // Return the final message details
-        return msg;
-      } catch (error) {
-        console.error('Error sending message:', error.message);
-        throw error; // Re-throw the error for upstream handling
-      }
-    },
-    sendMessage2: async (socket, { recipientId, content }) => {
-      try {
-        // Step 1: Validate input
-        if (!recipientId || !content) {
-          throw new Error('Recipient ID and message content are required.');
-        }
-
-        // Step 2: Create and persist the message
-        const message = await users.sendMessage(socket.id, recipientId, content);
-        const { emitSockets, ...msg } = message;
-
-        // Helper function to update message status
-        const updateMessageStatus = async (status) => {
-          console.log(`Updating message status to "${status}" for messageId: ${msg.messageId}`);
-          await users.updateMessageStatus(recipientId, msg.messageId, status);
-          msg.status = status;
-
-          // Notify the sender about the status update
-          io.to(socket.id).emit('messageStatusUpdate', msg);
-        };
-
-        const acknowledgmentPromises = emitSockets.map((sockId) =>
-          pTimeout(
-            new Promise((resolve, reject) => {
-              io.to(sockId).emit('receiveMessage', msg, (ack) => {
-                if (ack === 'received') {
-                  resolve(sockId); // Resolve with the socket ID
-                } else {
-                  reject(new Error(`Acknowledgment failed for socket ${sockId} - ${ack.message}`));
-                }
-              });
-            }),
-            MESSAGE_ACKNOWLEDGEMENT_TIMEOUT,
-            `Acknowledgment timed out for socket ${sockId}`
-          )
-        );
-
-        const [successfulSockets, errors] = await Promise.allSettled(acknowledgmentPromises).then((results) => {
-          const successes = results
-            .filter((result) => result.status === 'fulfilled')
-            .map((result) => result.value);
-          const failures = results
-            .filter((result) => result.status === 'rejected')
-            .map((result) => result.reason);
-          return [successes, failures];
-        });
-
-        if (successfulSockets.length > 0) {
-          console.log(`Acknowledgments received from sockets: ${successfulSockets.join(', ')}`);
-          await updateMessageStatus('delivered');
-        } else {
-          console.error('All acknowledgments failed or timed out:', errors.map((err) => err.message));
-          await updateMessageStatus('pending');
-        }
-
-        // Return the final message details
-        return msg;
-      } catch (error) {
-        console.error('Error sending message:', error.message);
-        throw error; // Re-throw the error for upstream handling
-      }
-    },
-    sendMessage2: async (socket, { recipientId, content }) => {
-      try {
-        // Step 1: Create the message
-        const message = await users.sendMessage(socket.id, recipientId, content);
-        const { emitSockets, ...msg } = message; // Extract sockets and message details
-
-        // Helper function to update message status
-        const updateStatus = async (status) => {
-          console.log(`Updating message status to "${status}" for messageId: ${msg.messageId}`);
-          await users.updateMessageStatus(socket.user.userId, msg.messageId, status);
-          msg.status = status;
-        };
-
-        // Step 2: Send the message to recipients and handle acknowledgments
-        const acknowledgmentPromises = (message?.emitSockets || []).map((sockId) => {
-          console.log('to', sockId, 'emit', 'receiveMessage', msg);
-
-          // Return a Promise for each socket's acknowledgment
-          return new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              reject(new Error(`Acknowledgment timed out for socket ${sockId}`));
-            }, 10000); // 10-second timeout
-
-            io.to(sockId).emit('receiveMessage', msg, (ack) => {
-              clearTimeout(timeout);
-              if (ack === 'received') {
-                console.log(`Message acknowledged by socket ${sockId}`);
-                resolve(sockId); // Resolve with the socket ID that acknowledged
-              } else {
-                console.error(`Acknowledgment failed for socket ${sockId}`);
-                reject(new Error(`Acknowledgment failed for socket ${sockId}`));
-              }
-            });
-          });
-        });
-
-        // Add a timeout promise to handle cases where no acknowledgment is received
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => {
-            reject(new Error('All acknowledgments timed out'));
-          }, 15000); // 15-second global timeout
-        });
-
-        // Step 3: Wait for the first successful acknowledgment or timeout
-        let acknowledgedSocket;
-        try {
-          acknowledgedSocket = await Promise.race([...acknowledgmentPromises, timeoutPromise]);
-          console.log(`First acknowledgment received from socket: ${acknowledgedSocket}`);
-          await updateStatus('delivered'); // Update status to 'delivered'
-        } catch (error) {
-          console.error('Acknowledgment failed or timed out:', error.message);
-          await updateStatus('pending'); // Update status to 'pending'
-        }
-
-        return msg;
-      } catch (error) {
-        console.error('Error sending message:', error.message);
-        throw error; // Re-throw the error for upstream handling
-      }
-    },
-
-    // UI
+    // UI typing
     typing: async (socket, data) => {
-      const ret = await users.typingIndicator(socket.id, { isTyping: true, recipientId: data?.recipientId });
-      (ret?.emitSockets || []).forEach((sockId) => {
-        io.to(sockId).emit('typing', data?.recipientId);
+      //const ret = await users.typingIndicator(socket.id, { isTyping: true, recipientId: data?.recipientId });
+      const emitSockets = await users.getUserSockets(data.recipientId);
+      (emitSockets || []).forEach((sock) => {
+        io.to(sock.socketId).emit('typing', data?.recipientId);
       });
 
     },
     stopTyping: async (socket, data) => {
-      const ret = await users.typingIndicator(socket.id, { isTyping: false, recipientId: data?.recipientId });
-      (ret?.emitSockets || []).forEach((sockId) => {
-        io.to(sockId).emit('stopTyping', data?.recipientId);
+      //const ret = await users.typingIndicator(socket.id, { isTyping: false, recipientId: data?.recipientId });
+      const emitSockets = await users.getUserSockets(data.recipientId);
+      (emitSockets || []).forEach((sock) => {
+        io.to(sock.socketId).emit('stopTyping', data?.recipientId);
       });
     },
     //
-    typingIndicator: async (socket, data) =>
-      await users.typingIndicator(socket.id, data),
-    markMessagesAsRead: async (socket, options) =>
-      await users.markMessagesAsRead(socket.id, options),
+    // typingIndicator: async (socket, data) =>
+    // await users.typingIndicator(socket.id, data),
+    markMessagesAsRead: async (socket, options) => {
+      const resp = await users.markMessagesAsRead(socket.id, options);
+
+      const emitSockets = await users.getUserSockets(resp.recipientId);
+
+      // If no sockets to emit to, mark it with pending and return
+      if (!emitSockets || emitSockets.length === 0) {
+        console.log(`No active sockets for recipient ${recipientId}, marking as pending`);
+        // the will bewill notify pending bellow after trying to deliver to recipient and fail
+        io.to(socket.id).emit('receivedMessage', { ...msg, direction: 'outgoing' });
+        emitSockets.forEach(sock => {
+          io.to(sock.socketId).emit('receivedMessage', { ...msg, direction: 'incoming' })
+        });
+        return msg;
+      } else {
+        // notify without ack, recipient on pending message. will try bellow to formal deliver and acknolege
+        emitSockets.forEach(sock => {
+          io.to(sock.socketId).emit('receivedMessage', { ...msg, direction: 'incoming' });
+        });
+      }
+    },
     getPublicMessages: async (socket) =>
       await users.getPublicMessages(socket.id),
     broadcastPublicMessage: async (socket, { content }) =>
       await users.broadcastPublicMessage(socket.id, content),
-    getMessageHistory: async (socket, options) =>
-      await users.getMessageHistory(socket.id, options),
+    // Complete server socket handler for getUserConversation
+    getUserConversation: async (socket, options) => {
+      try {
+        // Call the user service to get conversation messages
+        const conversationData = await users.getUserConversation(socket.id, options);
+
+        // Emit the conversation data back to the client
+        socket.emit('userConversation', {
+          success: true,
+          data: {
+            messages: conversationData.messages.map(msg => ({
+              id: msg.id,
+              senderId: msg.senderId,
+              recipientId: msg.recipientId,
+              content: msg.content,
+              timestamp: msg.timestamp,
+              status: msg.status,
+              type: msg.type,
+              direction: msg.direction
+            })),
+            total: conversationData.total,
+            hasMore: conversationData.hasMore,
+            context: conversationData.context || null
+          },
+          options: options // Echo back the options for client reference
+        });
+
+        console.log(`Sent ${conversationData.messages.length} messages to user ${socket.id} for conversation with ${options.otherPartyId}`);
+
+      } catch (error) {
+        console.error('Error in getUserConversation:', error);
+
+        // Emit error back to client
+        socket.emit('userConversation', {
+          success: false,
+          error: error.message || 'Failed to fetch conversation',
+          options: options
+        });
+      }
+    },
+
+    getUserConversationsList: async (socket, options) => {
+      try {
+        await users.getUserConversationsList(socket.id, options).then(res => {
+          socket.emit('userConversations', {
+            success: true,
+            data: res.map(u => ({
+              userId: u.userId,
+              userName: u.userName,
+              otherPartyId: u.otherPartyId,
+              otherPartyName: u.otherPartyName,
+              startedAt: u.startedAt,
+              lastMessageAt: u.lastMessageAt,
+              incoming: u.incoming,
+              outgoing: u.outgoing
+            }))
+          });
+        });
+      } catch (error) {
+        console.error('Error in getUserConversationsList:', error);
+        socket.emit('getUserConversationsList', {
+          success: false,
+          error: error.message || 'Failed to fetch conversations list'
+        });
+      }
+    },
     getUsers: async (socket, options) => {
       await users.getUsers(socket.id, options).then(res => {
         socket.emit('usersList', res.map(u => {

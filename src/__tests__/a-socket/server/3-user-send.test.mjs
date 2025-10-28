@@ -80,11 +80,11 @@ describe('Socket.IO Server Tests', () => {
 
           // Send the message
           const sentMessage = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
-          expect(sentMessage.status).toBe('pending');
+          expect(sentMessage.status).toBe('sent');
 
           // Wait for the recipient to receive the message
           /*const receivedMessage = await new Promise((resolve) => {
-            recipientSocket.on('receiveMessage', (msg) => resolve(msg));
+            recipientSocket.on('receivedMessage', (msg) => resolve(msg));
           });*/
 
           // Assertions for the received message

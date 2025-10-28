@@ -56,7 +56,7 @@ export interface GetMessageHistoryResponse {
   };
 }
 
-// Define types for message cache and getMessageHistory
+// Define types for message cache and getUserConversation
 export interface MessageCache {
   [userId: string]: {
     messages: (PublicMessage | PrivateMessage)[];

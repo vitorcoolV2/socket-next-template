@@ -56,7 +56,7 @@ describe('Socket.IO Acknowledgment Tests', () => {
 
   test('should send and acknowledge a message', (done) => {
     // Set up the client listener
-    clientSocket.on('receiveMessage', (msg, ack) => {
+    clientSocket.on('receivedMessage', (msg, ack) => {
       console.log('Client received message:', msg);
       if (ack) {
         console.log('Client sending acknowledgment');
@@ -69,7 +69,7 @@ describe('Socket.IO Acknowledgment Tests', () => {
       console.log('Server emitting message to', clientSocket.id);
 
       // Emit the message
-      ioServer.to(clientSocket.id).emit('receiveMessage', { content: 'Hello' }, (response) => {
+      ioServer.to(clientSocket.id).emit('receivedMessage', { content: 'Hello' }, (response) => {
         console.log('Server received acknowledgment response:', response);
 
         try {

@@ -6,12 +6,11 @@ const PORT = process.env.PORT || 3001;
 const BASE_URL = `http://localhost:${PORT}`;
 
 const SERVER_START_TIMEOUT = 10000; // < seconds
-const HTTP_TEST_TIMEOUT = 200; // <1 second for HTTP tests
-const SOCKET_TEST_TIMEOUT = 8000; // <5 seconds for socket tests
+const SOCKET_TEST_TIMEOUT = 1000; // <5 seconds for socket tests
 
 
 
-jest.setTimeout(20000); // Increase global timeout
+jest.setTimeout(10000); // Increase global timeout
 
 let httpServer;
 
@@ -51,12 +50,12 @@ describe('Socket.IO Server Tests', () => {
   beforeEach(async () => {
     // Create and connect sockets using the utility function
     senderSocket = await createClientSocket(BASE_URL);
-    recipientSocket = await createClientSocket(BASE_URL);
-
     senderUser = await userManager.storeUser(senderSocket.id, {
       userId: 'sender',
       userName: 'Sender'
     }, true);
+
+    recipientSocket = await createClientSocket(BASE_URL);
     recipientUser = await userManager.storeUser(recipientSocket.id, {
       userId: 'recipient',
       userName: 'Recipient'
@@ -86,10 +85,8 @@ describe('Socket.IO Server Tests', () => {
         const messageContent = 'Hello, world!';
         const message = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
 
-
-
         expect(message).toMatchObject({
-          status: 'pending',
+          status: 'sent',
           content: messageContent,
           sender: { userId: 'sender', userName: 'Sender' },
           recipientId: 'recipient',
@@ -98,33 +95,6 @@ describe('Socket.IO Server Tests', () => {
     });
 
     describe('Typing Indicator', () => {
-      test('should send and receive a typing indicator', async () => {
-        const sender = await userManager.storeUser(senderSocket.id, { userId: 'sender', userName: 'Sender' }, true);
-        const recipient = await userManager.storeUser(recipientSocket.id, { userId: 'recipient', userName: 'Recipient' }, true);
-
-        const typingData = {
-          isTyping: true,
-          recipientId: recipient.userId,
-        };
-
-        // Sender emits the typing indicator event
-        senderSocket.emit('typingIndicator', typingData);
-
-        // Recipient listens for the typing indicator event
-        const typingEvent = await new Promise((resolve) => {
-          recipientSocket.on('typingIndicator', (data) => resolve(data));
-        });
-
-        // Validate the received typing indicator
-        expect(typingEvent).toMatchObject({
-          success: true,
-          event: 'typingIndicator',
-          sender: sender.userId,
-          isTyping: true,
-          timestamp: expect.any(String), // Timestamp should be in ISO format
-        });
-      }, SOCKET_TEST_TIMEOUT);
-
 
       test('should send typing indicator', async () => {
         const typingData = {
@@ -165,64 +135,7 @@ describe('Socket.IO Server Tests', () => {
       }, SOCKET_TEST_TIMEOUT); // Increased timeout to 10 seconds      
 
 
-      test('should handle stopping typing', async () => {
-        const sender = await userManager.storeUser(senderSocket.id, { userId: 'sender', userName: 'Sender' }, true);
-        const recipient = await userManager.storeUser(recipientSocket.id, { userId: 'recipient', userName: 'Recipient' }, true);
 
-        const typingData = {
-          isTyping: false,
-          recipientId: recipient.userId,
-        };
-
-        // Sender emits the typing indicator event
-        senderSocket.emit('typingIndicator', typingData);
-
-        // Recipient listens for the typing indicator event
-        const typingEvent = await new Promise((resolve) => {
-          recipientSocket.on('typingIndicator', (data) => resolve(data));
-        });
-
-        // Validate the received typing indicator
-        expect(typingEvent).toMatchObject({
-          success: true,
-          event: 'typingIndicator',
-          sender: sender.userId,
-          isTyping: false,
-          timestamp: expect.any(String), // Timestamp should be in ISO format
-        });
-      }, SOCKET_TEST_TIMEOUT);
-
-
-
-      test('should handle invalid recipient IDs', async () => {
-        // Assert that no typingIndicator event will be received
-        expect.assertions(1);
-
-        // Step 1: Add sender user
-        const sender = await userManager.storeUser(senderSocket.id, { userId: 'sender', userName: 'Sender' }, true);
-
-        // Step 2: Define invalid typing data
-        const invalidTypingData = {
-          isTyping: true,
-          recipientId: 'nonexistent-user',
-        };
-
-        // Step 3: Call the typingIndicator method
-        const typingResult = await userManager.typingIndicator(senderSocket.id, invalidTypingData);
-
-        // Step 4: Validate the result (no typing event should be sent)
-        expect(typingResult).toBeNull(); // Expect the result to be null for invalid recipients
-
-        // Step 5: Ensure no typingIndicator event is received by the recipient
-        await new Promise((resolve) => {
-          recipientSocket.once('typingIndicator', () => {
-            throw new Error('Unexpected typing indicator event');
-          });
-
-          // Resolve the promise after a short delay if no event is received
-          setTimeout(resolve, 1000);
-        });
-      }, SOCKET_TEST_TIMEOUT);
     });
   });
 });

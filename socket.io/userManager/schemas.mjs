@@ -22,7 +22,7 @@ export const sessionIdSchema = Joi.string().description('Unique session ID gener
 export const messageIdSchema = Joi.string().optional().max(50).description('Unique message identifier');
 export const contentSchema = Joi.string().min(1).max(5000).required().description('Message content');
 
-export const MESSAGE_STATUS_ORDERED = Object.freeze(['sent', 'pending', 'delivered', 'read']);
+export const MESSAGE_STATUS_ORDERED = Object.freeze(['sent', 'pending', 'delivered', 'read', 'failed']);
 export const statusSchema = Joi.string()
   .valid(...MESSAGE_STATUS_ORDERED)
   .default('sent')
@@ -182,7 +182,7 @@ const directionSchema = Joi.string()
         unreadOnly = false,
 */
 // getMesageOptions for _getMessages(userId, options|query)
-export const getMessagesOptionsSchema = Joi.object({
+export const getMessagesUOptionsSchema = Joi.object({
   // pagination
   limit: Joi.number().integer().min(0).optional().default(50).allow(null).description('Maximum number of messages to retrieve'),
   offset: Joi.number().integer().min(0).optional().default(0).allow(null).description('Offset for pagination'),
@@ -195,20 +195,24 @@ export const getMessagesOptionsSchema = Joi.object({
   type: Joi.string().valid('private', 'public').required().default('private').description('Filter messages by type'),
 
   senderId: userIdSchema.optional().allow(null).default(null).description('options Filter messages by senderId'),
-  status: statusSchema.optional().allow(null).default(null),
-  otherPartyId: userIdSchema.optional().allow(null).default(null).description('option Filter messages where the specified other party is either the sender or receiverId for'),
   recipientId: Joi.string().optional().allow(null).default(null).description('option Filter messages for incoming messages'),
+  status: statusSchema.optional().allow(null).default(null),
+
   direction: directionSchema.optional(),
   unreadOnly: Joi.boolean().optional().default(false).description('Retrieve only unread messages'),
+  otherPartyId: userIdSchema.optional().allow(null).default(null).description('Used only with type: "public". option Filter messages where the specified other party is either the sender or receiverId for'),
 }).description('Options for fetching messages');
 
 
-export const getMessageHistoryOptionsSchema = Joi.object({
+export const getUserConversationUOptionsSchema = Joi.object({
   limit: Joi.number().integer().min(0).max(100).default(20), // Number of messages to fetch
   offset: Joi.number().integer().min(0).default(0), // Offset for pagination
   type: Joi.string().optional().allow(null).valid('private', 'public').default('private'), // Type of messages to fetch
   status: statusSchema.optional().allow(null).default(null),
-  otherPartyId: userIdSchema.optional().allow(null).default(null).description('option Filter messages where the specified other party is either the sender or receiverId'),
+  otherPartyId: userIdSchema.required().default(null).description('option Filter messages where the specified other party is either the sender or receiverId'),
+});
+export const getUserConversationPOptionsSchema = getUserConversationUOptionsSchema.clone().keys({
+  userId: userIdSchema.required().allow(null).default(null).description('option Filter userId oucoming,incoming messages'),
 });
 
 // Storage Message Simple Message Schema
@@ -217,7 +221,7 @@ export const baseMessageSchema = Joi.object({
   sender: senderSchema.required(),
   recipientId: userIdSchema.required().description('Recipient user ID'),
   content: contentSchema.required(),
-  timestamp: timestampSchema.description('Message creation timestamp in ISO format'),
+  //timestamp: timestampSchema.description('Message creation timestamp in ISO format'),
   status: statusSchema.required(),
   type: Joi.string()
     .valid('private', 'public')
@@ -347,7 +351,7 @@ export const schemas = {
   getMessages: {
     in: Joi.object({
       meId: userIdSchema.required(),
-      options: getMessagesOptionsSchema.optional(),
+      options: getMessagesUOptionsSchema.optional(),
     }),
     out: getMessagesResultSchema,
   },
@@ -441,11 +445,17 @@ export const typingSchema = Joi.object({
   recipientId: Joi.string().min(1).max(100).required().description('Recipient user ID'),
 }).unknown(false).strict();
 
-
-export const conversationQuerySchema = Joi.object({
+// U=User
+export const getConversationsListUOptionsSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(10),
   offset: Joi.number().integer().min(0).default(0),
-  include: Joi.array().items(Joi.string().valid('metadata')).default([])
+  include: Joi.array().items(Joi.string().valid('metadata')).allow(null).default([]),
+  otherPartyId: userIdSchema.optional().description('optional. filter resultuser can load a single conversation'),
+});
+// P=Persistence
+export const getConversationsListPOptionsSchema = getConversationsListUOptionsSchema.clone().keys({
+  userId: userIdSchema.required().allow(null).default(null).description('the requesting user'),
+  include: Joi.array().items(Joi.string().valid('metadata')).allow(null).default([])
 });
 
 // Validation Wrapper Function

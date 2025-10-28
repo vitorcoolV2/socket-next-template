@@ -20,8 +20,8 @@ import {
   markMessagesAsReadOptionsSchema,
   markMessagesAsReadResultSchema,
   typingSchema,
-  getMessageHistoryOptionsSchema,
-  getMessagesOptionsSchema,
+  getUserConversationUOptionsSchema,
+  getMessagesUOptionsSchema,
   activeUserSchema,
   userQuerySchema
 } from './schemas.mjs';
@@ -163,7 +163,7 @@ export class MemoryPersistence extends PersistenceInterface {
     }
 
     // Validate options against the schema
-    const { error, value: validOps } = getMessagesOptionsSchema.validate(options);
+    const { error, value: validOps } = getMessagesUOptionsSchema.validate(options);
     if (error) {
       throw new Error(`Invalid options: ${error.message}`);
     }

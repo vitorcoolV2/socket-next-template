@@ -1,4 +1,7 @@
 import ClientIO from 'socket.io-client';
+import {
+  MESSAGE_ACKNOWLEDGEMENT_TIMEOUT
+} from 'a-socket/config.mjs'
 
 /**
  * Utility function to create and connect a client socket.
@@ -12,6 +15,10 @@ export const createClientSocket = (baseUrl, timeoutMs = 5000) => {
       transports: ['websocket', 'polling'],
       forceNew: true,
       timeout: timeoutMs,
+      reconnection: false,
+      ackTimeout: MESSAGE_ACKNOWLEDGEMENT_TIMEOUT,  // Must match server
+      pingTimeout: MESSAGE_ACKNOWLEDGEMENT_TIMEOUT,
+      pingInterval: MESSAGE_ACKNOWLEDGEMENT_TIMEOUT / 2
     });
 
     const timeout = setTimeout(() => {

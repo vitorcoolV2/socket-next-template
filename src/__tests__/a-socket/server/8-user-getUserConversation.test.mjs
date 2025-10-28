@@ -87,7 +87,7 @@ describe('Socket.IO Server Tests', () => {
         const sentMessage = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
 
         expect(sentMessage).toMatchObject({
-          status: 'pending',
+          status: 'sent',
           content: messageContent,
           sender: { userId: 'sender', userName: 'Sender' },
           recipientId: 'recipient',
@@ -96,7 +96,7 @@ describe('Socket.IO Server Tests', () => {
         // Validate the sent message
         expect(sentMessage).toBeDefined();
         expect(sentMessage.messageId).toBeDefined();
-        expect(sentMessage.status).toBe('pending');
+        expect(sentMessage.status).toBe('sent');
         //   await Promise((resolve, reject) => setInterval(resolve, 1000));
       }, SOCKET_TEST_TIMEOUT);
 
@@ -104,7 +104,7 @@ describe('Socket.IO Server Tests', () => {
         // Send a private message
         const messageContent = 'Test message to mark as read';
         const sentMessage = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
-        expect(sentMessage.status).toBe('pending');
+        expect(sentMessage.status).toBe('sent');
         const mess = await userManager._getMessages('recipient', {
           direction: 'outgoing',
 
@@ -176,7 +176,7 @@ describe('Socket.IO Server Tests', () => {
           otherPartyId: recipientUser.userId,
         };
 
-        const history = await userManager.getMessageHistory(socketId, options);
+        const history = await userManager.getUserConversation(socketId, options);
 
         // Validate the response
         expect(history.messages.length).toBeGreaterThan(0);
@@ -211,7 +211,7 @@ describe('Socket.IO Server Tests', () => {
 
 
         socketId = senderSocket.id;
-        const history = await userManager.getMessageHistory(socketId, options);
+        const history = await userManager.getUserConversation(socketId, options);
 
         // Validate the fetched messages
         expect(history.messages.length).toBeGreaterThanOrEqual(messages.length);

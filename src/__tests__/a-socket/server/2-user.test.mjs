@@ -16,7 +16,7 @@ jest.setTimeout(10000); // Set global timeout
 
 
 
-let httpServer, clientSocket;
+let httpServer;
 
 beforeAll(async () => {
   // Start the server
@@ -36,21 +36,28 @@ afterAll(async () => {
   }
 });
 
-beforeEach(async () => {
-  // Connect client for each test
-  clientSocket = await createClientSocket(BASE_URL);
-});
 
-afterEach(async () => {
-  // Clean up client after each test
-  if (clientSocket) {
-    clientSocket.disconnect();
-    clientSocket.close();
-  }
-
-});
 
 describe('Socket.IO Server Tests', () => {
+  let clientSocket, clientUser;
+  beforeEach(async () => {
+    // Connect client for each test
+    clientSocket = await createClientSocket(BASE_URL);
+    clientUser = await userManager.storeUser('client-socket', {
+      userId: 'client',
+      userName: 'Client',
+    }, true);
+  });
+
+  afterEach(async () => {
+    // Clean up client after each test
+    if (clientSocket) {
+      userManager.disconnectUser(clientSocket.id);
+      clientSocket.disconnect();
+      clientSocket.close();
+    }
+
+  });
   describe('HTTP Server', () => {
     test('should respond to health check', async () => {
       const response = await axios.get(`${BASE_URL}/health`);

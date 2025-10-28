@@ -71,7 +71,7 @@ describe('Socket.IO Server Tests', () => {
         const message = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
 
         expect(message).toMatchObject({
-          status: 'pending',
+          status: 'sent',
           content: messageContent,
           sender: { userId: 'sender', userName: 'Sender' },
           recipientId: 'recipient',

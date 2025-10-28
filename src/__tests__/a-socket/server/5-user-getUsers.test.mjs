@@ -75,7 +75,7 @@ describe('Socket.IO Server Tests', () => {
         const message = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
 
         expect(message).toMatchObject({
-          status: 'pending',
+          status: 'sent',
           content: messageContent,
           sender: { userId: 'sender', userName: 'Sender' },
           recipientId: 'recipient',
@@ -124,12 +124,10 @@ describe('Socket.IO Server Tests', () => {
 
       test('should handle edge case: no users match filters', async () => {
         // Store users
-        const u1 = await userManager.storeUser(senderSocket.id, { userId: 'sender', userName: 'Sender' }, true);
-        const u2 = await userManager.storeUser(recipientSocket.id, { userId: 'recipient', userName: 'Recipient' }, true);
 
         // Retrieve users with strict filters
         const retrievedUsers = await userManager.getUsers(senderSocket.id, {
-          states: ['offline'],
+          states: ['disconnected'],
           limit: 10,
           offset: 0
         });
@@ -141,8 +139,6 @@ describe('Socket.IO Server Tests', () => {
 
       test('should handle edge case: pagination beyond available users', async () => {
         // Store users
-        const u1 = await userManager.storeUser(senderSocket.id, { userId: 'sender', userName: 'Sender' }, true);
-        const u2 = await userManager.storeUser(recipientSocket.id, { userId: 'recipient', userName: 'Recipient' }, true);
 
         // Retrieve users with pagination beyond available users
         const retrievedUsers = await userManager.getUsers(senderSocket.id, {
