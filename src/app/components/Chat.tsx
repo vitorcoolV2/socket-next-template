@@ -1,6 +1,6 @@
 // components/Chat.tsx
 import { useEffect, useState, useCallback } from 'react';
-import { useSocket, type Message, type GetUserConversationOptions } from '../context/SocketContext';
+import { useSocket, type Message, type FetchGetUserConversationOptions } from '../context/SocketContext';
 import Input from './Input';
 import { MessageItem } from './MessageItem';
 
@@ -29,7 +29,7 @@ const Chat = ({ recipientId }: ChatProps) => {
     const userId = socketUser.userId || 'undefined';
 
     try {
-      const options: GetUserConversationOptions = {
+      const options: FetchGetUserConversationOptions = {
         type: 'private',
         userId,
         otherPartyId: recipientId,

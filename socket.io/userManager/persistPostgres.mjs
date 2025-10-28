@@ -376,7 +376,7 @@ export class PostgresPersistence extends PersistenceInterface {
     }
   }
 
-  async onUserAuthenticated(user) {
+  async ____TO_DELETE_onUserAuthenticated(user) {
     await this.ensureInitialized(); // Ensure the database is initialized
     try {
       await this.pool.query(
@@ -390,8 +390,7 @@ export class PostgresPersistence extends PersistenceInterface {
   }
 
 
-
-  async onUserDisconnected(uSession) {
+  async ____TO_DELETE_onUserDisconnected(uSession) {
     await this.ensureInitialized(); // Ensure the database is initialized
     try {
       // select user_sessions sockets as [{sessionId,state,connectedAt,sessionId}] where user_id = ${user.userId}
@@ -404,18 +403,14 @@ export class PostgresPersistence extends PersistenceInterface {
       );
 
       // Remove user if no more socket connections. never delete user_session. update user_session.sockets, by removing
-      await this.pool.query(
-        `DELETE FROM user_sessions 
-         WHERE user_id = $1 AND array_length(socket_i, 1) IS NULL`,
-        [uSession.userId]
-      );
+
     } catch (error) {
       console.error('Error in onUserDisconnected:', error);
       throw error;
     }
   }
 
-  async onUserActivity(user) {
+  async ____TO_DELETE_onUserActivity(user) {
     await this.ensureInitialized(); // Ensure the database is initialized
     try {
       await this.pool.query(
@@ -450,7 +445,6 @@ export class PostgresPersistence extends PersistenceInterface {
       // Construct the query for upserting the message
       const query = `
         INSERT INTO messages (
-          -- insert
           message_id, 
           direction,         
           sender_id, 
@@ -458,19 +452,19 @@ export class PostgresPersistence extends PersistenceInterface {
           recipient_id, 
           message_type,           
           content, 
-          -- mutatatable status, updated_at, read_at, metadata. can not mutate new message head logic properties               
-          status,       
+          status,    
+          created_at,   
           updated_at, 
           read_at, 
           metadata
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         ON CONFLICT (message_id, direction) 
         DO UPDATE SET         
           status = EXCLUDED.status,
           updated_at = EXCLUDED.updated_at,
           read_at = EXCLUDED.read_at,
-          metadata = EXCLUDED.metadata
+          metadata = EXCLUDED.metadata;
       `;
 
 
@@ -484,6 +478,7 @@ export class PostgresPersistence extends PersistenceInterface {
         type,
         content,
         status,
+        new Date(), // created_at updated on first persistence
         new Date(), // updated_at updated each input on message
         readAt ? new Date(readAt) : null, // Handle null readAt
         JSON.stringify({
@@ -492,6 +487,7 @@ export class PostgresPersistence extends PersistenceInterface {
       ];
 
       // Execute the query
+      console.log(query, values);
       await this.pool.query(query, values);
 
       // Log the operation
@@ -579,8 +575,9 @@ export class PostgresPersistence extends PersistenceInterface {
         userName: row.userName,
         sockets: row.sockets || [],
         sessionId: row.sessionId,
-        connectedAt: row.connectedAt,
-        lastActivity: row.lastActivity,
+
+        connectedAt: new Date(row.connectedAt).getTime(), // Convert to Unix epoch milliseconds
+        lastActivity: new Date(row.lastActivity).getTime(), // Convert to Unix epoch milliseconds
         state: row.state,
         //       ...row.metadata
       }));
@@ -668,7 +665,6 @@ export class PostgresPersistence extends PersistenceInterface {
   }
 
 
-
   /**
    * Get user names from messages for the given user IDs 
    * @param {string[]} senderIds - Array of user IDs to get names for
@@ -726,17 +722,21 @@ export class PostgresPersistence extends PersistenceInterface {
    */
   async getUserConversationsList(options = {}) {
     try {
+      console.log(options);
       // Validate input options
       const validOptions = validateOptions(options, getConversationsListPOptionsSchema);
-      const { userId, limit = 10, offset = 0, include = [] } = validOptions;
+      const { userId, type, limit = 10, offset = 0, include = [] } = validOptions;
 
       // Build SQL query
       const whereClauses = [
-        // critical to correct model results
-        // '(sender_id = $1 AND direction = \'outgoing\') OR (recipient_id = $1 AND direction = \'incoming\')'
-        'sender_id = $1 OR recipient_id = $1',
+        // critical to correct model results        
+        '(sender_id = $1 OR recipient_id = $1)',
       ];
       const params = [userId];
+      if (type) {
+        whereClauses.push('message_type = $2');
+        params.push(type)
+      }
 
       const selectFields = `
         CASE 
@@ -777,7 +777,7 @@ export class PostgresPersistence extends PersistenceInterface {
           ELSE sender_id 
         END
       ORDER BY "lastMessageAt" DESC
-      LIMIT $2 OFFSET $3
+      LIMIT $3 OFFSET $4
     `;
 
       console.log('Outgoing stats SQL:', getMessageStats('sender_id', 'out_', 'outgoing').join(', '));
@@ -879,7 +879,8 @@ export class PostgresPersistence extends PersistenceInterface {
         message_type AS "type",
         direction,
         status,
-        updated_at,
+        created_at as createdAt,
+        updated_at as updatedAt,
         read_at AS "readAt",
         metadata
       FROM messages
@@ -918,11 +919,11 @@ export class PostgresPersistence extends PersistenceInterface {
       }
 
       if (senderId) {
-        query += ` AND sender_id >= $${params.length + 1}`;
+        query += ` AND sender_id = $${params.length + 1}`;
         params.push(senderId);
       }
       if (recipientId) {
-        query += ` AND recipient_id >= $${params.length + 1}`;
+        query += ` AND recipient_id = $${params.length + 1}`;
         params.push(recipientId);
       }
 
@@ -960,7 +961,8 @@ export class PostgresPersistence extends PersistenceInterface {
         type: row.type,
         direction: row.direction,
         status: row.status,
-        updated_at: row.updated_at,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
         readAt: row.readAt,
         metadata: row.metadata || {},
       }));
@@ -1032,7 +1034,8 @@ export class PostgresPersistence extends PersistenceInterface {
           message_type AS "type",
           direction,
           status,
-          updated_at,
+          created_at as createdAt,
+          updated_at as updatedAt,
           read_at AS "readAt";
       `;
       const values = [status, fromStatus, messageId, userId, new Date()];

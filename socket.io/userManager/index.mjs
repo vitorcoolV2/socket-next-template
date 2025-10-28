@@ -13,6 +13,7 @@ import {
   userResultSchema,
   userSessionSchema,
   baseMessageSchema,
+  persistMessageSchema,
   validateEventData,
   socketInfoSchema,
   markMessagesAsReadOptionsSchema,
@@ -79,7 +80,6 @@ const messageContextDefault = () => ({
   timestamp: getHighPrecisionISO(),
   readAt: null,
 });
-
 
 
 export const userManager = (options = {}) => {
@@ -530,7 +530,7 @@ export const userManager = (options = {}) => {
   };
 
 
-  const getUsers = async (socketId, options = {}) => {
+  const getUsersList = async (socketId, options = {}) => {
     return safeOperation(async () => {
       // Log the options and initial state of the_users
       if (debug) {
@@ -693,7 +693,7 @@ export const userManager = (options = {}) => {
         recipientId,
         status: 'sent', // Initial status
         type: 'private',
-        updated_at: getHighPrecisionISO(),
+        //    createdAt: getHighPrecisionISO(),
         readAt: null,
       };
 
@@ -916,7 +916,7 @@ export const userManager = (options = {}) => {
   /**
   * Load user messages from persistence layer into conversation structure
   */
-  const _loadUserMessages = async (userId) => {
+  const _TO_DELETE_loadUserMessages = async (userId) => {
     return safeOperation(async () => {
       if (!userId || typeof userId !== 'string') {
         throw new Error('Invalid userId provided');
@@ -944,7 +944,6 @@ export const userManager = (options = {}) => {
     return safeOperation(() => {
       the_users.clear();
       activeUsers.clear();
-
       return;
     }, `Error reseting users`);
   };
@@ -962,11 +961,11 @@ export const userManager = (options = {}) => {
 
       message.status = message.status || 'sent';
       message.type = message.type || 'private';
-      message.updated_at = message.updated_at || getHighPrecisionISO();
+      //message.updated_at = message.updated_at || getHighPrecisionISO();
 
 
       // Validate the message against the schema
-      const { valid, errors, data: msg } = validateEventData(baseMessageSchema, message);
+      const { valid, errors, data: msg } = validateEventData(persistMessageSchema, message);
       if (!valid) {
         const errorMessage = errors.map(e => e.message).join(', ');
         throw new Error(`Validation failed: ${errorMessage}`);
@@ -1010,12 +1009,6 @@ export const userManager = (options = {}) => {
         throw new Error('Invalid userId provided');
       }
 
-      // Step 2: Set default type and normalize options
-      //     options.type = options.type || 'private';
-      //   options.senderId = options.senderId || null;
-      // options.recipientId = options.recipientId || null;
-      /// options.recipientId = type === 'public' ? PUBLIC_MESSAGE_USER_ID : options.recipientId;
-
       const normalizedOptions = getNormalizedOptions(options);
 
       // Step 3: Validate options against schema
@@ -1045,7 +1038,7 @@ export const userManager = (options = {}) => {
         }
 
         // Step 9: Sort messages chronologically
-        messages.sort((a, b) => new Date(a.updated_at) - new Date(b.updated_at));
+        messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
 
         // Step 10: Return structured response
         return {
@@ -1130,7 +1123,6 @@ export const userManager = (options = {}) => {
   };
 
 
-
   const broadcastPublicMessage = (socketId, content) => {
     return safeOperation(async () => {
       const user = await _failInsecureSocketId(socketId);
@@ -1147,7 +1139,7 @@ export const userManager = (options = {}) => {
           userId: user.userId,
           userName: user.userName || 'Anonymous',
         },
-        updated_at: getHighPrecisionISO(),
+        //    updated_at: getHighPrecisionISO(),
         readAt: null,
         direction: 'outgoing',
       };
@@ -1223,57 +1215,57 @@ export const userManager = (options = {}) => {
       const user = await _failInsecureSocketId(socketId);
       options.userId = user.userId;
       // Step 2: get Joi default options to merge with user options
-      const { value: mOptions } = getUserConversationPOptionsSchema.validate(options);
+      const { value: userOptions } = getUserConversationPOptionsSchema.validate(options);
 
       // Step 3: Handle private messages (fetch both incoming and outgoing)
-      if (mOptions.type === 'private') {
+      if (userOptions.type === 'private') {
         // Fetch incoming messages (user is the recipient)
         const incomingOps = {
-          limit: mOptions.limit,
-          offset: mOptions.offset,
-          status: mOptions.status,
+          limit: userOptions.limit,
+          offset: userOptions.offset,
+          status: userOptions.status,
           since: null,
           until: null,
           type: 'private',
           unreadOnly: false,
           direction: 'incoming',
-          senderId: mOptions.otherPartyId || null,
+          senderId: userOptions.otherPartyId || null,
           recipientId: user.userId, // Sender is the other party
         };
         const { value: iops, error: iOpsError } = getMessagesUOptionsSchema.validate(incomingOps);
         if (iOpsError) {
           throw new Error(`Invalid incoming message options: ${iOpsError.message}`);
         }
-        const incomingMessagesResult = await persistence.getMessages(mOptions.otherPartyId, iops);
+        const incomingMessagesResult = await persistence.getMessages(userOptions.otherPartyId, iops);
 
         // Fetch outgoing messages (user is the sender)
         const outgoingOps = {
-          limit: mOptions.limit,
-          offset: mOptions.offset,
-          status: mOptions.status,
+          limit: userOptions.limit,
+          offset: userOptions.offset,
+          status: userOptions.status,
           since: null,
           until: null,
           type: 'private',
           direction: 'outgoing',
           unreadOnly: false,
-          senderId: user.userId || null,
-          recipientId: mOptions.otherPartyId, // Recipient is the other party
+          senderId: user.userId,
+          recipientId: userOptions.otherPartyId, // Recipient is the other party
         };
         const { value: oops, error: oOpsError } = getMessagesUOptionsSchema.validate(outgoingOps);
         if (oOpsError) {
           throw new Error(`Invalid incoming message options: ${oOpsError.message}`);
         }
-        const outgoingMessagesResult = await persistence.getMessages(user.userId, outgoingOps);
+        const outgoingMessagesResult = await persistence.getMessages(user.userId, oops);
 
         // Merge and sort the messages
         const allMessages = [
           ...incomingMessagesResult.messages,
           ...outgoingMessagesResult.messages,
-        ].sort((a, b) => new Date(a.updated_at) - new Date(b.updated_at)); // Chronological order
+        ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); // Chronological order
 
         // Apply pagination to the merged results
-        const start = mOptions.offset;
-        const end = mOptions.offset + mOptions.limit;
+        const start = userOptions.offset;
+        const end = userOptions.offset + userOptions.limit;
         const paginatedMessages = allMessages.slice(start, end);
 
         // Construct the response
@@ -1292,11 +1284,11 @@ export const userManager = (options = {}) => {
       }
 
       // Step 4: Handle public messages (unchanged)
-      if (mOptions.type === 'public') {
+      if (userOptions.type === 'public') {
         const iops = {
-          limit: mOptions.limit,
-          offset: mOptions.offset,
-          status: mOptions.status,
+          limit: userOptions.limit,
+          offset: userOptions.offset,
+          status: userOptions.status,
           since: null,
           until: null,
           unreadOnly: false,
@@ -1464,7 +1456,7 @@ export const userManager = (options = {}) => {
     getPublicMessages,
     //   typingIndicator,
     getUserConversation,
-    getUsers,
+    getUsersList: getUsersList,
     updateUserState,
     storeUser,
     _incrementErrors,

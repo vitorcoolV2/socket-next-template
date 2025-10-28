@@ -106,8 +106,8 @@ describe('Socket.IO Server Tests', () => {
         const sentMessage = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
         expect(sentMessage.status).toBe('sent');
         const mess = await userManager._getMessages('recipient', {
+          type: 'private',
           direction: 'outgoing',
-
           messageIds: [sentMessage.messageId]
         });
 

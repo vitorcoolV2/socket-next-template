@@ -221,7 +221,6 @@ export const baseMessageSchema = Joi.object({
   sender: senderSchema.required(),
   recipientId: userIdSchema.required().description('Recipient user ID'),
   content: contentSchema.required(),
-  //timestamp: timestampSchema.description('Message creation timestamp in ISO format'),
   status: statusSchema.required(),
   type: Joi.string()
     .valid('private', 'public')
@@ -233,6 +232,11 @@ export const baseMessageSchema = Joi.object({
   status: statusSchema.required(),
   readAt: readAtSchema.optional(),
 });
+
+export const persistMessageSchema = baseMessageSchema.clone().keys({
+  createdAt: timestampSchema.description('Message creation timestamp in ISO format'),
+  updatedAt: timestampSchema.description('Message creation timestamp in ISO format'),
+})
 
 // Mark Messages as Read Schemas
 export const markMessagesAsReadOptionsSchema = Joi.object({
@@ -450,7 +454,9 @@ export const getConversationsListUOptionsSchema = Joi.object({
   limit: Joi.number().integer().min(1).max(100).default(10),
   offset: Joi.number().integer().min(0).default(0),
   include: Joi.array().items(Joi.string().valid('metadata')).allow(null).default([]),
-  otherPartyId: userIdSchema.optional().description('optional. filter resultuser can load a single conversation'),
+  otherPartyId: userIdSchema.optional().description('optional. filter result to one specific user conversation'),
+  type: Joi.string().optional().allow(null).valid('private', 'public').default('private')
+    .description('optional. filter result to one type of user conversation'),
 });
 // P=Persistence
 export const getConversationsListPOptionsSchema = getConversationsListUOptionsSchema.clone().keys({

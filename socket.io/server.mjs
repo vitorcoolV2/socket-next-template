@@ -7,6 +7,7 @@ import {
   INACTIVITY_CHECK_INTERVAL,
   INACTIVITY_THRESHOLD,
   MESSAGE_ACKNOWLEDGEMENT_TIMEOUT,
+  DEFAULT_REQUEST_TIMEOUT,
   PUBLIC_MESSAGE_USER_ID
 } from './config.mjs';
 
@@ -32,10 +33,10 @@ export const users = userManager({
 
 // Create HTTP server
 const createHttpServer = () => {
-  return createServer(requestLogger);
+  return createServer(rootMiddleware);
 };
 
-const requestLogger = (req, res) => {
+const rootMiddleware = (req, res) => {
   if (!req || !res) {
     throw new Error('Invalid request or response object');
   }
@@ -75,9 +76,69 @@ const requestLogger = (req, res) => {
   res.end(JSON.stringify({ error: 'Not Found' }));
 };
 
-// Event handler wrapper with validation
-function _createEventHandler(eventName, eventHandler) {
+const withTimeout = (promise, timeoutError = 'Request timed out', timeoutMs = 10000) => {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      const timeoutId = setTimeout(() => {
+        clearTimeout(timeoutId); // Clear the timeout to avoid memory leaks
+        reject(new Error(timeoutError));
+      }, timeoutMs);
+    }),
+  ]).catch(error => {
+    console.error('Error in withTimeout:', error.message);
+    throw error; // Rethrow the error after logging
+  });
+};
+
+// Prevent predictable timeout exceptions from crashing the app
+const catchTimeoutExceptions = (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+
+  // Exit the process only for unexpected or critical errors
+  if (!['Request timed out', 'Invalid data'].includes(reason.message)) {
+    console.error('Critical error detected. Exiting process...');
+    process.exit(1);
+  } else {
+    console.warn('Predictable error detected. Continuing execution...');
+  }
+};
+
+process.on('unhandledRejection', catchTimeoutExceptions);
+
+
+const _registerEventHandlers = (socket, handlers) => {
+  Object.entries(handlers).forEach(([eventName, eventHandler, eventAck, timeout]) => {
+    registerEventHandler(socket, { eventName, eventHandler, eventAck, timeout });
+  });
+};
+
+/**
+ * Registers a single event handler with customizable properties.
+ *
+ * @param {Socket} socket - The Socket.IO socket instance.
+ * @param {Object} options - Event handler configuration.
+ * @param {string} options.eventName - The name of the event.
+ * @param {Function} options.eventHandler - The function to handle the event.
+ * @param {boolean} [options.eventAck=false] - Whether the event requires acknowledgment.
+ * @param {number} [options.timeout=10000] - Timeout duration in milliseconds.
+ */
+const registerEventHandler = (socket, { eventName, eventHandler, eventAck = false, timeout = DEFAULT_REQUEST_TIMEOUT }) => {
+  socket.on(eventName, createEventHandler(eventName, eventHandler, eventAck, timeout));
+};
+
+/**
+ * Creates a wrapper for an event handler with validation, timeout, and acknowledgment support.
+ *
+ * @param {string} eventName - The name of the event.
+ * @param {Function} eventHandler - The function to handle the event.
+ * @param {boolean} eventAck - Whether the event requires acknowledgment.
+ * @param {number} timeout - Timeout duration in milliseconds.
+ * @returns {Function} - The wrapped event handler function.
+ */
+function createEventHandler(eventName, eventHandler, eventAck = false, timeout = 10000) {
   return async function (data, callback) {
+    // Step 1: Validate input data
     if (!data || typeof data !== 'object') {
       const errorResponse = {
         success: false,
@@ -89,25 +150,34 @@ function _createEventHandler(eventName, eventHandler) {
     }
 
     try {
+      // Step 2: Retrieve user information
       const user = await users.getUserBySocketId(this.id);
       console.info('>>> ', [eventName], 'user:', [user?.state, user?.userId]);
 
-      const result = await Promise.race([
+      // Step 3: Execute the event handler with a timeout
+      const result = await withTimeout(
         eventHandler(this, data, callback),
-        new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Request timed out')), 10000)
-        ),
-      ]);
+        'Request timed out',
+        timeout
+      );
 
+      // Step 4: Handle successful response
       const successResponse = {
         success: true,
         event: eventName,
-        data: result
+        result
       };
-      _respondOrFallback(callback, this, successResponse);
+
+      // If acknowledgment is required, ensure the callback is called
+      if (eventAck && typeof callback === 'function') {
+        callback(successResponse);
+      } else {
+        _respondOrFallback(callback, this, successResponse);
+      }
 
       return result;
     } catch (error) {
+      // Step 5: Log and handle errors
       console.error('>>> ', `[${eventName}]`, 'Error:', error.message);
       users._incrementErrors();
 
@@ -116,23 +186,23 @@ function _createEventHandler(eventName, eventHandler) {
         event: eventName,
         error: error.message
       };
-      _respondOrFallback(callback, this, errorResponse);
 
-      // Only re-throw if it's not a timeout or client error
-      if (!error.message.includes('timeout') && !error.message.includes('Invalid')) {
+      // If acknowledgment is required, ensure the callback is called
+      if (eventAck && typeof callback === 'function') {
+        callback(errorResponse);
+      } else {
+        _respondOrFallback(callback, this, errorResponse);
+      }
+
+      // Step 6: Re-throw only unexpected or critical errors
+      if (!['Request timed out', 'Invalid data'].includes(error.message)) {
         throw error;
       }
     }
   };
 }
 
-const _registerEventHandlers = (socket, handlers) => {
-  Object.entries(handlers).forEach(([eventName, eventHandler, eventAck]) => {
-    socket.on(eventName, _createEventHandler(eventName, eventHandler, eventAck));
-  });
-};
-
-// Helper function to send responses or fallback
+// Utility function to handle responses or fallbacks
 function _respondOrFallback(callback, socket, response) {
   if (typeof callback === 'function') {
     callback(response);
@@ -188,7 +258,7 @@ io.use(async (socket, next) => {
       socket.join(PUBLIC_MESSAGE_USER_ID);
 
       // Fetch and join rooms for all authenticated users
-      const authenticatedUsers = await users.getUsers(socket.id, { states: ['authenticated', 'offline'] });
+      const authenticatedUsers = await users.getUsersList(socket.id, { states: ['authenticated', 'offline'] });
       authenticatedUsers.forEach((u) => {
         socket.join(u.userId);
       });
@@ -224,122 +294,7 @@ io.on('connection', (socket) => {
   const TEST_DISABLE_ACK = process.env.NODE_ENV === 'test';
   // Helper function to update message status
 
-
   const handlers = {
-    sendMessage: async (socket, { recipientId, content }) => {
-      let msg;
-      try {
-        // Step 1: Validate input
-        if (!recipientId || !content) {
-          throw new Error('Recipient ID and message content are required.');
-        }
-
-        // Step 2: define support for inner functions
-        // Create | persisted message with "sent" status
-        msg = await users.sendMessage(socket.id, recipientId, content);
-        // Normalize emitSockets for notify* func*
-        const emitSockets = (await users.getUserSockets(recipientId)) || [];
-
-
-
-        // Notify sender and recipient of the "sent" message
-        // only the sender sends a message. 
-        //          - the sender upon sending he has a new "outgoing" message. 
-        //          - the receiver, receive the "incoming" message.
-        const notifyMessage = (emitName, status) => {
-          io.to(socket.id).emit(emitName, { ...msg, status, direction: "outgoing" });
-          emitSockets.forEach(sock => {
-            io.to(sock.socketId).emit(emitName, { ...msg, status, direction: "incoming" });
-          });
-        };
-
-        /// >>>>>>>> ACTION START HEAR
-
-        // 1. Notify "sent" status
-        notifyMessage('receivedMessage', 'sent');  //+ means server receive message and persisted for async delivery
-
-        const updateMessageAndNotify = async (status) => {
-          console.log(status);
-          console.log(`Updating message status to "${status}" for messageId: ${msg.messageId}`);
-          const updateMsg = await users.updateMessageStatus(socket.id, msg.messageId, status);
-
-          notifyMessage('updateMessageStatus', updateMsg.status);
-          return updateMsg;
-        };
-
-        // 2: Update message status to "pending"
-        try {
-          msg = await updateMessageAndNotify('pending');
-        } catch (error) {
-          notifyMessage('updateMessageStatus', 'error');
-          return msg;
-        }
-
-
-        // 3: Attempt delivery with timeout handling
-        const withTimeout = (promise, timeoutMs = MESSAGE_ACKNOWLEDGEMENT_TIMEOUT) => {
-          return Promise.race([
-            promise,
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error('timeout')), timeoutMs)
-            ),
-          ]);
-        };
-
-        console.log(`Attempting delivery to ${emitSockets.length} socket(s)`);
-
-        const deliveryAttempts = emitSockets.map(async (sockId) => {
-          try {
-            const result = await withTimeout(
-              new Promise((resolve) => {
-                const deliveryMsg = { ...msg, direction: 'incoming', status: 'delivery' };
-                io.to(sockId).emit('receiveMessage', deliveryMsg, (ack) => {
-                  if (!TEST_DISABLE_ACK && ack === 'received') {
-                    console.log(`Acknowledgment received from socket ${sockId}`);
-                    resolve(sockId);
-                  } else {
-                    console.log(`Acknowledgment failed from socket ${sockId}`);
-                    resolve({ sockId, success: false });
-                  }
-                });
-              })
-            );
-            return result;
-          } catch (error) {
-            console.log(`Delivery timeout for socket ${sockId}`);
-            return { sockId, success: false, reason: 'timeout' };
-          }
-        });
-
-        const results = await Promise.all(deliveryAttempts);
-        const successfulDeliveries = results.filter(result => typeof result === 'string');
-
-        console.log(`Delivery completed: ${successfulDeliveries.length}/${emitSockets.length} successful`);
-
-        // Step 5: Update message status based on delivery results
-        if (successfulDeliveries.length > 0) {
-          msg = await updateMessageAndNotify('delivered');
-        } else {
-          // not persisting invalid server state. but can notify the client of a error on delivering with ACK          
-          notifyMessage('updateMessageStatus', 'error');
-        }
-
-        return msg;
-      } catch (error) {
-        console.error('Error in sendMessage:', error.message);
-
-        // Handle critical errors (e.g., missing recipient ID or content)
-        if (error.message.includes('Recipient ID') || error.message.includes('content')) {
-          throw error; // Re-throw critical errors
-        }
-
-        // For non-critical errors (e.g., delivery failures), return gracefully
-        console.error('Delivery error, returning message as pending');
-        return { ...msg, status: 'pending', error: error.message };
-      }
-    },
-
-
     // UI typing
     typing: async (socket, data) => {
       //const ret = await users.typingIndicator(socket.id, { isTyping: true, recipientId: data?.recipientId });
@@ -356,9 +311,8 @@ io.on('connection', (socket) => {
         io.to(sock.socketId).emit('stopTyping', data?.recipientId);
       });
     },
-    //
-    // typingIndicator: async (socket, data) =>
-    // await users.typingIndicator(socket.id, data),
+
+
     markMessagesAsRead: async (socket, options) => {
       const resp = await users.markMessagesAsRead(socket.id, options);
 
@@ -385,6 +339,24 @@ io.on('connection', (socket) => {
     broadcastPublicMessage: async (socket, { content }) =>
       await users.broadcastPublicMessage(socket.id, content),
     // Complete server socket handler for getUserConversation
+
+    getUsersList: async (socket, options) => {
+      await users.getUsersList(socket.id, options).then(res => {
+        socket.emit('usersList', res.map(u => {
+          return {
+            userId: u.userId,
+            userName: u.userName,
+            state: u.state,
+          }
+        }));
+      });
+    },
+    getActiveUsers: async (socket, options) =>
+      await users.getActiveUsers(socket.id, options),
+    getUserConnectionMetrics: async (socket, userId) =>
+      await users.getUserConnectionMetrics(userId),
+    getAndDeliverPendingMessages: async (socket) =>
+      await users.getAndDeliverPendingMessages(socket.id),
     getUserConversation: async (socket, options) => {
       try {
         // Call the user service to get conversation messages
@@ -428,7 +400,7 @@ io.on('connection', (socket) => {
     getUserConversationsList: async (socket, options) => {
       try {
         await users.getUserConversationsList(socket.id, options).then(res => {
-          socket.emit('userConversations', {
+          socket.emit('userConversationsList', {
             success: true,
             data: res.map(u => ({
               userId: u.userId,
@@ -450,26 +422,123 @@ io.on('connection', (socket) => {
         });
       }
     },
-    getUsers: async (socket, options) => {
-      await users.getUsers(socket.id, options).then(res => {
-        socket.emit('usersList', res.map(u => {
-          return {
-            userId: u.userId,
-            userName: u.userName,
-            state: u.state,
-          }
-        }));
-      });
-    },
-    getActiveUsers: async (socket, options) =>
-      await users.getActiveUsers(socket.id, options),
-    getUserConnectionMetrics: async (socket, userId) =>
-      await users.getUserConnectionMetrics(userId),
-    getAndDeliverPendingMessages: async (socket) =>
-      await users.getAndDeliverPendingMessages(socket.id),
   };
-
   _registerEventHandlers(socket, handlers);
+
+
+  const sendMessageHandler = async (socket, { recipientId, content }) => {
+    let msg;
+    try {
+      // Step 1: Validate input
+      if (!recipientId || !content) {
+        throw new Error('Recipient ID and message content are required.');
+      }
+
+      // Step 2: define support for inner functions
+      // Create | persisted message with "sent" status
+      msg = await users.sendMessage(socket.id, recipientId, content);
+      // Normalize emitSockets for notify* func*
+      const emitSockets = (await users.getUserSockets(recipientId)) || [];
+
+
+
+      // Notify sender and recipient of the "sent" message
+      // only the sender sends a message. 
+      //          - the sender upon sending he has a new "outgoing" message. 
+      //          - the receiver, receive the "incoming" message.
+      const notifyMessage = (emitName, status) => {
+        io.to(socket.id).emit(emitName, { ...msg, status, direction: "outgoing" });
+        emitSockets.forEach(sock => {
+          io.to(sock.socketId).emit(emitName, { ...msg, status, direction: "incoming" });
+        });
+      };
+
+      /// >>>>>>>> ACTION START HEAR
+
+      // 1. Notify "sent" status
+      notifyMessage('receivedMessage', 'sent');  //+ means server receive message and persisted for async delivery
+
+      const updateMessageAndNotify = async (status) => {
+        console.log(status);
+        console.log(`Updating message status to "${status}" for messageId: ${msg.messageId}`);
+        const updateMsg = await users.updateMessageStatus(socket.id, msg.messageId, status);
+
+        notifyMessage('updateMessageStatus', updateMsg.status);
+        return updateMsg;
+      };
+
+      // 2: Update message status to "pending"
+      try {
+        msg = await updateMessageAndNotify('pending');
+      } catch (error) {
+        notifyMessage('updateMessageStatus', 'error');
+        return msg;
+      }
+
+
+      // 3: Attempt delivery with timeout handling
+
+
+      console.log(`Attempting delivery to ${emitSockets.length} socket(s)`);
+
+      const deliveryAttempts = emitSockets.map(async (sockId) => {
+        try {
+          const result = await withTimeout(
+            new Promise((resolve) => {
+              const deliveryMsg = { ...msg, direction: 'incoming', status: 'delivery' };
+              io.to(sockId).emit('receiveMessage', deliveryMsg, (ack) => {
+                if (!TEST_DISABLE_ACK && ack === 'received') {
+                  console.log(`Acknowledgment received from socket ${sockId}`);
+                  resolve(sockId);
+                } else {
+                  console.log(`Acknowledgment failed from socket ${sockId}`);
+                  resolve({ sockId, success: false });
+                }
+              });
+            }, 'Timeout - fail to ACK recipient delivery')
+          );
+          return result;
+        } catch (error) {
+          console.log(`Delivery timeout for socket ${sockId}`);
+          return { sockId, success: false, reason: 'timeout' };
+        }
+      });
+
+      const results = await Promise.all(deliveryAttempts);
+      const successfulDeliveries = results.filter(result => typeof result === 'string');
+
+      console.log(`Delivery completed: ${successfulDeliveries.length}/${emitSockets.length} successful`);
+
+      // Step 5: Update message status based on delivery results
+      if (successfulDeliveries.length > 0) {
+        msg = await updateMessageAndNotify('delivered');
+      } else {
+        // not persisting invalid server state. but can notify the client of a error on delivering with ACK          
+        notifyMessage('updateMessageStatus', 'error');
+      }
+
+      return msg;
+    } catch (error) {
+      console.error('Error in sendMessage:', error.message);
+
+      // Handle critical errors (e.g., missing recipient ID or content)
+      if (error.message.includes('Recipient ID') || error.message.includes('content')) {
+        throw error; // Re-throw critical errors
+      }
+
+      // For non-critical errors (e.g., delivery failures), return gracefully
+      console.error('Delivery error, returning message as pending');
+      return { ...msg, status: 'pending', error: error.message };
+    }
+  }
+  // Register 'sendMessage' event
+  registerEventHandler(socket, {
+    eventName: 'sendMessage',
+    eventHandler: sendMessageHandler,
+    eventAck: true, // No acknowledgment required
+    timeout: MESSAGE_ACKNOWLEDGEMENT_TIMEOUT // 10 seconds
+  });
+
 });
 
 // Cleanup intervals
@@ -507,6 +576,7 @@ const gracefulShutdown = () => {
 
 process.on('SIGTERM', gracefulShutdown);
 process.on('SIGINT', gracefulShutdown);
+
 
 // Start server
 // Export the start/stop functions

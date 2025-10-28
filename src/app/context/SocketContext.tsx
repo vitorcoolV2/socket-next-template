@@ -6,19 +6,16 @@ import { useUser, useAuth } from '@clerk/nextjs';
 export interface User {
   userId: string;
   userName: string;
-  state?: string;
+  state: 'disconnected' | 'connected' | 'authenticated' | 'offline';
 }
 
 export interface AuthUser extends User {
   success: boolean;
-  state: 'disconnected' | 'connected' | 'authenticated' | 'offline';
 }
 
-
-
 export interface ConversationMetrics {
-  startedAt: string | null;
-  lastMessageAt: string | null;
+  startedAt: string;
+  lastMessageAt: string;
   sent: number;
   pending: number;
   delivered: number;
@@ -30,22 +27,22 @@ export interface ConversationMetrics {
 export interface UserConversation extends User {
   otherPartyId: string;
   otherPartyName: string;
-  startedAt?: string | null;
-  lastMessageAt?: string | null;
+  startedAt: string;
+  lastMessageAt: string;
   types?: string[] | null;
 }
 export interface UserConversationMetrics extends UserConversation {
-  incoming: ConversationMetrics | null;
-  outgoing: ConversationMetrics | null;
+  incoming: ConversationMetrics;
+  outgoing: ConversationMetrics;
 }
 
-export interface userConversationsResponse {
-  data: UserConversationMetrics[];
-  total: number;
-  hasMore: boolean;
-  context?: any;
-}
+export interface UserRenderData extends User, UserConversationMetrics {
+  startedAt: string;
+  lastMessageAt: string;
+  types: string[];
+};
 
+export type MessageStatus = 'sent' | 'pending' | 'delivered' | 'read';
 
 export interface Message {
   id?: string;
@@ -53,20 +50,22 @@ export interface Message {
   senderName: string;
   recipientId: string;
   content: string;
-  timestamp: Date;
-  status?: string;
+  status?: MessageStatus;
   type?: 'private' | 'public';
   direction?: 'incoming' | 'outgoing';
+  createdAt?: Date;
+  updatedAt?: Date;
+  readdAt?: Date;
 }
 
-export interface ConversationResponse {
+export interface GetUserConversationResponse {
   data: Message[];
   total: number;
   hasMore: boolean;
-  context?: any;
+  context?: unknown;
 }
 
-export interface GetUserConversationOptions {
+export interface FetchGetUserConversationOptions {
   // Pagination
   limit?: number;
   offset?: number;
@@ -78,24 +77,78 @@ export interface GetUserConversationOptions {
   // message user Ids
   userId: string | null;
   otherPartyId: string | null;
-
-  //  status?: string | null;  
-  //  recipientId?: string | null;
-  //  direction?: 'incoming' | 'outgoing' | null;
-  //  unreadOnly?: boolean;
 }
 
 // In SocketContext.tsx - update the interface
 export interface UserConversationEvent {
   success: boolean;
-  data?: ConversationResponse;
+  data?: GetUserConversationResponse;// ['data'];
   error?: string;
-  options?: GetUserConversationOptions; // Add this to match server
+  options?: FetchGetUserConversationOptions; // Add this to match server
 }
+
 
 export interface getUserConversationResponse {
   success: boolean;
   data: Message[],
+}
+
+interface ContextData {
+  [key: string]: string | number | boolean; // Adjust based on your needs
+}
+
+// conversations list
+export interface UserConversationsListResponse {
+  data: UserConversationMetrics[];
+  total: number;
+  hasMore: boolean;
+  context?: ContextData;
+}
+
+export interface FetchGetUserConversationsListOptions {
+  limit?: number;
+  offset?: number;
+  since?: Date | null;
+  until?: Date | null;
+  userId?: string | null;
+  otherPartyId?: string | null;
+  type?: 'private' | 'public';
+  sortBy?: 'lastMessageAt' | 'startedAt';
+  sortOrder?: 'asc' | 'desc';
+}
+
+export interface UserConversationsListResponse {
+  data: UserConversationMetrics[];
+  total: number;
+  hasMore: boolean;
+  context?: ContextData;
+}
+
+// In SocketContext.tsx - update the interface
+export interface UserConversationsListEvent {
+  success: boolean;
+  data?: GetUserConversationResponse; //['data'];
+  error?: string;
+  options?: FetchGetUserConversationsListOptions; // Add this to match server
+}
+
+export interface FetchGetUsersListOptions {
+  limit?: number;
+  offset?: number;
+  since?: Date | null;
+  until?: Date | null;
+  type?: 'private' | 'public';
+}
+
+export interface getUsersListResponse {
+  data: UserRenderData[];
+}
+
+export interface UsersListEvent {
+  success: boolean;
+  data?: getUsersListResponse
+  error?: string;
+  options?: FetchGetUsersListOptions;
 }
 
 // Define the default value for the context
@@ -104,9 +157,10 @@ const SocketContext = createContext<{
   isConnected: boolean;
   isAuthenticated: boolean;
   socketUser: User | null;
-  conversations: UserConversationMetrics[];
-  getUserConversationsList: (options?: GetUserConversationsListOptions) => Promise<ConversationListResponse>;
-  getUserConversation: (options: GetUserConversationOptions) => Promise<ConversationResponse>;
+  conversationsList: UserConversationMetrics[];
+  getUsersList: (options?: FetchGetUsersListOptions) => Promise<UserRenderData[]>;
+  getUserConversationsList: (options?: FetchGetUserConversationsListOptions) => Promise<void>;
+  getUserConversation: (options: FetchGetUserConversationOptions) => Promise<GetUserConversationResponse>;
   connect: () => void;
   disconnect: () => void;
 }>({
@@ -114,14 +168,20 @@ const SocketContext = createContext<{
   isConnected: false,
   isAuthenticated: false,
   socketUser: null,
-  conversations: [],
-  getUserConversationsList: () => { },
+  conversationsList: [],
+  getUsersList: async () => {
+    throw new Error('Socket not initialized'); // Default implementation throws an error
+  },
+  getUserConversationsList: async () => {
+    throw new Error('Socket not initialized'); // Default implementation throws an error
+  },
   getUserConversation: async () => {
-    throw new Error('Socket not initialized');
+    throw new Error('Socket not initialized'); // Default implementation throws an error
   },
   connect: () => { },
   disconnect: () => { },
 });
+
 
 // Custom hook to use the socket context
 export const useSocket = () => {
@@ -133,22 +193,62 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  const [isLoading, setIsLoading] = useState(true);
   const { user, isLoaded, isSignedIn } = useUser();
   const [socketUser, setSocketUser] = useState<User | null>(null);
-  const [conversations, setConversations] = useState<UserConversationMetrics[]>([]);
+  const [usersState, setUsersState] = useState<User[]>([]);
+  const [conversationsList, setConversationsList] = useState<UserRenderData[]>([]);
   const { getToken } = useAuth();
 
   // Function to get user conversations list
-  const getUserConversationsList = useCallback((options?: any) => {
-    if (socket && isAuthenticated) {
-      socket.emit('getUserConversationsList', options);
+  const getUserConversationsList = useCallback(async (options?: FetchGetUserConversationsListOptions): Promise<void> => {
+    if (!socket || !isAuthenticated) {
+      throw new Error('Socket not connected or user not authenticated');
     }
+    socket.emit('getUserConversationsList', options);
+
   }, [socket, isAuthenticated]);
 
   // Function to get specific conversation messages
   // In SocketContext.tsx - getUserConversation function
   // Function to get specific conversation messages with complete protocol
-  const getUserConversation = useCallback(async (options: GetUserConversationOptions): Promise<ConversationResponse> => {
+  const getUsersList = useCallback(async (options?: FetchGetUsersListOptions): Promise<UserRenderData[]> => {
+    if (!socket || !isAuthenticated) {
+      throw new Error('Socket not connected or user not authenticated');
+    }
+
+    return new Promise((resolve, reject) => {
+      // Set up timeout for the request
+      const timeout = setTimeout(() => {
+        reject(new Error('Request timeout'));
+        socket.off('usersList', handleResponse); // Clean up the listener
+      }, 10000); // 10 seconds timeout
+
+      // Define the response handler
+      const handleResponse = (event: UsersListEvent) => {
+        clearTimeout(timeout); // Clear the timeout
+        socket.off('usersList', handleResponse); // Remove the listener
+        if (event.success && event.data) {
+          setUsersState(event.data);
+          resolve(event.data); // Resolve with the fetched users
+        } else {
+          reject(new Error(event.error || 'Failed to fetch users list'));
+        }
+      };
+
+      // Listen for the server's response
+      socket.on('usersList', handleResponse);
+
+      // Emit the request to the server
+      socket.emit('getUsersList', options);
+    });
+  }, [socket, isAuthenticated, usersState]);
+
+  // Function to get specific conversation messages
+  // In SocketContext.tsx - getUserConversation function
+  // Function to get specific conversation messages with complete protocol
+  const getUserConversation = useCallback(async (options: FetchGetUserConversationOptions): Promise<GetUserConversationResponse> => {
     if (!socket || !isAuthenticated) {
       throw new Error('Socket not connected or user not authenticated');
     }
@@ -168,9 +268,9 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         // if (event.options && JSON.stringify(event.options) !== JSON.stringify(options)) {
         //   return; // This response is for a different request
         // }
-
         if (event.success && event.data) {
           resolve(event.data);
+
         } else {
           reject(new Error(event.error || 'Failed to fetch conversation'));
         }
@@ -195,6 +295,13 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
       socket.disconnect();
     }
   };
+
+  useEffect(() => {
+    if (isLoaded && isAuthenticated) {
+      getUsersList()
+      getUserConversationsList({ limit: 50, offset: 0 });
+    }
+  }, [isLoaded, isAuthenticated]);
 
   useEffect(() => {
     let newSocket: Socket | null = null;
@@ -235,15 +342,16 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         });
 
         newSocket.on('user_authenticated', (authUser: AuthUser) => {
-          console.log('User authenticated:', authUser);
           setSocketUser(authUser);
           setIsAuthenticated(true);
+          setIsLoading(false);
+
         });
 
         // Listen for user conversations list
-        newSocket.on('userConversations', (conversationsData: UserConversationMetrics[]) => {
+        newSocket.on('userConversationsList', (conversationsData: UserRenderData[]) => {
           console.log('Received conversations:', conversationsData);
-          setConversations(conversationsData);
+          setConversationsList(conversationsData);
         });
 
         // Note: userConversation events are handled in the getUserConversation function
@@ -253,7 +361,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           setIsAuthenticated(false);
           setSocketUser(null);
           setIsConnected(false);
-          setConversations([]);
+          setConversationsList([]);
         });
 
         newSocket.on('connect_error', (error) => {
@@ -274,7 +382,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         setIsConnected(false);
       }
     };
-  }, [isLoaded, isSignedIn, getToken, user?.id]);
+  }, [isLoaded, isSignedIn, getToken, user, user?.id]);
 
   return (
     <SocketContext.Provider value={{
@@ -282,7 +390,8 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
       isConnected,
       isAuthenticated,
       socketUser,
-      conversations,
+      conversationsList,
+      getUsersList,
       getUserConversationsList,
       getUserConversation,
       connect,

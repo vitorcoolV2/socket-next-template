@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useMemo } from 'react';
-import { useSocket, AuthUser, ConversationMetrics, UserConversationMetrics, UserConversationEvent } from '../context/SocketContext';
+import React, { useState, useMemo } from 'react';
+import { useSocket, AuthUser, UserRenderData } from '../context/SocketContext';
 import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 
 interface UserListProps {
@@ -7,241 +7,243 @@ interface UserListProps {
 }
 
 const UserList = ({ setRecipient }: UserListProps) => {
-    const { socket, isConnected, isAuthenticated, socketUser } = useSocket();
-    const [users, setUsers] = useState<UserConversationMetrics[]>([]);
+    const { isConnected, isAuthenticated, socketUser, conversationsList } = useSocket();
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
     // Priority mapping for user states
-    const statePriority: Record<AuthUser['state'], number> = useMemo(
+    const statePriority: Record<"disconnected" | "connected" | "authenticated" | "offline", number> = useMemo(
         () => ({
+            disconnected: 4,
+            connected: 3,
             authenticated: 1,
             offline: 2,
-            connected: 3,
-            disconnected: 4,
         }),
         []
     );
 
     // Sort users based on their state priority
+    // Sort users based on their state priority
     const sortedUsers = useMemo(() => {
-        return [...users].sort((a, b) => statePriority[a.state] - statePriority[b.state]);
-    }, [users, statePriority]);
+        const rawData = conversationsList?.data || [];
 
-    useEffect(() => {
-        if (!socket || !isConnected || !isAuthenticated) return;
-
-        console.log('Requesting users list...');
-        socket.emit('getUsers', { states: ['authenticated', 'offline'], limit: 50, offset: 0 });
-        setTimeout(() => {
-            socket.emit('getUserConversationsList', { limit: 50, offset: 0 });
-        }, 250);
-
-        const handleUsersList = (fetchedUsers: UserConversationMetrics[]) => {
-            console.log('Received users list:', fetchedUsers);
-            setUsers(fetchedUsers);
-        };
-
-        const handleUserStateUpdate = (updatedUser: AuthUser) => {
-            console.log('Received user state update:', updatedUser);
-            setUsers((prevUsers) =>
-                prevUsers.map((user) =>
-                    user.userId === updatedUser.userId ? { ...user, state: updatedUser.state } : user
-                )
-            );
-        };
-
-        const handleUsersConversations = (response: UserConversationEvent) => {
-            console.log('Received user conversation metrics:', response);
-            if (!response?.success || !Array.isArray(response.data)) {
-                console.error('Invalid conversations data received:', response);
-                return;
+        // Deduplicate users by userId
+        const uniqueUsers = rawData.reduce((acc, user) => {
+            if (!acc.find(u => u.userId === user.userId)) {
+                acc.push(user);
             }
+            return acc;
+        }, [] as any[]);
 
-            const conversations: UserConversationMetrics[] = response.data;
-            if (conversations.length === 0) return;
+        return uniqueUsers
+            .map((user): UserRenderData => ({
+                ...user,
+                startedAt: user.startedAt ? new Date(user.startedAt).toISOString() : '',
+                lastMessageAt: user.lastMessageAt ? new Date(user.lastMessageAt).toISOString() : '',
+                types: user.types || [],
+            }))
+            .sort((a, b) => {
+                const stateA = a.state as keyof typeof statePriority;
+                const stateB = b.state as keyof typeof statePriority;
 
-            setUsers((prevUsers) =>
-                prevUsers.map((prevUser) => {
-                    // Find the relevant conversation for the socket user
-                    const theSenderUser = conversations.find((c) => c.userId === socketUser?.userId);
-                    const theOtherPartyUser = conversations.find((c) => c.otherPartyId === prevUser.userId);
-
-                    if (!theSenderUser || !theOtherPartyUser) return prevUser;
-
-                    // Update the user's conversation metrics
-                    return {
-                        ...prevUser,
-                        incoming: theOtherPartyUser.incoming,
-                        outgoing: theOtherPartyUser.outgoing,
-                        startedAt: theOtherPartyUser.startedAt,
-                        lastMessageAt: theOtherPartyUser.lastMessageAt,
-                    };
-                })
-            );
-        };
-
-        const handleNewMessageCount = (msg: { sender: { userId: string }; recipientId: string; status: string }) => {
-            console.log('Received new message:', msg);
-
-            if (!socketUser) return;
-
-            setUsers((prevUsers) =>
-                prevUsers.map((user) => {
-                    const isSender = user.userId === msg.sender.userId;
-                    const isRecipient = user.userId === msg.recipientId;
-
-                    if (!isSender && !isRecipient) return user;
-
-                    // Update unread message count for the relevant user
-                    return isRecipient
-                        ? {
-                            ...user,
-                            incoming: {
-                                ...(user.incoming || {}),
-                                sent: (user.incoming?.sent || 0) + (msg.status === 'sent' ? 1 : 0),
-                                pending: (user.incoming?.pending || 0) + (msg.status === 'pending' ? 1 : 0),
-                            },
-                        }
-                        : user;
-                })
-            );
-        };
-
-        socket.on('usersList', handleUsersList);
-        socket.on('userStateUpdate', handleUserStateUpdate);
-        socket.on('userConversations', handleUsersConversations);
-        socket.on('receivedMessage', handleNewMessageCount);
-
-        return () => {
-            socket.off('usersList', handleUsersList);
-            socket.off('userStateUpdate', handleUserStateUpdate);
-            socket.off('userConversations', handleUsersConversations);
-            socket.off('receivedMessage', handleNewMessageCount);
-        };
-    }, [socket, isConnected, isAuthenticated, socketUser]);
+                return (statePriority[stateA] || Infinity) - (statePriority[stateB] || Infinity);
+            });
+    }, [conversationsList, statePriority]);
 
     const handleUserClick = (userId: string) => {
         setSelectedUserId(userId);
         setRecipient(userId);
     };
 
-    // Memoized rendering of individual user items
-    // Memoized rendering of individual user items
-    const RenderUser = React.memo(({ user }: { user: AuthUser & Partial<UserConversationMetrics> }) => {
-        const incoming: ConversationMetrics | undefined = user.incoming;
-        const outgoing: ConversationMetrics | undefined = user.outgoing;
-        const isSocketUser = user.userId === socketUser?.userId;
+    // Enhanced badge component with better colors
+    const StateBadge = ({ state }: { state: string }) => {
+        const stateConfig = {
+            authenticated: {
+                bg: 'bg-gradient-to-r from-green-100 to-emerald-100 dark:from-green-900 dark:to-emerald-900',
+                text: 'text-green-800 dark:text-green-200',
+                border: 'border border-green-200 dark:border-green-700',
+                icon: '🟢'
+            },
+            connected: {
+                bg: 'bg-gradient-to-r from-blue-100 to-cyan-100 dark:from-blue-900 dark:to-cyan-900',
+                text: 'text-blue-800 dark:text-blue-200',
+                border: 'border border-blue-200 dark:border-blue-700',
+                icon: '🔵'
+            },
+            offline: {
+                bg: 'bg-gradient-to-r from-gray-100 to-slate-100 dark:from-gray-700 dark:to-slate-700',
+                text: 'text-gray-600 dark:text-gray-300',
+                border: 'border border-gray-200 dark:border-gray-600',
+                icon: '⚫'
+            },
+            disconnected: {
+                bg: 'bg-gradient-to-r from-red-100 to-pink-100 dark:from-red-900 dark:to-pink-900',
+                text: 'text-red-800 dark:text-red-200',
+                border: 'border border-red-200 dark:border-red-700',
+                icon: '🔴'
+            }
+        };
+
+        const config = stateConfig[state as keyof typeof stateConfig] || stateConfig.offline;
+
+        return (
+            <span
+                className={`inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium ${config.bg} ${config.text} ${config.border} shadow-sm`}
+            >
+                {config.icon} {state}
+            </span>
+        );
+    };
+
+    // Enhanced message stats component
+    const MessageStats = ({ incoming, outgoing }: { incoming: any; outgoing: any }) => {
+        if (incoming.unread === 0 && incoming.sent === 0 && outgoing.sent === 0) {
+            return null;
+        }
+
+        return (
+            <div className="flex items-center gap-2">
+                {incoming.unread > 0 && (
+                    <div className="flex items-center gap-1 bg-red-500 text-white px-2 py-1 rounded-full text-xs font-bold shadow-sm">
+                        <span>✉️</span>
+                        <span>{incoming.unread}</span>
+                    </div>
+                )}
+                {incoming.sent > 0 && (
+                    <div className="flex items-center gap-1 bg-blue-500 text-white px-2 py-1 rounded-full text-xs shadow-sm" title={`${incoming.sent} received messages`}>
+                        <span>📥</span>
+                        <span>{incoming.sent}</span>
+                    </div>
+                )}
+                {outgoing.sent > 0 && (
+                    <div className="flex items-center gap-1 bg-green-500 text-white px-2 py-1 rounded-full text-xs shadow-sm" title={`${outgoing.sent} sent messages`}>
+                        <span>📤</span>
+                        <span>{outgoing.sent}</span>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // Memoized rendering of individual user items with enhanced design
+    const RenderUser = React.memo(({ user }: { user: UserRenderData }) => {
+        const incoming = user.incoming || { sent: 0, pending: 0, delivered: 0, unread: 0, read: 0 };
+        const outgoing = user.outgoing || { sent: 0, pending: 0, delivered: 0, unread: 0, read: 0 };
         const isSelfConversation = user.userId === socketUser?.userId;
 
-        // For self-conversations: only show incoming stats
-        if (isSelfConversation) {
-            return (
-                <li
-                    key={user.userId}
-                    className={`cursor-pointer p-2 rounded transition-colors ${user.userId === selectedUserId
-                        ? 'bg-blue-100 dark:bg-blue-900'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                        }`}
-                    onClick={() => handleUserClick(user.userId)}
-                >
-                    <div className="flex justify-between items-center">
-                        <div>
-                            <strong className="font-medium dark:text-gray-200">{user.userName} (Me)</strong> - {' '}
-                            <span
-                                className={`text-xs px-1.5 py-0.5 rounded-full ${user.state === 'authenticated'
-                                    ? 'bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200'
-                                    : 'bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-300'
-                                    }`}
-                            >
-                                {user.state}
-                            </span>
+        // Color schemes for different user states
+        const getBackgroundColors = () => {
+            if (isSelfConversation) {
+                return user.userId === selectedUserId
+                    ? 'bg-gradient-to-r from-purple-100 to-indigo-100 dark:from-purple-900 dark:to-indigo-900 border-l-4 border-purple-500'
+                    : 'hover:bg-gradient-to-r from-purple-50 to-indigo-50 dark:hover:from-purple-800 dark:hover:to-indigo-800';
+            }
+
+            const baseColors = {
+                authenticated: user.userId === selectedUserId
+                    ? 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-800 dark:to-emerald-800 border-l-4 border-green-500'
+                    : 'hover:bg-gradient-to-r from-green-50 to-emerald-50 dark:hover:from-green-800 dark:hover:to-emerald-800',
+                connected: user.userId === selectedUserId
+                    ? 'bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-800 dark:to-cyan-800 border-l-4 border-blue-500'
+                    : 'hover:bg-gradient-to-r from-blue-50 to-cyan-50 dark:hover:from-blue-800 dark:hover:to-cyan-800',
+                offline: user.userId === selectedUserId
+                    ? 'bg-gradient-to-r from-gray-50 to-slate-50 dark:from-gray-700 dark:to-slate-700 border-l-4 border-gray-500'
+                    : 'hover:bg-gradient-to-r from-gray-50 to-slate-50 dark:hover:from-gray-700 dark:hover:to-slate-700',
+                disconnected: user.userId === selectedUserId
+                    ? 'bg-gradient-to-r from-red-50 to-pink-50 dark:from-red-800 dark:to-pink-800 border-l-4 border-red-500'
+                    : 'hover:bg-gradient-to-r from-red-50 to-pink-50 dark:hover:from-red-800 dark:hover:to-pink-800'
+            };
+
+            return baseColors[user.state as keyof typeof baseColors] || baseColors.offline;
+        };
+
+        return (
+            <li
+                key={user.userId}
+                className={`cursor-pointer p-3 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md ${getBackgroundColors()} group`}
+                onClick={() => handleUserClick(user.userId)}
+            >
+                <div className="flex justify-between items-start">
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-2">
+                            <div className="w-2 h-2 rounded-full bg-current opacity-70"></div>
+                            <strong className={`font-semibold truncate ${isSelfConversation ? 'text-purple-700 dark:text-purple-300' : 'text-gray-800 dark:text-gray-200'}`}>
+                                {user.userName}
+                                {isSelfConversation && (
+                                    <span className="ml-1 text-xs text-purple-500 dark:text-purple-400">(You)</span>
+                                )}
+                            </strong>
                         </div>
-                        <div className="flex flex-col items-end">
-                            {/* Self-conversation: only show incoming stats */}
-                            {incoming && (
-                                <div className="flex gap-1 text-xs">
-                                    {incoming.unread > 0 && (
-                                        <span title={`${incoming.unread} unread notes`} className="text-red-500 font-bold">
-                                            ✉️{incoming.unread}
+
+                        <div className="flex items-center gap-2">
+                            <StateBadge state={user.state} />
+
+                            {user.types && user.types.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                    {user.types.slice(0, 2).map((type, index) => (
+                                        <span
+                                            key={index}
+                                            className="inline-block px-1.5 py-0.5 rounded text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 border border-yellow-200 dark:border-yellow-700"
+                                        >
+                                            {type}
                                         </span>
-                                    )}
-                                    {incoming.sent > 0 && (
-                                        <span title={`${incoming.sent} total notes`} className="text-gray-500">
-                                            {incoming.sent} notes
+                                    ))}
+                                    {user.types.length > 2 && (
+                                        <span className="inline-block px-1.5 py-0.5 rounded text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                                            +{user.types.length - 2}
                                         </span>
                                     )}
                                 </div>
                             )}
                         </div>
                     </div>
-                </li>
-            );
-        }
 
-        // For regular conversations: show simple incoming stats
-        const simpleStats = (
-            <div className="flex flex-col items-end gap-1">
-                {incoming && (
-                    <div className="flex gap-1 text-xs">
-                        {incoming.unread > 0 && (
-                            <span title={`${incoming.unread} unread messages`} className="text-red-500 font-bold">
-                                ✉️{incoming.unread}
-                            </span>
-                        )}
-                        {incoming.sent > 0 && (
-                            <span title={`${incoming.sent} received messages`} className="text-gray-500">
-                                📥{incoming.sent}
-                            </span>
-                        )}
+                    <div className="flex-shrink-0 ml-2">
+                        <MessageStats incoming={incoming} outgoing={outgoing} />
                     </div>
-                )}
-                {outgoing && outgoing.sent > 0 && (
-                    <div className="text-xs text-gray-500" title={`${outgoing.sent} sent messages`}>
-                        📤{outgoing.sent}
-                    </div>
-                )}
-            </div>
-        );
-
-        return (
-            <li
-                key={user.userId}
-                className={`cursor-pointer p-2 rounded transition-colors ${user.userId === selectedUserId
-                    ? 'bg-blue-100 dark:bg-blue-900'
-                    : 'hover:bg-gray-50 dark:hover:bg-gray-700'
-                    }`}
-                onClick={() => handleUserClick(user.userId)}
-            >
-                <div className="flex justify-between items-center">
-                    <div>
-                        <strong className="font-medium dark:text-gray-200">{user.userName}</strong> - {' '}
-                        <span
-                            className={`text-xs px-1.5 py-0.5 rounded-full ${user.state === 'authenticated'
-                                ? 'bg-green-200 text-green-800 dark:bg-green-800 dark:text-green-200'
-                                : 'bg-gray-200 text-gray-600 dark:bg-gray-600 dark:text-gray-300'
-                                }`}
-                        >
-                            {user.state}
-                        </span>
-                    </div>
-                    {simpleStats}
                 </div>
+
+                {/* Last activity time if available */}
+                {user.lastMessageAt && (
+                    <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        Last: {new Date(user.lastMessageAt).toLocaleDateString()}
+                    </div>
+                )}
             </li>
         );
     });
 
+    RenderUser.displayName = 'RenderUser';
+
     return (
-        <div className="border-r border-gray-300 p-4 w-64 bg-white dark:bg-gray-800">
-            <h3 className="text-lg font-bold mb-4 dark:text-gray-200">
-                User List <ConnectionStatusIndicator />
-            </h3>
+        <div className="border-r border-gray-200 dark:border-gray-700 p-4 w-80 bg-gradient-to-b from-white to-gray-50 dark:from-gray-800 dark:to-gray-900 h-full overflow-y-auto">
+            <div className="mb-6">
+                <h3 className="text-xl font-bold text-gray-800 dark:text-gray-200 mb-2 flex items-center gap-2">
+                    👥 User List
+                    <ConnectionStatusIndicator />
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                    {sortedUsers.length} user{sortedUsers.length !== 1 ? 's' : ''} online
+                </p>
+            </div>
 
             {!isConnected ? (
-                <p className="text-gray-500 dark:text-gray-400">User offline...</p>
+                <div className="text-center py-8">
+                    <div className="text-4xl mb-2">🔌</div>
+                    <p className="text-gray-500 dark:text-gray-400 font-medium">User offline</p>
+                    <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Waiting for connection...</p>
+                </div>
             ) : !isAuthenticated ? (
-                <p className="text-gray-500 dark:text-gray-400">Connecting to server...</p>
-            ) : users.length === 0 ? (
-                <p className="text-gray-500 dark:text-gray-400">Loading users...</p>
+                <div className="text-center py-8">
+                    <div className="text-4xl mb-2">⏳</div>
+                    <p className="text-gray-500 dark:text-gray-400 font-medium">Connecting to server</p>
+                    <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Authenticating...</p>
+                </div>
+            ) : !conversationsList?.data || conversationsList.data.length === 0 ? (
+                <div className="text-center py-8">
+                    <div className="text-4xl mb-2">👀</div>
+                    <p className="text-gray-500 dark:text-gray-400 font-medium">No users found</p>
+                    <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Users will appear here when available</p>
+                </div>
             ) : (
                 <ul className="space-y-2">
                     {sortedUsers.map((user) => (

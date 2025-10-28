@@ -195,7 +195,7 @@ describe('Socket.IO Server Tests', () => {
       }, true);
 
       await userManager._checkInactivity();
-      const u4 = await userManager.getUsers('test-socket-id')
+      const u4 = await userManager.getUsersList('test-socket-id')
 
 
       // Simulate inactivity by setting lastActivity to a past timestamp
@@ -209,7 +209,7 @@ describe('Socket.IO Server Tests', () => {
       // authenticate use to observe other party conn state
       const otherP = await userManager.storeUser('test-socket-id2', testUserData, true);
       expect(otherP.state).toBe('authenticated');
-      const userObsOtherP = await userManager.getUsers('test-socket-id2');
+      const userObsOtherP = await userManager.getUsersList('test-socket-id2');
       expect(userObsOtherP.some(u =>
         u.userId === 'inactive-user' &&
         u.state === 'offline'

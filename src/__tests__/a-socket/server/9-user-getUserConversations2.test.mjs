@@ -85,6 +85,7 @@ describe('Socket.IO Server Tests', () => {
 
         // Retrieve conversation state counts
         const options = {
+          type: 'private',
           limit: 10,
           offset: 0,
           include: [],
