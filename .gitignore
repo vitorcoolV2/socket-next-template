@@ -47,8 +47,10 @@ next-env.d.ts
 !.env.*template
 !.env.*example
 
-*__tests__
+
 .jest-*
 /docs
 .vscode
 /public/test*.html
+*.snap
+#test-keys.json

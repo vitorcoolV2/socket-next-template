@@ -21,8 +21,10 @@ export const sessionIdSchema = Joi.string().description('Unique session ID gener
 
 export const messageIdSchema = Joi.string().optional().max(50).description('Unique message identifier');
 export const contentSchema = Joi.string().min(1).max(5000).required().description('Message content');
+
+export const MESSAGE_STATUS_ORDERED = Object.freeze(['sent', 'pending', 'delivered', 'read', 'failed']);
 export const statusSchema = Joi.string()
-  .valid('sent', 'delivered', 'read', 'pending', 'failed')
+  .valid(...MESSAGE_STATUS_ORDERED)
   .default('sent')
   .required()
   .description('Message delivery status');
@@ -90,9 +92,9 @@ export const socketInfoSchema = Joi.object({
 export const socketsSchema = Joi.array()
   .items(socketInfoSchema)
   .messages({
-    'array.base': 'Socket IDs must be an array.',
-    'array.includesRequiredUnknowns': 'Each item in Socket IDs must match the socketInfoSchema.',
-    'any.required': 'Socket IDs are required.',
+    'array.base': 'Sockets must be an array.',
+    'array.includesRequiredUnknowns': 'Each item in Sockets must match the socketInfoSchema.',
+    'any.required': 'Sockets are required.',
   });
 
 
@@ -164,7 +166,7 @@ const directionSchema = Joi.string()
   .optional()
   .allow(null)
   .default(null)
-  .description('option filter message direction relative to current user');
+  .description('option defining "message" "OWN-relation" current user. For current user OWN message (sender=current && "outgoing") + OWN message for (message recipient && "incoming"');
 
 // Get Messages Options Schema
 /*
@@ -179,31 +181,38 @@ const directionSchema = Joi.string()
         direction = null,
         unreadOnly = false,
 */
-export const getMessagesOptionsSchema = Joi.object({
+// getMesageOptions for _getMessages(userId, options|query)
+export const getMessagesUOptionsSchema = Joi.object({
   // pagination
-  limit: Joi.number().integer().min(0).optional().default(50).description('Maximum number of messages to retrieve'),
-  offset: Joi.number().integer().min(0).optional().default(0).description('Offset for pagination'),
+  limit: Joi.number().integer().min(0).optional().default(50).allow(null).description('Maximum number of messages to retrieve'),
+  offset: Joi.number().integer().min(0).optional().default(0).allow(null).description('Offset for pagination'),
   // date interval
   since: Joi.date().iso().optional().allow(null).default(null).description('Retrieve messages sent after this timestamp'),
   until: Joi.date().iso().optional().allow(null).default(null).description('Retrieve messages sent before this timestamp'),
   // filter set conversations
-  messageIds: Joi.array().optional().allow(null).valid(messageIdSchema).default(null).description('Filter messages by message id'),
+  messageIds: Joi.array().items(messageIdSchema).optional().allow(null).default(null).description('Filter messages by message id'),
+
   type: Joi.string().valid('private', 'public').required().default('private').description('Filter messages by type'),
 
   senderId: userIdSchema.optional().allow(null).default(null).description('options Filter messages by senderId'),
+  recipientId: Joi.string().optional().allow(null).default(null).description('option Filter messages for incoming messages'),
   status: statusSchema.optional().allow(null).default(null),
-  otherPartyId: userIdSchema.optional().allow(null).default(null).description('option Filter messages where the specified other party is either the sender or receiverId'),
+
   direction: directionSchema.optional(),
   unreadOnly: Joi.boolean().optional().default(false).description('Retrieve only unread messages'),
+  otherPartyId: userIdSchema.optional().allow(null).default(null).description('Used only with type: "public". option Filter messages where the specified other party is either the sender or receiverId for'),
 }).description('Options for fetching messages');
 
 
-export const getMessageHistoryOptionsSchema = Joi.object({
+export const getUserConversationUOptionsSchema = Joi.object({
   limit: Joi.number().integer().min(0).max(100).default(20), // Number of messages to fetch
   offset: Joi.number().integer().min(0).default(0), // Offset for pagination
   type: Joi.string().optional().allow(null).valid('private', 'public').default('private'), // Type of messages to fetch
   status: statusSchema.optional().allow(null).default(null),
-  otherPartyId: userIdSchema.optional().allow(null).default(null).description('option Filter messages where the specified other party is either the sender or receiverId'),
+  otherPartyId: userIdSchema.required().default(null).description('option Filter messages where the specified other party is either the sender or receiverId'),
+});
+export const getUserConversationPOptionsSchema = getUserConversationUOptionsSchema.clone().keys({
+  userId: userIdSchema.required().allow(null).default(null).description('option Filter userId oucoming,incoming messages'),
 });
 
 // Storage Message Simple Message Schema
@@ -212,7 +221,6 @@ export const baseMessageSchema = Joi.object({
   sender: senderSchema.required(),
   recipientId: userIdSchema.required().description('Recipient user ID'),
   content: contentSchema.required(),
-  timestamp: timestampSchema.description('Message creation timestamp in ISO format'),
   status: statusSchema.required(),
   type: Joi.string()
     .valid('private', 'public')
@@ -225,11 +233,13 @@ export const baseMessageSchema = Joi.object({
   readAt: readAtSchema.optional(),
 });
 
+export const persistMessageSchema = baseMessageSchema.clone().keys({
+  createdAt: timestampSchema.description('Message creation timestamp in ISO format'),
+  updatedAt: timestampSchema.description('Message creation timestamp in ISO format'),
+})
+
 // Mark Messages as Read Schemas
 export const markMessagesAsReadOptionsSchema = Joi.object({
-  // Optional direction with a default value
-  direction: directionSchema.optional().default('incoming'),
-
   // Optional senderId with custom error messages
   senderId: userIdSchema.optional().messages({
     'string.base': 'senderId must be a string',
@@ -267,13 +277,29 @@ export const markMessagesAsReadResultSchema = Joi.object({
   }),
 }).description('Result of marking messages as read');
 
-
-export const userQuerySchema = Joi.object({
+/**
+ * export const userQuerySchema = Joi.object({
   state: userConnectionState.optional(),
-
   includeOffline: Joi.boolean()
-    .default(false)
+    .default(true)
     .description('Include offline users in results'),
+
+  limit: Joi.number().integer().min(1).max(100).default(10)
+    .description('Maximum number of users to retrieve'),
+
+  offset: Joi.number().integer().min(0).default(0)
+    .description('Number of users to skip for pagination')
+});
+
+
+ */
+export const userIncludables = ['metadata'];
+export const userQuerySchema = Joi.object({
+  include: Joi.array().items(Joi.string().valid(...userIncludables)).allow(null).default([])
+    .description(`Can include extra fields: ${userIncludables.join(', ')}`),
+
+  states: Joi.array().items(userConnectionState).optional().allow(null).default(['authenticated', 'offline'])
+    .description('If not specified include all. If specified Include the connection states in results'),
 
   limit: Joi.number().integer().min(1).max(100).default(10)
     .description('Maximum number of users to retrieve'),
@@ -329,7 +355,7 @@ export const schemas = {
   getMessages: {
     in: Joi.object({
       meId: userIdSchema.required(),
-      options: getMessagesOptionsSchema.optional(),
+      options: getMessagesUOptionsSchema.optional(),
     }),
     out: getMessagesResultSchema,
   },
@@ -417,13 +443,26 @@ export const schemas = {
   },
 };
 
-
-
 // Typing Indicator Schema
 export const typingSchema = Joi.object({
   isTyping: Joi.boolean().required().description('Indicates whether the user is typing'),
   recipientId: Joi.string().min(1).max(100).required().description('Recipient user ID'),
 }).unknown(false).strict();
+
+// U=User
+export const getConversationsListUOptionsSchema = Joi.object({
+  limit: Joi.number().integer().min(1).max(100).default(10),
+  offset: Joi.number().integer().min(0).default(0),
+  include: Joi.array().items(Joi.string().valid('metadata')).allow(null).default([]),
+  otherPartyId: userIdSchema.optional().description('optional. filter result to one specific user conversation'),
+  type: Joi.string().optional().allow(null).valid('private', 'public').default('private')
+    .description('optional. filter result to one type of user conversation'),
+});
+// P=Persistence
+export const getConversationsListPOptionsSchema = getConversationsListUOptionsSchema.clone().keys({
+  userId: userIdSchema.required().allow(null).default(null).description('the requesting user'),
+  include: Joi.array().items(Joi.string().valid('metadata')).allow(null).default([])
+});
 
 // Validation Wrapper Function
 export const validateEventData = (schema, data) => {

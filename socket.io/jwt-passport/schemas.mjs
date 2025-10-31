@@ -16,15 +16,26 @@ const jwksKeySchema = Joi.object({
   e: Joi.string().required(),
 });
 
-// Passport schema
 const passportSchema = Joi.object({
-  keys: Joi.array().items(jwksKeySchema).optional(),
-  roles: Joi.array().items(Joi.string()).optional(),
-  iss: Joi.string().uri().required(),
-  aud: Joi.array().items(Joi.string()).min(1).required().messages({
-    'array.min': 'Passport audience (aud) must contain at least one item',
-    'any.required': 'Passport audience (aud) is required',
-  }),
+  keys: Joi.array()
+    .items(jwksKeySchema)
+    .optional()
+    .description('Array of JWKS keys for token validation'),
+  roles: Joi.array()
+    .items(Joi.string())
+    .optional(),
+  iss: Joi.string()
+    .uri()
+    .optional()
+    .description('Issuer URI for token validation'),
+  aud: Joi.array()
+    .items(Joi.string())
+    .min(1)
+    .optional()
+    .messages({
+      'array.min': 'Passport audience (aud) must contain at least one item',
+      'any.required': 'Passport audience (aud) is required',
+    }),
   exp: Joi.number().optional(),
   ignoreExpiration: Joi.boolean()
     .optional()
@@ -34,14 +45,27 @@ const passportSchema = Joi.object({
     .optional()
     .default(true)
     .description('If true, token not-before (nbf) will be ignored during validation'),
-  algorithms: Joi.array().items(algSchema.clone()).optional().description('Allowed algorithms, e.g., RS256'),
-  nbf: Joi.number().optional().description('Not Before claim'),
-  sub: Joi.string().optional().description('Subject claim'),
-  jti: Joi.string().optional().description('JWT ID claim'),
+  algorithms: Joi.array()
+    .items(algSchema.clone())
+    .optional()
+    .description('Allowed algorithms, e.g., RS256'),
+  nbf: Joi.number()
+    .optional()
+    .description('Not Before claim'),
+  sub: Joi.string()
+    .optional()
+    .description('Subject claim'),
+  jti: Joi.string()
+    .optional()
+    .description('JWT ID claim'),
   roles: Joi.array()
     .items(Joi.string().valid('user', 'admin'))
     .optional()
     .description('Allowed roles'),
-});
+})
+  .or('keys', 'iss') // Ensure either `keys` or `iss` is provided, but not both
+  .messages({
+    'object.or': 'Either "keys" or "iss" must be provided to recover the public key',
+  });
 
 export { algSchema, jwksKeySchema, passportSchema, supportedAlgorithms };

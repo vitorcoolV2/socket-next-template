@@ -1,6 +1,6 @@
 export class PersistenceInterface {
-  async addUser(user) {
-    throw new Error('Method "addUser" must be implemented');
+  async storeUser(user) {
+    throw new Error('Method "storeUser" must be implemented');
   }
 
   async getUser(userId) {
@@ -20,7 +20,7 @@ export class PersistenceInterface {
     throw new Error('Method "markMessagesAsRead" must be implemented');
   }
 
-  async setMessagesStatus(userId, messageIds, status) {
+  async updateMessageStatus(userId, messageIds, status) {
     throw new Error('Method "setMessagesStatus" must be implemented');
   }
 

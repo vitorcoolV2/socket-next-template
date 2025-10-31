@@ -1,7 +1,11 @@
 
 import { Server } from 'socket.io'; // Import Socket.IO Server for type checking
-import { verifyToken } from '../jwt-clerk/index.mjs';
+
 import { v4 as uuidv4 } from 'uuid';
+
+import {
+  INACTIVITY_THRESHOLD,
+} from '../config.mjs';
 
 // Import schemas
 import {
@@ -9,15 +13,19 @@ import {
   userResultSchema,
   userSessionSchema,
   baseMessageSchema,
+  persistMessageSchema,
   validateEventData,
   socketInfoSchema,
   markMessagesAsReadOptionsSchema,
   markMessagesAsReadResultSchema,
   typingSchema,
-  getMessageHistoryOptionsSchema,
-  getMessagesOptionsSchema,
+  getUserConversationPOptionsSchema,
+  getMessagesUOptionsSchema,
   activeUserSchema,
-  userQuerySchema
+  userQuerySchema,
+  getConversationsListUOptionsSchema,
+  getConversationsListPOptionsSchema,
+  MESSAGE_STATUS_ORDERED,
 } from './schemas.mjs';
 
 
@@ -29,25 +37,11 @@ import {
   debug,
   PUBLIC_MESSAGE_USER_ID,
   PUBLIC_MESSAGE_EXPIRE_DAYS,
-  PASSPORT_PATH
-} from './config.mjs';
+} from '../config.mjs';
 
 
 import { cleanupOldMessages as cleanupOldMessagesUtil } from './messageCleanupUtils.mjs';
 
-
-const loadPassportData = async () => {
-  // load from './passport.json' with { type: 'json' };
-  if (PASSPORT_PATH) {
-    try {
-      return await import(PASSPORT_PATH, { with: { type: 'json' } }).then(module => module.default);
-    } catch (error) {
-      throw error;
-    }
-  } else {
-    throw new Error('passport is missing');
-  }
-}
 
 const cleanupOldMessages = (threshold = 7 * 24 * 60 * 60 * 1000) => {
   return cleanupOldMessagesUtil(userMessages, debug, threshold);
@@ -87,49 +81,28 @@ const messageContextDefault = () => ({
   readAt: null,
 });
 
-// Token validation function
-const validateContentToken = async (token) => {
-  const passport = await loadPassportData();
-  try {
-    return await verifyToken(token, passport);
-  } catch (error) {
-    throw new Error(`Token validation failed: ${error.message}`);
-  }
-};
 
 export const userManager = (options = {}) => {
-  const { io: __io, defaultStorage = 'memory', maxTotalConnections = 1000 } = options;
+  const { defaultStorage = 'memory', maxTotalConnections = 1000 } = options;
+  // set socket instance
+  let __io = options.io;
+  const setIO = (io) => {
+    // Validate that io is an instance of Server
+    if (!(io instanceof Server) && process.env.NODE_ENV !== 'test') {
+      throw new Error('Invalid or missing io instance. Expected an instance of socket.io Server.');
+    }
+    __io = io;
+  };
+  const getIO = () => {
+    return __io;
+  }
+  if (options.io) setIO(options.io);
 
   // Use the provided maxTotalConnections value
   const MAX_TOTAL_CONNECTIONS = maxTotalConnections;
   if (debug) console.log(`Max total connections set to: ${MAX_TOTAL_CONNECTIONS}`);
 
-  // Validate that io is an instance of Server
-  if (!(__io instanceof Server) && process.env.NODE_ENV !== 'test') {
-    throw new Error('Invalid or missing io instance. Expected an instance of socket.io Server.');
-  }
 
-  __io.use(async (socket, next) => {
-    try {
-      const { token } = socket.handshake.auth;
-
-      if (!token) {
-        return next(new Error('Authentication failed: Missing token'));
-      }
-
-      // Authenticate the user using the internal method
-      try {
-        await _authenticateUserWithToken(socket.id, token);
-      } catch (error) {
-        throw error
-      }
-
-      // Proceed to the next middleware
-      next();
-    } catch (error) {
-      next(new Error(`Authentication failed: ${error.message}`));
-    }
-  });
 
   // Initialize persistence layer based on defaultStorage
   let persistence;
@@ -139,21 +112,6 @@ export const userManager = (options = {}) => {
     persistence = new MemoryPersistence();
   }
 
-
-  // Persistence hooks
-  /*  const _persistenceHooks = {
-      onUserConnected: persistence.onUserConnected?.bind(persistence),
-      onUserDisconnected: persistence.onUserDisconnected?.bind(persistence),
-      onUserAuthenticated: persistence.onUserAuthenticated?.bind(persistence),
-      // onUserActivity: persistence.onUserActivity?.bind(persistence),
-      onUsersGet: persistence.onUsersGet?.bind(persistence),
-      onMessageStored: persistence.onMessageStored?.bind(persistence),
-      onMessageGet: persistence.onMessageGet?.bind(persistence),
-      onMessagesDelivered: persistence.onMessagesDelivered?.bind(persistence),
-    };*/
-
-  // Configuration constants
-  const INACTIVITY_THRESHOLD = 60 * 60 * 1000;
 
   // Maps for tracking users, sockets, and messages
   const the_users = new Map(); // userId -> user data 
@@ -180,32 +138,19 @@ export const userManager = (options = {}) => {
   /**
    * Safe operation wrapper for error handling (supports both sync and async operations)
    */
-  const safeOperation = (operation, errorMessage) => {
+
+  const safeOperation = async (operation, errorMessage) => {
     try {
-      const result = operation(); // Execute the operation
-
-      // Check if the result is a promise (indicating an async operation)
-      if (result && typeof result.then === 'function') {
-        // Handle async operations
-        return result.catch((error) => {
-          if (debug) console.error(`${operation} ${errorMessage}:`, [error.message]);
-          _incrementErrors();
-
-          // Create a new error with a custom message
-          const newError = new Error(errorMessage);
-          newError.cause = error;
-          throw newError;
-        });
-      }
-
-      // Return the result for synchronous operations
+      const result = await operation();
       return result;
     } catch (error) {
-      if (debug) console.error(`${errorMessage}:`, [error.message]);
+      const message = `${errorMessage}: ${error.message}`;
+      if (debug) console.error(message);
       _incrementErrors();
 
       // Create a new error with a custom message
-      const newError = new Error(errorMessage);
+      const newError = new Error(message);
+      newError.operation = operation;
       newError.cause = error;
       throw newError;
     }
@@ -246,114 +191,107 @@ export const userManager = (options = {}) => {
     return validatedUser;
   };
 
-  /**
- * Internal method to authenticate a user with a token
- */
-  const _authenticateUserWithToken = async (socketId, token) => {
+  const storeUser = async (socketId, userData, auth = false) => {
     return safeOperation(async () => {
-      const user = _getUserBySocketId(socketId);
-      if (!user) {
-        throw new Error(`No user found for socketId: ${socketId}`);
-      }
-
-      // Validate the token
-      let decodedToken;
-      try {
-        decodedToken = await validateContentToken(token);
-        if (!decodedToken) {
-          throw new Error('Invalid jwt token');
-        }
-      } catch (error) {
-        const message = (process.env.NODE_ENV === 'test') ? error.message : 'Token validation failed';
-        if (debug) console.error(error);
-        throw new Error(message);
-      }
-
-      // Update the state of the specific socket being authenticated
-      user.sockets = user.sockets.map(s =>
-        s.socketId === socketId ? {
-          ...s,
-          payload: decodedToken.payload,
-          state: 'authenticated'
-        } : s
-      );
-
-      // Recalculate the user's overall state based on all sockets
-      user.state = reduceUserSocketsState(user.sockets);
-      the_users.set(user.userId, user);
-
-      // Emit an event to notify the client
-      __io.to(socketId).emit('user_authenticated', {
-        success: user.state === 'authenticated',
-        userId: user.userId,
-        userName: user.userName,
-      });
-
-      await persistence.addUser(user);
-
-
-      if (debug) console.log(`User ${user.userName} authenticated successfully`);
-      return user;
-    }, `Error authenticating user for socket ${socketId}`);
-  };
-
-  /**
-   * Adds or updates a user in the activeUsers map
-   */
-
-  const addUser = async (socketId, userData) => {
-    return safeOperation(async () => {
+      // Validate input parameters
       if (!socketId || typeof socketId !== 'string') {
         throw new Error('Invalid socketId provided');
       }
 
-      // Check if the maximum number of connections has been reached
+      if (debug) {
+        console.log(`Adding user with socketId: ${socketId}, userData:`, userData);
+      }
+
+      // Check connection limits
       if (activeConnections >= MAX_TOTAL_CONNECTIONS) {
+        console.warn(`Connection limit exceeded for socketId: ${socketId}`);
         throw new Error(`Connection limit exceeded. Maximum allowed connections: ${MAX_TOTAL_CONNECTIONS}`);
       }
 
-      const sessionId = generateSessionId();
-      const connectedAt = Date.now();
+      // Retrieve existing user and socket information
+      const userId = activeUsers.get(socketId);
+      const _u = userId ? the_users.get(userId) : null;
+      const _sockets = _u?.sockets || [];
+      const _socket = _sockets.find((s) => s.socketId === socketId);
 
+      // Generate session ID and timestamps
+      const _sessionId = (_socket?.sessionId || userData.sessionId || generateSessionId());
+      const _connectedAt = (_socket?.connectedAt || userData.connectedAt || Date.now());
+
+      const lastActivity =
+        process.env.NODE_ENV === 'test'
+          ? userData.lastActivity || Date.now() // For testing purposes only
+          : Date.now();
+
+      // Update or create the socket
       const this_socket = {
         socketId,
-        sessionId,
-        connectedAt,
-        state: 'connected',
-      }
+        sessionId: _sessionId,
+        connectedAt: _connectedAt,
+        state: auth ? 'authenticated' : (userData.state || 'connected'),
+        lastActivity,
+      };
 
-      const existent = the_users.get(userData.userId) || null;
-      const sockets = existent?.sockets || [];
-      sockets.push(this_socket);
+      // Merge existing sockets with the current socket
+      const sockets = [
+        this_socket,
+        ..._sockets.filter((s) => s.socketId !== socketId), // Exclude the old socket with the same ID
+      ];
 
+      // Create or update the user object
       const user = {
         userId: userData.userId || null,
         userName: userData.userName || 'Anonymous',
-        sockets, // Array of socket IDs
-        connectedAt,
-        //sessionId,
-        lastActivity: Date.now(),
-        state: reduceUserSocketsState(sockets),
+        sockets: sockets,
+        connectedAt: _connectedAt,
+        lastActivity: lastActivity,
+        state: reduceUserSocketsState(sockets), // Determine the user's state based on sockets
       };
 
-      // Validate user data against both schemas
-      validateUserData(user); // General user data validation
-      validateUserSessionData(user); // Session-specific validation
+      // Validate user data
+      try {
+        validateUserData(user);
+        validateUserSessionData(user);
+      } catch (error) {
+        console.error('Validation failed:', error.message);
+        throw error;
+      }
 
+      // Update in-memory stores
       the_users.set(user.userId, user);
       activeUsers.set(socketId, user.userId);
 
+      // Increment connection counters
       totalConnections++;
-      activeConnections++; // Increment active connections AFTER successful addition
+      activeConnections++;
 
-      // Call persistence hook for user connection
-      // Call persistence method for user connection
-      await persistence.addUser(user);
+      // Persist the user data
+      return await persistence.storeUser(user).then(us => {
 
-      if (debug) console.log(`User ${user.userName} (${user.userId || 'anonymous'}) connected on socket ${socketId}`);
-      return user;
-    }, `Error adding user for socket ${socketId}`);
+
+        // Log the successful connection
+        if (debug) {
+          console.log(`User connected:`, {
+            userId: user.userId,
+            userName: user.userName,
+            socketId,
+            state: user.state,
+          });
+        }
+        return user;
+      }).catch((error) => {
+        console.error(`Failed to persist user ${user.userId}:`, error.message);
+        // Clean up resources if persistence fails
+        the_users.delete(user.userId);
+        activeUsers.delete(socketId);
+        totalConnections--;
+        activeConnections--;
+        throw new Error(`Error persisting user ${user.userId}: ${error.message}`);
+      });
+
+    }, `Error storing user for socket ${socketId}`);
   };
+
 
   const reduceUserSocketsState = (sockets) => {
     if (!sockets || sockets.length === 0) return 'offline';
@@ -368,62 +306,62 @@ export const userManager = (options = {}) => {
   const disconnectUser = async (socketId) => {
     return safeOperation(async () => {
       // Step 2: Retrieve the user associated with the socketId
-      const user = _getUserBySocketId(socketId);
-      if (!user) return null;
+      const user = await getUserBySocketId(socketId);
+      if (!user) {
+        return null;
+      }
 
       // Remove the socket from the user's sockets array
-      user.sockets = user.sockets.filter(si => si.socketId !== socketId);
+      user.sockets = (user.sockets || []).filter(si =>
+        si.socketId !== socketId
+      );
 
       // Update the user's state based on remaining sockets
       user.lastActivity = Date.now();
       user.state = reduceUserSocketsState(user.sockets);
 
-
-
       // Check if the user has been inactive for more than INACTIVITY_THRESHOLD
       const currentTime = Date.now();
       const isInactive = user.lastActivity && currentTime - user.lastActivity > INACTIVITY_THRESHOLD;
 
-      // If no sockets remain, remove the user from activeUsers
-      if (user.sockets.length === 0) {
-        activeUsers.delete(socketId);
-        activeConnections--;
-        disconnections++;
-        //return null
-      }
 
       // Call persistence hook for user disconnection        
-      await persistence.addUser(user);
+      return await persistence.storeUser(user).then(u => {
+        if (user.sockets.length === 0) {
+          activeUsers.delete(socketId);
+          activeConnections--;
+          disconnections++;
+          //return null
+        }
 
-      // Log the disconnection
-      if (debug) console.log(
-        isInactive
-          ? `User ${user.userName} disconnected due to inactivity.`
-          : `User ${user.userName} disconnected from socket ${socketId}`
-      );
+        // Log the disconnection
+        if (debug) console.log(
+          isInactive
+            ? `User ${user.userName} disconnected due to inactivity.`
+            : `User ${user.userName} disconnected from socket ${socketId}`
+        );
 
-      // Notify other users about the disconnection
-      __io.emit('user_disconnected', {
-        userId: user.userId,
-        userName: user.userName,
-        state: user.state,
-        reason: isInactive ? 'inactivity' : 'manual',
+        // Notify other users about the disconnection
+        __io.emit('user_disconnected', {
+          userId: user.userId,
+          userName: user.userName,
+          state: user.state,
+          reason: isInactive ? 'inactivity' : 'manual',
+        });
+
+        return {
+          ...user,
+          socketId,
+        };
       });
 
-
-
-
-      return {
-        ...user,
-        socketId,
-      };
     }, `Error disconnecting user for socket ${socketId}`);
   };
   /**
    * Get user by socketId
    */
-  const _getUserBySocketId = (socketId) => {
-    return safeOperation(() => {
+  const getUserBySocketId = async (socketId) => {
+    return safeOperation(async () => {
       const userId = activeUsers.get(socketId);
       const user = the_users.get(userId);
       if (!user) {
@@ -480,7 +418,7 @@ export const userManager = (options = {}) => {
       }
 
       // Step 2: Retrieve the user associated with the socketId
-      const user = _getUserBySocketId(socketId);
+      const user = await getUserBySocketId(socketId);
       if (!user) {
         throw new Error(`No user found for socketId: ${socketId}`);
       }
@@ -502,7 +440,7 @@ export const userManager = (options = {}) => {
   /**
  * Silent fail, Ensure socketId belongs to a registered and authenticated user
  */
-  const _silenteFailInsecureSocketId = async (socketId) => {
+  const validateUserBySocketId = async (socketId) => {
     return safeOperation(async () => {
       // Step 1: Validate socketId
       if (!socketId || typeof socketId !== 'string' || socketId === undefined) {
@@ -511,7 +449,7 @@ export const userManager = (options = {}) => {
       }
 
       // Step 2: Retrieve the user associated with the socketId
-      const user = _getUserBySocketId(socketId);
+      const user = await getUserBySocketId(socketId);
       if (!user) {
         console.warn(`No user found for socketId: ${socketId}`);
         return null;
@@ -557,9 +495,19 @@ export const userManager = (options = {}) => {
       // Validate and add users to the in-memory map
       if (persistedUsers && Array.isArray(persistedUsers)) {
         persistedUsers.forEach(user => {
-          const { error, value: validatedUser } = userBaseSchema.validate(user);
+          const { error, value: ___user } = userBaseSchema.validate(user);
           if (!error) {
-            the_users.set(validatedUser.userId, validatedUser);
+            if (!the_users.has(___user.userId)) {
+              (___user.sockets || []).forEach(sock => {
+                if (!activeUsers.has(sock.socketId)) {
+                  activeUsers.delete(sock.socketId);
+                }
+              });
+              ___user.sockets = []
+              ___user.state = 'offline';
+              the_users.set(___user.userId, ___user);
+            }
+
           } else {
             console.error(
               `Failed to validate persisted user: ${error.details.map(d => d.message).join(', ')}`
@@ -581,68 +529,137 @@ export const userManager = (options = {}) => {
     }
   };
 
-  const getUsers = async (socketId, options = {}) => {
+
+  const getUsersList = async (socketId, options = {}) => {
     return safeOperation(async () => {
       // Log the options and initial state of the_users
-      if (debug) console.log(`getUsers called with options: ${JSON.stringify(options)}`);
-      if (debug) console.log(`Initial the_users size: ${the_users.size}`);
+      if (debug) {
+        console.log(`getUsers called with options: ${JSON.stringify(options)}`);
+        console.log(`Initial the_users size: ${the_users.size}`);
+      }
 
-      // Step 0: Validate the options against the schema
+      // Step 1: Validate the user associated with the socketId
+      const user = await validateUserBySocketId(socketId);
+      if (!user) {
+        return null;
+      }
+
+      // Step 2: Validate the options against the schema
       const { error: optionsError, value: validatedOptions } = userQuerySchema.validate(options);
       if (optionsError) {
         throw new Error(`Invalid options: ${optionsError.details.map(d => d.message).join(', ')}`);
       }
 
-      // Step 1: Validate the user associated with the socketId
-      const user = await _failInsecureSocketId(socketId);
+      // Step 3: Destructure validated options with defaults applied
+      const { states, limit, offset } = validatedOptions;
 
-      // Step 2: Destructure validated options with defaults applied
-      const { state, includeOffline, limit, offset } = validatedOptions;
-
-      // Step 3: Load users from persistence if the_users is empty
-      await __loadUsers();
+      // Step 4: Load users from persistence if the_users is empty
+      await __loadUsers(the_users.size < 50);
 
       // Log the loaded users
-      if (debug) console.log(`Loaded users: ${JSON.stringify(Array.from(the_users.values()))}`);
+      if (debug) {
+        console.log(`Loaded users: ${JSON.stringify(Array.from(the_users.values()))}`);
+      }
 
-      // Step 4: Retrieve all users from memory
+      // Step 5: Retrieve all users from memory
       let filteredUsers = Array.from(the_users.values());
 
       // Apply filters
-      if (state) {
-        filteredUsers = filteredUsers.filter(user => user.state === state);
-        if (debug) console.log(`Filtered by state (${state}): ${JSON.stringify(filteredUsers)}`);
-      }
-      if (!includeOffline) {
-        filteredUsers = filteredUsers.filter(user => user.state !== 'offline');
-        if (debug) console.log(`Filtered out offline users: ${JSON.stringify(filteredUsers)}`);
+      if (states && states.length > 0) {
+        filteredUsers = filteredUsers.filter(user => states.includes(user.state));
+        //if (debug) console.log(`Filtered by states (${JSON.stringify(states)}): ${JSON.stringify(filteredUsers)}`);
+
       }
 
-      // Step 5: Apply pagination
+      // Step 6: Apply pagination
       const paginatedUsers = filteredUsers.slice(offset, offset + limit);
-      if (debug) console.log(`Paginated users: ${JSON.stringify(paginatedUsers)}`);
-
-      if (paginatedUsers.length === 0) {
+      if (debug && paginatedUsers.length === 0) {
         console.warn('Pagination returned no results. Check offset and limit values.');
       }
 
-      // Step 6: Format the result and validate against userBaseSchema
+      // Step 7: Format the result and validate against userBaseSchema
       const usersList = paginatedUsers
         .map(user => ({
           userId: user.userId,
           userName: user.userName,
-          //sessionId: user.sessionId,
           state: user.state,
-          sockets: [...user.sockets.map(s => s)],
+          //sockets: [...user.sockets.map(s => s.socketId)], // Include only socket IDs
+          sockets: user.sockets,
           connectedAt: user.connectedAt,
           lastActivity: Date.now(),
         }))
         .map(validateUser) // Validate each user
         .filter(user => user !== null); // Exclude invalid users
 
-      if (debug) console.log(`Final users list: ${JSON.stringify(usersList)}`);
+      // Log the final result
+      if (debug) {
+        console.log(`Final users list: ${JSON.stringify(usersList)}`);
+      }
+
       return usersList;
     }, `Error getting users for socketId: ${socketId}`);
+  };
+
+  const getUserConversationsList = async (socketId, _options = {}) => {
+    return safeOperation(async () => {
+      // Log initial state for debugging
+      if (debug) {
+        console.log(`getUsers called with options: ${JSON.stringify(_options)}`);
+      }
+      // Step 2: Validate the user associated with the socketId
+      const user = await validateUserBySocketId(socketId);
+      if (!user || !user.userId) {
+        console.error(`Invalid user for socketId: ${socketId}`);
+        return null; // Original behavior: Return null for invalid users
+      }
+
+      // Step 1: Validate user-provided options against conversationUQuerySchema
+      const { error: _optionsError, value: _validOptions } = getConversationsListUOptionsSchema.validate(_options);
+      if (_optionsError) {
+        const errorMessage = `Invalid user options: ${_optionsError.message}`;
+        console.error({ error: _optionsError }, errorMessage);
+        throw new Error(errorMessage); // Throw a meaningful error for invalid options
+      }
+
+
+
+      // Step 3: Prepare final options by merging validated options with userId
+      const options = { ..._validOptions, userId: user.userId };
+
+      // Step 4: Validate final options against conversationPQuerySchema
+      const { error: optionsError, value: validOptions } = getConversationsListPOptionsSchema.validate(options);
+      if (optionsError) {
+        console.error({ error: optionsError }, 'Invalid options');
+        return []; // Original behavior: Return an empty array for invalid options
+      }
+
+      // Step 5: Load user conversations from persistence
+      const respUserConversations = await persistence.getUserConversationsList(validOptions);
+
+      // Step 6: Format and validate results
+      const userConversations = respUserConversations
+        //.filter(s => s.userId === user.userId) // Ensure only conversations related to the user are included
+        .map(s => ({
+          userId: s.userId,
+          userName: s.userName,
+          otherPartyId: s.otherPartyId, // The other party in the conversation
+          otherPartyName: s.otherPartyName, // Name of the other party
+          startedAt: s.startedAt,
+          incoming: s.incoming,
+          outgoing: s.outgoing,
+          lastMessageAt: s.lastMessageAt,
+        }))
+        .filter(s => s !== null); // Exclude invalid entries
+
+      // Log the final result
+      if (debug) {
+        console.log(`Final users list: ${JSON.stringify(userConversations)}`);
+      }
+
+      // Return the filtered conversations
+      return userConversations;
+
+    }, `Error getting getUserConversationsList for socketId: ${socketId}`);
   };
 
   /**
@@ -650,99 +667,80 @@ export const userManager = (options = {}) => {
   */
   const sendMessage = async (socketId, recipientId, content) => {
     return safeOperation(async () => {
-      // Step 1: 
-      const user = await _failInsecureSocketId(socketId);
+      // Step 1: Validate the sender
+      const user = await validateUserBySocketId(socketId);
+      if (!user) {
+        const ret = { success: false, error: `No user found for socketId: ${socketId}` };
+        if (debug) console.log(ret);
+        return ret;
+      }
 
       // Step 2: Validate the recipient
       if (!the_users.has(recipientId)) {
-        throw new Error(`No user found for userId: ${recipientId}`);
+        const ret = { success: false, error: `No user found for userId: ${recipientId}` };
+        if (debug) console.log(ret);
+        return ret;
       }
 
-      // Step 2: Generate a unique messageId
+      // Step 3: Generate a unique messageId
       const messageId = generateMessageId();
 
       // Create the base message object
       const simple_message = {
         messageId,
         content,
-        sender: { userId: user.userId, userName: user.userName }, // Use user.userId instead of socketId
-        recipientId, // The target of the message
+        sender: { userId: user.userId, userName: user.userName },
+        recipientId,
         status: 'sent', // Initial status
-        type: 'private', // The sender-to-recipient relationship is private
-        timestamp: getHighPrecisionISO(),
+        type: 'private',
+        //    createdAt: getHighPrecisionISO(),
         readAt: null,
       };
 
       // Validate the message against the schema
-      const { valid, errors, data: msg } = validateEventData(baseMessageSchema, simple_message);
+      const { valid, errors, data: ___msg } = validateEventData(baseMessageSchema, simple_message);
       if (!valid) {
         const errorMessage = errors.map(e => e.message).join(', ');
         throw new Error(`Validation failed: ${errorMessage}`);
       }
 
-      // Check if the recipient is online
-      const recipientSockets = Array.from(the_users.get(recipientId)?.sockets || []);
-      if (recipientSockets.length > 0) {
-        // Update the message status to 'delivered'
-        msg.status = 'delivered';
-        // Recipient is online - emit the message to their sockets
-        recipientSockets.forEach(socket => {
-          __io.to(socket.socketId).emit(`${msg.type}_message`, { ...msg, direction: 'incoming' });
-        });
-      } else {
-        // Recipient is offline - mark the message as 'pending'
-        msg.status = 'pending';
-      }
-
-
       // Store the message in both sender's and recipient's conversations
-      await _storeMessage(recipientId, { ...msg, direction: 'incoming' });
-      await _storeMessage(user.userId, { ...msg, direction: 'outgoing' });
+      await _storeMessage(recipientId, { ...___msg, direction: 'incoming', status: 'sent' });
+      const msg = await _storeMessage(user.userId, { ...___msg, direction: 'outgoing', status: 'sent' });
 
-      // Debugging information
-
-      if (debug) console.log(`Message sent from ${user.userId} to ${recipientId}:`, {
-        messageId: msg.messageId,
-        status: msg.status,
-      });
-
-
-      // Return the message with its final status
-      return { ...msg };
+      // Return the message with its final status      
+      return { ...msg, direction: 'outgoing' };
     }, `Error sending message from socketId ${socketId} to recipientId ${recipientId}`);
   };
 
 
   /**
- * Update the state of specific messages for a user.
- * @param {string} userId - The ID of the user whose messages are being updated.
- * @param {string[]} messageIds - Array of message IDs to update.
- * @param {string} newState - The new state to assign to the messages (e.g., 'delivered', 'read').
- */
-  const _updateMessageState = async (userId, messageIds, newState) => {
+  * Update the state of specific messages sent by the user.
+  * @param {string} socketId - The socket for user ID of the user whose messages are being updated.
+  * @param {string[]} messageId - A message IDs to update.
+  * @param {string} newStatus - The new state to assign to the messages (e.g., 'delivered', 'read').
+  */
+  const updateMessageStatus = async (socketId, messageId, newStatus) => {
     return safeOperation(async () => {
-      if (!userId || typeof userId !== 'string') {
-        throw new Error('Invalid userId provided');
+      // Step 1: Validate the user associated with the socketId
+      const user = await _failInsecureSocketId(socketId);
+      const userId = user.userId;
+
+      if (typeof messageId !== 'string') {
+        throw new Error('Invalid messageId provided');
       }
-      if (!Array.isArray(messageIds) || messageIds.some(id => typeof id !== 'string')) {
-        throw new Error('Invalid messageIds provided');
-      }
-      if (!['delivered', 'read'].includes(newState)) {
-        throw new Error(`Invalid newState: ${newState}`);
+      if (!MESSAGE_STATUS_ORDERED.filter(s => s !== MESSAGE_STATUS_ORDERED[0]).includes(newStatus)) {
+        throw new Error(`Invalid newState: ${newStatus}`);
       }
 
+
+      const _idx = MESSAGE_STATUS_ORDERED.indexOf(newStatus) - 1;
+      const fromStatus = MESSAGE_STATUS_ORDERED[_idx];
       // Update message states in the persistence layer
-      await persistence.updateMessageState(userId, messageIds, newState);
+      const messSender = await persistence.updateMessageStatus(userId, messageId, newStatus, fromStatus);
 
-      if (debug) {
-        console.log(`Updated ${messageIds.length} messages to state "${newState}" for user ${userId}`);
-      }
-
-      return {
-        updated: messageIds.length,
-        total: messageIds.length,
-      };
-    }, `Error updating message state for userId: ${userId}`);
+      return messSender.find(m => m.direction === 'outgoing');
+    }, `Error updating message state for socketId user: ${socketId}`);
   };
 
   const getAndDeliverPendingMessages = async (socketId) => {
@@ -777,7 +775,7 @@ export const userManager = (options = {}) => {
       options.since = sinceDate.toISOString();
 
       // Step 4: Validate the options against the schema
-      const { error: optionsError, value: validOptions } = getMessagesOptionsSchema.validate(options);
+      const { error: optionsError, value: validOptions } = getMessagesUOptionsSchema.validate(options);
       if (optionsError) {
         throw new Error(`Invalid options: ${optionsError.message}`);
       }
@@ -849,12 +847,21 @@ export const userManager = (options = {}) => {
 
   /**
    * Mark messages as read for a socketId user state in sent,received,!read
+   * Socket user can only mark as read de incoming messages
    */
   const markMessagesAsRead = async (socketId, options) => {
     return safeOperation(async () => {
       // Step 1: Validate the user associated with the socketId
-      const user = await _failInsecureSocketId(socketId);
-      const recipientId = user.userId;
+      const user = await validateUserBySocketId(socketId);
+      if (!user) return null;
+      const userId = user.userId;
+
+      // Overwrite director on mark message
+      //options.direction = "incoming"; // for now socketId user will mark its own copy of message;
+      // should sender outgoing message copy be updated too ?  It whould flag sender of recipient open-2-read
+      // TODO: investigate best pratice. for NOW just socket user OWN messages
+      // MEANS: --- TAKE CARE OF message owner ship issue. the socker (user as sender) outgoing message MUST NOT persist read_at flag
+
 
       // Step 2: Validate input options against the schema
       const { error: optionsError, value: validOps } = markMessagesAsReadOptionsSchema.validate(options);
@@ -867,37 +874,41 @@ export const userManager = (options = {}) => {
       // Step 3: Fetch unread messages from the persistence layer
       let unreadMessages = [];
       try {
-        unreadMessages = await persistence.getUnreadMessages(recipientId, {
+        unreadMessages = await persistence.getUnreadMessages(userId, {
           conversationPartnerId,
           messageIds,
-          direction,
+          direction: 'incoming',
         });
+
 
         // Debugging: Log fetched unread messages
         if (debug) {
           console.log(
-            `Fetched ${unreadMessages.length} unread messages for userId: ${recipientId}`,
+            `Fetched ${unreadMessages.length} unread messages for userId: ${userId}`,
             `Matching message IDs: ${messageIds ? messageIds.join(', ') : 'all'}`
           );
         }
+
+        // Step 4: Mark the fetched messages as read in the persistence layer
+        const updatedMessageIds = unreadMessages.map(msg => {
+          return msg.messageId;
+        });
+        const result = await persistence.markMessagesAsRead(userId, { direction, messageIds: updatedMessageIds });
+
+        // Step 6: Validate the result against the schema
+        const { error: resultError } = markMessagesAsReadResultSchema.validate(result);
+        if (resultError) {
+          throw new Error(`Invalid result: ${resultError.message}`);
+        }
+
+        return result;
+
       } catch (error) {
-        console.error(`Failed to fetch unread messages for userId: ${recipientId}`, error.message);
+        console.error(`Failed to fetch unread messages for userId: ${userId}`, error.message);
         throw error; // Propagate the error
       }
 
-      // Step 4: Mark the fetched messages as read in the persistence layer
-      const updatedMessageIds = unreadMessages.map(msg => msg.messageId);
-      const result = await persistence.markMessagesAsRead(recipientId, { direction, messageIds: updatedMessageIds });
 
-
-
-      // Step 6: Validate the result against the schema
-      const { error: resultError } = markMessagesAsReadResultSchema.validate(result);
-      if (resultError) {
-        throw new Error(`Invalid result: ${resultError.message}`);
-      }
-
-      return result;
     }, `Error marking messages as read for socketId: ${socketId}`);
   };
 
@@ -905,7 +916,7 @@ export const userManager = (options = {}) => {
   /**
   * Load user messages from persistence layer into conversation structure
   */
-  const _loadUserMessages = async (userId) => {
+  const _TO_DELETE_loadUserMessages = async (userId) => {
     return safeOperation(async () => {
       if (!userId || typeof userId !== 'string') {
         throw new Error('Invalid userId provided');
@@ -933,7 +944,6 @@ export const userManager = (options = {}) => {
     return safeOperation(() => {
       the_users.clear();
       activeUsers.clear();
-
       return;
     }, `Error reseting users`);
   };
@@ -951,11 +961,11 @@ export const userManager = (options = {}) => {
 
       message.status = message.status || 'sent';
       message.type = message.type || 'private';
-      message.timestamp = message.timestamp || getHighPrecisionISO();
+      //message.updated_at = message.updated_at || getHighPrecisionISO();
 
 
       // Validate the message against the schema
-      const { valid, errors, data: msg } = validateEventData(baseMessageSchema, message);
+      const { valid, errors, data: msg } = validateEventData(persistMessageSchema, message);
       if (!valid) {
         const errorMessage = errors.map(e => e.message).join(', ');
         throw new Error(`Validation failed: ${errorMessage}`);
@@ -975,7 +985,7 @@ export const userManager = (options = {}) => {
   /**
    * Get socket IDs for a specific userId
    */
-  const _getUserSockets = (userId) => {
+  const _getUserSockets = async (userId) => {
     return safeOperation(() => {
       if (!userId || typeof userId !== 'string') {
         throw new Error('Invalid userId provided');
@@ -987,33 +997,6 @@ export const userManager = (options = {}) => {
     }, `Error getting socket IDs for userId: ${userId}`);
   };
 
-  const __userMessagesOptions = async (userId, options = {}) => {
-    return safeOperation(async () => {
-      // Validate userId
-      if (!userId || typeof userId !== 'string') {
-        throw new Error('Invalid userId provided');
-      }
-
-      // Validate options using getMessagesOptionsSchema
-      const { value: validOps, error: optionsError } = getMessagesOptionsSchema.validate(options);
-      if (optionsError) {
-        throw new Error(`Invalid options: ${optionsError.message}`);
-      }
-
-      // Fetch filtered messages from the persistence layer
-      let filteredMessages = [];
-      try {
-        filteredMessages = await persistence.getMessages(userId, validOps);
-      } catch (error) {
-        console.error(`Failed to fetch messages for userId: ${userId}`, error.message);
-        throw error; // Propagate the error
-      }
-
-      return filteredMessages;
-    }, `Error retrieving messages for userId: ${userId}`);
-  };
-
-
 
   /**
    * Get messages for a user with optional filters and pagination
@@ -1021,22 +1004,20 @@ export const userManager = (options = {}) => {
 
   const _getMessages = async (userId, options = {}) => {
     return safeOperation(async () => {
+      // Step 1: Validate userId
       if (!userId || typeof userId !== 'string') {
         throw new Error('Invalid userId provided');
       }
 
-      options.type = options.type || 'private';
-
-      // Normalize options
       const normalizedOptions = getNormalizedOptions(options);
 
-      // Validate options using getMessagesOptionsSchema
-      const { value: validOps, error: optionsError } = getMessagesOptionsSchema.validate(normalizedOptions);
+      // Step 3: Validate options against schema
+      const { value: validOps, error: optionsError } = getMessagesUOptionsSchema.validate(normalizedOptions);
       if (optionsError) {
         throw new Error(`Invalid options: ${optionsError.message}`);
       }
 
-      // Step 4: Determine the recipientId for the query
+      // Step 4: Determine the userId for the query
       const __userId = validOps.type === 'public' ? PUBLIC_MESSAGE_USER_ID : userId;
 
       // Step 5: Apply public message expiration filter
@@ -1046,25 +1027,32 @@ export const userManager = (options = {}) => {
         validOps.since = expireDate.toISOString();
       }
 
-      // Step 6: Fetch messages from the persistence layer
-      let messagesResp = {};
-      try {
-        messagesResp = await persistence.getMessages(__userId, validOps);
-      } catch (error) {
+      // Step 6: Fetch messages from persistence
+      return await persistence.getMessages(__userId, validOps).then(messagesResp => {
+        // Step 7: Extract messages, total, and hasMore
+        const { messages, total, hasMore } = messagesResp;
+
+        // Step 8: Apply unreadOnly filter
+        if (validOps.unreadOnly) {
+          messages = messages.filter(msg => !msg.readAt);
+        }
+
+        // Step 9: Sort messages chronologically
+        messages.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+        // Step 10: Return structured response
+        return {
+          messages,
+          total,
+          hasMore,
+        };
+
+      }).catch(error => {
         console.error(`Failed to fetch messages for userId: ${__userId}`, error.message);
         throw new Error(`Error fetching messages for userId: ${__userId}. Details: ${error.message}`);
-      }
-
-      // Step 7: Extract messages, total, and hasMore
-      const { messages, total, hasMore } = messagesResp;
+      });
 
 
-      // Step 8: Return the structured response
-      return {
-        messages,
-        total,
-        hasMore,
-      };
     }, `Error getting messages for userId: ${userId}`);
   };
 
@@ -1074,7 +1062,7 @@ export const userManager = (options = {}) => {
   const getActiveUsers = async (socketId, options = {}) => {
     return safeOperation(async () => {
       // Step 1: 
-      const user = await _silenteFailInsecureSocketId(socketId);
+      const user = await validateUserBySocketId(socketId);
       if (!user) {
         return null;
       }
@@ -1135,7 +1123,6 @@ export const userManager = (options = {}) => {
   };
 
 
-
   const broadcastPublicMessage = (socketId, content) => {
     return safeOperation(async () => {
       const user = await _failInsecureSocketId(socketId);
@@ -1152,7 +1139,7 @@ export const userManager = (options = {}) => {
           userId: user.userId,
           userName: user.userName || 'Anonymous',
         },
-        timestamp: getHighPrecisionISO(),
+        //    updated_at: getHighPrecisionISO(),
         readAt: null,
         direction: 'outgoing',
       };
@@ -1166,10 +1153,12 @@ export const userManager = (options = {}) => {
       await _storeMessage(user.userId, { ...msg, direction: 'outgoing' });
 
       // Store the message globally for all users
+      msg.status = 'delivered';
+      msg.direction = 'incoming';
       await _storeMessage(PUBLIC_MESSAGE_USER_ID, { ...msg, direction: 'incoming' });
 
       // Broadcast the message to all connected users
-      __io.emit('public_message', msg.content);
+      __io.emit('public_message', { ...msg, direction: 'incoming' });
 
       if (debug) {
         console.log(`User ${user.userId} broadcasted public message:`, msg);
@@ -1186,7 +1175,7 @@ export const userManager = (options = {}) => {
     return safeOperation(async () => {
       const user = await _failInsecureSocketId(socketId);
 
-      // Calculate the timestamp for 7 days ago
+      // Calculate the updated_at for 7 days ago
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - PUBLIC_MESSAGE_EXPIRE_DAYS);
 
@@ -1195,7 +1184,7 @@ export const userManager = (options = {}) => {
         limit: 50, // Maximum number of messages to retrieve
         offset: 0, // Start from the first message
         since: sevenDaysAgo.toISOString(), // Only retrieve messages from the last 7 days
-        until: null, // No upper bound for the timestamp
+        until: null, // No upper bound for the updated_at
         type: 'public', // Only retrieve public messages
         //    direction: 'outgoing', // Align with stored direction for public messages
         unreadOnly: false, // Include both read and unread messages
@@ -1203,7 +1192,7 @@ export const userManager = (options = {}) => {
       };
 
       // Validate the options against the schema
-      const { error, value: validatedOptions } = getMessagesOptionsSchema.validate(options);
+      const { error, value: validatedOptions } = getMessagesUOptionsSchema.validate(options);
       if (error) {
         throw new Error(`Invalid options: ${error.message}`);
       }
@@ -1217,134 +1206,242 @@ export const userManager = (options = {}) => {
   };
 
   /*
-  * retrive socketId user
+  * retrive socketId user History
   */
-  const getMessageHistory = async (socketId, options = {}) => {
+
+  const getUserConversation = async (socketId, options = {}) => {
     return safeOperation(async () => {
       // Step 1: Validate the socketId and user association
       const user = await _failInsecureSocketId(socketId);
+      options.userId = user.userId;
+      // Step 2: get Joi default options to merge with user options
+      const { value: userOptions } = getUserConversationPOptionsSchema.validate(options);
 
-
-      // Step 2 Validate the options against the schema
-      const { error, value: cOps } = getMessageHistoryOptionsSchema.validate(options);
-      if (error) {
-        throw new Error(`Invalid options: ${error.message}`);
-      }
-
-      const context = (cOps.type === 'private') ?
-        // Step 3: Construct the options object
-        {
-          limit: cOps.limit, // Maximum number of messages to retrieve
-          offset: cOps.offset, // Start from the first message
-          status: cOps.status,
-          since: null, // Only retrieve messages from the last 7 days
-          until: null, // No upper bound for the timestamp
-          type: 'private', // Only retrieve public messages
+      // Step 3: Handle private messages (fetch both incoming and outgoing)
+      if (userOptions.type === 'private') {
+        // Fetch incoming messages (user is the recipient)
+        const incomingOps = {
+          limit: userOptions.limit,
+          offset: userOptions.offset,
+          status: userOptions.status,
+          since: null,
+          until: null,
+          type: 'private',
+          unreadOnly: false,
           direction: 'incoming',
+          senderId: userOptions.otherPartyId || null,
+          recipientId: user.userId, // Sender is the other party
+        };
+        const { value: iops, error: iOpsError } = getMessagesUOptionsSchema.validate(incomingOps);
+        if (iOpsError) {
+          throw new Error(`Invalid incoming message options: ${iOpsError.message}`);
+        }
+        const incomingMessagesResult = await persistence.getMessages(userOptions.otherPartyId, iops);
+
+        // Fetch outgoing messages (user is the sender)
+        const outgoingOps = {
+          limit: userOptions.limit,
+          offset: userOptions.offset,
+          status: userOptions.status,
+          since: null,
+          until: null,
+          type: 'private',
+          direction: 'outgoing',
           unreadOnly: false,
           senderId: user.userId,
-          otherPartyId: cOps.otherPartyId,
-        } :
-        // public
-        {
-          limit: cOps.limit,
-          offset: cOps.offset,
-          status: cOps.status,
+          recipientId: userOptions.otherPartyId, // Recipient is the other party
+        };
+        const { value: oops, error: oOpsError } = getMessagesUOptionsSchema.validate(outgoingOps);
+        if (oOpsError) {
+          throw new Error(`Invalid incoming message options: ${oOpsError.message}`);
+        }
+        const outgoingMessagesResult = await persistence.getMessages(user.userId, oops);
+
+        // Merge and sort the messages
+        const allMessages = [
+          ...incomingMessagesResult.messages,
+          ...outgoingMessagesResult.messages,
+        ].sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt)); // Chronological order
+
+        // Apply pagination to the merged results
+        const start = userOptions.offset;
+        const end = userOptions.offset + userOptions.limit;
+        const paginatedMessages = allMessages.slice(start, end);
+
+        // Construct the response
+        const response = {
+          messages: paginatedMessages,
+          total: allMessages.length,
+          hasMore: end < allMessages.length,
+        };
+
+        // Log the operation
+        if (debug) console.log(
+          `Fetched ${response.messages.length} messages for user ${user.userId}`
+        );
+
+        return response;
+      }
+
+      // Step 4: Handle public messages (unchanged)
+      if (userOptions.type === 'public') {
+        const iops = {
+          limit: userOptions.limit,
+          offset: userOptions.offset,
+          status: userOptions.status,
           since: null,
           until: null,
           unreadOnly: false,
           type: 'public',
-          direction: 'incoming', // Align with stored direction for public messages
+          direction: 'incoming',
           otherPartyId: PUBLIC_MESSAGE_USER_ID, // Special ID for public messages
         };
 
-      // Step 2: Validate the incoming options against the schema
-      const { error: e, value: validatedMOptions } = getMessagesOptionsSchema.validate(context);
-      if (e) {
-        throw new Error(`Invalid options: ${e.message}`);
+        // Validate the options
+        const { error: e, value: validatedMOptions } = getMessagesUOptionsSchema.validate(iops);
+        if (e) {
+          throw new Error(`Invalid options: ${e.message}`);
+        }
+
+        // Fetch public messages
+        const messagesResult = await persistence.getMessages(user.userId, validatedMOptions);
+
+        // Construct the response
+        const response = {
+          context: iops,
+          messages: messagesResult.messages,
+          total: messagesResult.total,
+          hasMore: messagesResult.hasMore,
+        };
+
+        // Log the operation
+        if (debug) console.log(
+          `Fetched ${response.messages.length} public messages for user ${user.userId}`
+        );
+
+        return response;
       }
-
-      // Step 3: Fetch messages using _getMessages
-      const messagesResult = await _getMessages(user.userId, validatedMOptions);
-
-      // Step 5: Construct the response
-      const response = {
-        context,
-        messages: messagesResult.messages,
-        total: messagesResult.total,
-        hasMore: messagesResult.hasMore,
-      };
-
-      // Step 6: Log the operation
-      if (debug) console.log(
-        `Fetched ${response.messages.length} messages for user ${user.userId} '`
-      );
-
-      // Step 7: Return the response
-      return response;
     }, `Error fetching messages to ${socketId}`);
   };
 
 
-  const typingIndicator = async (socketId, data) => {
+  const updateUserState = async (userId, newState) => {
     return safeOperation(async () => {
-      // Step 1: Validate the user associated with the socketId
-      const user = await _silenteFailInsecureSocketId(socketId);
-      if (!user) return null;
-
-      // Step 2: Validate the incoming data against the typingSchema
-      const { error, value: validatedData } = typingSchema.validate(data);
-      if (error) {
-        throw new Error(`Invalid typingIndicator data: ${error.message}`);
+      // Step 1: Retrieve the user by userId
+      const user = the_users.get(userId);
+      if (!user) {
+        throw new Error(`User with ID ${userId} not found`);
       }
 
-      const { isTyping, recipientId } = validatedData;
-
-      // Step 3: Retrieve the sender's user ID
-      const senderUser = _getUserBySocketId(socketId);
-      if (!senderUser || !senderUser.userId) {
-        throw new Error('Sender not found');
-      }
-      const sender = senderUser.userId;
-
-      // Step 4: Check if the recipient exists
-      const recipient = the_users.get(recipientId);
-      if (!recipient) {
-        console.warn(`Recipient with ID ${recipientId} not found`);
-        return null; // Exit early if the recipient is missing
+      // Step 2: Validate the new state
+      const validStates = ['connected', 'disconnected', 'authenticated', 'offline'];
+      if (!validStates.includes(newState)) {
+        throw new Error(`Invalid state: ${newState}`);
       }
 
-      // Step 5: Prepare the flat typing event payload
-      const timestamp = getHighPrecisionISO();
+      // Step 3: Update the user's state
+      user.state = newState;
+      user.lastActivity = Date.now();
 
-      // Step 6: Get the recipient's socket IDs
-      const recipientSockets = Array.from(recipient.sockets || []);
-      if (recipientSockets.length > 0) {
-        // Emit the typingIndicator event to all recipient sockets
-        recipientSockets.forEach((socket) => {
-          __io.to(socket.socketId).emit('typingIndicator', {
-            success: true,
-            event: 'typingIndicator',
-            sender, // Use the sender's userId
-            isTyping,
-            timestamp,
-          });
-        });
-      }
+      // Step 4: Persist the updated user (if applicable)
+      await persistence.storeUser(user); // Uncomment if using persistence
 
-      if (debug) console.log(`Typing indicator sent: ${isTyping ? 'is typing' : 'stopped typing'}`);
-      return { sender, isTyping, timestamp }; // Return flat response
-    }, 'Error handling typingIndicator');
+      // Return the updated user
+      return user;
+    }, `Error updating user state for userId: ${userId}`);
   };
 
+
+  const _checkInactivity = async () => {
+    return safeOperation(async () => {
+      const currentTime = Date.now();
+      console.log(
+        `Processing inactivity check for ${the_users.size} users at ${new Date().toISOString()}`
+      );
+
+      // Iterate over all users
+      for (const [userId, user] of the_users.entries()) {
+        if (!user || !Array.isArray(user.sockets)) {
+          console.warn(`Removing invalid user data for userId: ${userId}`);
+          the_users.delete(userId);
+          continue; // Skip invalid users
+        }
+
+        // Remove invalid sockets
+        user.sockets = user.sockets.filter(
+          (socket) => socket && typeof socket.lastActivity === 'number'
+        );
+
+        if (user.sockets.length === 0) {
+          console.warn(`No valid sockets remaining for user ${userId}. Removing user.`);
+          the_users.delete(userId);
+          continue;
+        }
+
+        // Track whether the user has any active sockets
+        let hasActiveSockets = false;
+
+        // Iterate over each socket for the user
+        for (const socket of user.sockets) {
+          if (!socket || typeof socket.lastActivity !== 'number') {
+            console.warn(`Invalid socket data for userId: ${userId}`);
+            continue; // Skip invalid sockets
+          }
+
+          // Check if the socket is inactive
+          if (currentTime - socket.lastActivity > INACTIVITY_THRESHOLD) {
+            console.log(
+              `Socket ${socket.socketId} for user ${user.userName} (${userId}) is inactive. Disconnecting...`
+            );
+
+            try {
+              await disconnectUser(socket.socketId);
+            } catch (error) {
+              console.error(`Failed to disconnect socket ${socket.socketId}:`, error.message);
+            }
+          } else {
+            hasActiveSockets = true; // Mark the user as having at least one active socket
+          }
+        }
+
+        // If no active sockets remain, transition the user to offline
+        if (!hasActiveSockets && user.state !== 'offline') {
+          user.state = 'offline';
+
+          try {
+            await persistence.storeUser({
+              userId,
+              state: 'offline',
+            });
+
+            console.log(
+              `User ${user.userName} (${userId}) transitioned to offline due to inactivity.`
+            );
+
+            // Notify other users about the disconnection
+            __io.emit('user_disconnected', {
+              userId,
+              userName: user.userName,
+              state: 'offline',
+              reason: 'inactivity',
+            });
+          } catch (error) {
+            console.error(`Failed to persist offline state for user ${userId}:`, error.message);
+          }
+        }
+      }
+    }, 'Error checking user inactivity');
+  };
+
+  __loadUsers(true);
 
 
   /**
    * Public API
    */
   return {
-    // socket Interface
-    addUser,
+    setIO,
+    getIO,
     disconnectUser,
     sendMessage,
     //
@@ -1357,20 +1454,27 @@ export const userManager = (options = {}) => {
     getUserConnectionMetrics,
     broadcastPublicMessage,
     getPublicMessages,
-    typingIndicator,
-    getMessageHistory,
-    getUsers,
-    // Testing purposes
-    _authenticateUserWithToken: process.env.NODE_ENV === 'test' ? _authenticateUserWithToken : undefined,
-    _getUserBySocketId: process.env.NODE_ENV === 'test' ? _getUserBySocketId : undefined, // Expose only in test environment
+    //   typingIndicator,
+    getUserConversation,
+    getUsersList: getUsersList,
+    updateUserState,
+    storeUser,
+    _incrementErrors,
+    getUserSockets: _getUserSockets,
+    updateMessageStatus,
+    getUserConversationsList,
+    //storeMessage: _storeMessage,
+    // Testing purposes    
+
+    getUserBySocketId,
+    _checkInactivity: process.env.NODE_ENV === 'test' ? _checkInactivity : undefined, // Expose only in test environment
     _getMessages: process.env.NODE_ENV === 'test' ? _getMessages : undefined, // Expose only in test environment
-    _incrementErrors: process.env.NODE_ENV === 'test' ? _incrementErrors : undefined, // Expose only in test environment
+    // _incrementErrors: process.env.NODE_ENV === 'test' ? _incrementErrors : undefined, // Expose only in test environment
     _getUserSockets: process.env.NODE_ENV === 'test' ? _getUserSockets : undefined, // Expose only in test environment     
     __resetData: process.env.NODE_ENV === 'test' ? __resetData : undefined,
     _getSockeyById: process.env.NODE_ENV === 'test' ? _getSockeyById : undefined,
     _failInsecureSocketId: process.env.NODE_ENV === 'test' ? _failInsecureSocketId : undefined,
     _storeMessage: process.env.NODE_ENV === 'test' ? _storeMessage : undefined, // Expose only in test environment
-    _persistenceHooks: process.env.NODE_ENV === 'test' ? persistence : undefined, // Expose only in test environment
 
   };
 };

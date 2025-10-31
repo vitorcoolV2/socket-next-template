@@ -6,7 +6,7 @@ import {
   debug,
   PUBLIC_MESSAGE_USER_ID,
   PUBLIC_MESSAGE_EXPIRE_DAYS,
-} from './config.mjs';
+} from '../config.mjs';
 
 
 // Import schemas
@@ -20,8 +20,8 @@ import {
   markMessagesAsReadOptionsSchema,
   markMessagesAsReadResultSchema,
   typingSchema,
-  getMessageHistoryOptionsSchema,
-  getMessagesOptionsSchema,
+  getUserConversationUOptionsSchema,
+  getMessagesUOptionsSchema,
   activeUserSchema,
   userQuerySchema
 } from './schemas.mjs';
@@ -66,7 +66,7 @@ export class MemoryPersistence extends PersistenceInterface {
   /**
  * Add or update a user in the persistence layer.
  */
-  async addUser(user) {
+  async storeUser(user) {
     if (!user || !user.userId) {
       throw new Error('Invalid user data provided');
     }
@@ -163,7 +163,7 @@ export class MemoryPersistence extends PersistenceInterface {
     }
 
     // Validate options against the schema
-    const { error, value: validOps } = getMessagesOptionsSchema.validate(options);
+    const { error, value: validOps } = getMessagesUOptionsSchema.validate(options);
     if (error) {
       throw new Error(`Invalid options: ${error.message}`);
     }
@@ -235,7 +235,7 @@ export class MemoryPersistence extends PersistenceInterface {
   }
 
 
-  async setMessagesStatus(userId, messageIds, status) {
+  async updateMessageStatus(userId, messageIds, status) {
     if (!this.messages.has(userId)) {
       console.warn(`No messages found for userId: ${userId}`);
       return [];
@@ -382,4 +382,6 @@ export class MemoryPersistence extends PersistenceInterface {
       return isUnread && matchesConversation && matchesDirection && matchesMessageIds;
     });
   }
+
+
 }

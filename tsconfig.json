@@ -35,7 +35,7 @@
     "src/**/*",
     "socket.io/server.ts",
     ".next/types/**/*.ts",
-    "src/__tests__/events.test.mjs",
+    "src/__tests__/requirements/events.test.mjs",
     "____/schemas2",
     "src/server",
     "____/types",

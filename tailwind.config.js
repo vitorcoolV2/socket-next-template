@@ -3,20 +3,42 @@ const config = {
   content: ['./src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+
       // Colors
       colors: {
+        // Base colors
+        // Base colors
         red: {
           600: '#dc2626',
         },
         green: {
-          600: '#16a34a',
+          200: '#bbf7d0', // Light green (used for authenticated badge)
+          800: '#166534', // Dark green (text color for authenticated badge)
         },
-        blue: {
-          500: '#3b82f6',
+        gray: {
+          50: '#f9fafb',   // Very light gray (hover background in light mode)
+          200: '#e5e7eb',  // Light gray (offline badge in light mode)
+          600: '#4b5563',  // Medium gray (text color for offline badge)
+          800: '#1f2937',  // Dark gray (background in dark mode)
+          900: '#111827',  // Very dark gray (text in dark mode)
         },
+        yellow: {
+          200: '#fef3c7', // Light yellow (optional connected badge)
+          800: '#92400e', // Dark yellow (text color for optional connected badge)
+        },
+        pink: {
+          500: '#ec4899', // Default Tailwind pink-500
+        },
+
         black: '#000000',
         white: '#ffffff',
         transparent: 'transparent',
+
+        // ✅ Semantic state colors
+        'user-authenticated': '#e6ffe6',     // Light green
+        'user-offline': '#f9f9f9',           // Very light gray
+        'user-connected': '#fff7e6',         // Light orange (optional)
+        'user-disconnected': '#f9f9f9',      // Same as offline or use #f3f3f3
       },
 
       // Spacing
