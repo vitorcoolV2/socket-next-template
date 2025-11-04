@@ -1,16 +1,16 @@
 import React, { useState, useMemo } from 'react';
-import { useSocket, AuthUser, UserRenderData } from '../context/SocketContext';
+import { useSocket, Message, UserRenderData } from 'a-app/context/SocketContext';
 import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 
 interface UserListProps {
-    setRecipient: (userId: string) => void;
+    setRecipient: (otherPartyId: string) => void;
 }
 
 const UserList = ({ setRecipient }: UserListProps) => {
     const { isConnected, isAuthenticated, socketUser, conversationsList } = useSocket();
     const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
-    // Priority mapping for user states
+    // Priority mapping for user state
     const statePriority: Record<"disconnected" | "connected" | "authenticated" | "offline", number> = useMemo(
         () => ({
             disconnected: 4,
@@ -24,11 +24,11 @@ const UserList = ({ setRecipient }: UserListProps) => {
     // Sort users based on their state priority
     // Sort users based on their state priority
     const sortedUsers = useMemo(() => {
-        const rawData = conversationsList?.data || [];
+        const rawData = conversationsList || [];
 
         // Deduplicate users by userId
         const uniqueUsers = rawData.reduce((acc, user) => {
-            if (!acc.find(u => u.userId === user.userId)) {
+            if (!acc.find(u => u.userId === user.userId && u.otherPartyId === user.otherPartyId)) {
                 acc.push(user);
             }
             return acc;
@@ -49,9 +49,9 @@ const UserList = ({ setRecipient }: UserListProps) => {
             });
     }, [conversationsList, statePriority]);
 
-    const handleUserClick = (userId: string) => {
-        setSelectedUserId(userId);
-        setRecipient(userId);
+    const handleUserClick = (otherPartyId: string) => {
+        setSelectedUserId(otherPartyId);
+        setRecipient(otherPartyId);
     };
 
     // Enhanced badge component with better colors
@@ -128,27 +128,27 @@ const UserList = ({ setRecipient }: UserListProps) => {
     const RenderUser = React.memo(({ user }: { user: UserRenderData }) => {
         const incoming = user.incoming || { sent: 0, pending: 0, delivered: 0, unread: 0, read: 0 };
         const outgoing = user.outgoing || { sent: 0, pending: 0, delivered: 0, unread: 0, read: 0 };
-        const isSelfConversation = user.userId === socketUser?.userId;
+        const isSelfConversation = user.otherPartyId === socketUser?.userId;
 
-        // Color schemes for different user states
+        // Color schemes for different user state
         const getBackgroundColors = () => {
             if (isSelfConversation) {
-                return user.userId === selectedUserId
+                return user.otherPartyId === selectedUserId
                     ? 'bg-gradient-to-r from-purple-100 to-indigo-100 dark:from-purple-900 dark:to-indigo-900 border-l-4 border-purple-500'
                     : 'hover:bg-gradient-to-r from-purple-50 to-indigo-50 dark:hover:from-purple-800 dark:hover:to-indigo-800';
             }
 
             const baseColors = {
-                authenticated: user.userId === selectedUserId
+                authenticated: user.otherPartyId === selectedUserId
                     ? 'bg-gradient-to-r from-green-50 to-emerald-50 dark:from-green-800 dark:to-emerald-800 border-l-4 border-green-500'
                     : 'hover:bg-gradient-to-r from-green-50 to-emerald-50 dark:hover:from-green-800 dark:hover:to-emerald-800',
-                connected: user.userId === selectedUserId
+                connected: user.otherPartyId === selectedUserId
                     ? 'bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-800 dark:to-cyan-800 border-l-4 border-blue-500'
                     : 'hover:bg-gradient-to-r from-blue-50 to-cyan-50 dark:hover:from-blue-800 dark:hover:to-cyan-800',
-                offline: user.userId === selectedUserId
+                offline: user.otherPartyId === selectedUserId
                     ? 'bg-gradient-to-r from-gray-50 to-slate-50 dark:from-gray-700 dark:to-slate-700 border-l-4 border-gray-500'
                     : 'hover:bg-gradient-to-r from-gray-50 to-slate-50 dark:hover:from-gray-700 dark:hover:to-slate-700',
-                disconnected: user.userId === selectedUserId
+                disconnected: user.otherPartyId === selectedUserId
                     ? 'bg-gradient-to-r from-red-50 to-pink-50 dark:from-red-800 dark:to-pink-800 border-l-4 border-red-500'
                     : 'hover:bg-gradient-to-r from-red-50 to-pink-50 dark:hover:from-red-800 dark:hover:to-pink-800'
             };
@@ -158,20 +158,20 @@ const UserList = ({ setRecipient }: UserListProps) => {
 
         return (
             <li
-                key={user.userId}
+                key={user.otherPartyId}
                 className={`cursor-pointer p-3 rounded-lg transition-all duration-200 shadow-sm hover:shadow-md ${getBackgroundColors()} group`}
-                onClick={() => handleUserClick(user.userId)}
+                onClick={() => handleUserClick(user.otherPartyId)}
             >
                 <div className="flex justify-between items-start">
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-2">
                             <div className="w-2 h-2 rounded-full bg-current opacity-70"></div>
-                            <strong className={`font-semibold truncate ${isSelfConversation ? 'text-purple-700 dark:text-purple-300' : 'text-gray-800 dark:text-gray-200'}`}>
-                                {user.userName}
+                            <small className={`font-semibold truncate ${isSelfConversation ? 'text-purple-700 dark:text-purple-300' : 'text-gray-800 dark:text-gray-200'}`}>
+                                {user.otherPartyName}
                                 {isSelfConversation && (
                                     <span className="ml-1 text-xs text-purple-500 dark:text-purple-400">(You)</span>
                                 )}
-                            </strong>
+                            </small>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -238,7 +238,7 @@ const UserList = ({ setRecipient }: UserListProps) => {
                     <p className="text-gray-500 dark:text-gray-400 font-medium">Connecting to server</p>
                     <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Authenticating...</p>
                 </div>
-            ) : !conversationsList?.data || conversationsList.data.length === 0 ? (
+            ) : !conversationsList || conversationsList.length === 0 ? (
                 <div className="text-center py-8">
                     <div className="text-4xl mb-2">👀</div>
                     <p className="text-gray-500 dark:text-gray-400 font-medium">No users found</p>
@@ -247,7 +247,7 @@ const UserList = ({ setRecipient }: UserListProps) => {
             ) : (
                 <ul className="space-y-2">
                     {sortedUsers.map((user) => (
-                        <RenderUser key={user.userId} user={user} />
+                        <RenderUser key={user.otherPartyId} user={user} />
                     ))}
                 </ul>
             )}

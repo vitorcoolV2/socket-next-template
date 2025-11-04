@@ -19,15 +19,96 @@ export const socketIdSchema = Joi.string().description('Socket ID for the user')
 export const socketIdsSchema = Joi.array().items(socketIdSchema).default([]).required().description('Array of socket IDs associated with the user');
 export const sessionIdSchema = Joi.string().description('Unique session ID generated for the user');
 
-export const messageIdSchema = Joi.string().optional().max(50).description('Unique message identifier');
+export const messageIdSchema = Joi.string()
+  .optional()
+  .max(50)
+  .description('Unique message identifier');
+
+
+export const messageIdArraySchema = Joi.array()
+  .items(messageIdSchema)
+  .optional()
+  .description('Array of message identifiers');
+//  .meta({ example: ['msg_123', 'msg_456'] });
+
+export const messageIdsSchema = Joi.alternatives()
+  .try(
+    messageIdSchema,
+    messageIdArraySchema
+  )
+  .optional()
+  .description(`
+Accepts either:
+• Single status string
+• Array of message identifiers for bulk operations
+  `.trim())
+  .messages({
+    'alternatives.types': `
+Invalid message identifier format.
+
+Expected:
+✓ Single message identifier
+✓ Array of message identifiers
+
+Received: {{#label}}
+
+Tip: Message identifiers represent unique creation keys for messages
+    `.trim(),
+    'alternatives.match': `
+The input did not match any valid message identifier format.
+
+What you can use:
+✓ Single identifier (string)
+✓ Multiple identifiers (array of strings)
+
+What you provided: {{#value}}
+
+Examples:
+• "msg_12345"
+• ["msg_123", "msg_456"]
+    `.trim()
+  })
+
 export const contentSchema = Joi.string().min(1).max(5000).required().description('Message content');
 
 export const MESSAGE_STATUS_ORDERED = Object.freeze(['sent', 'pending', 'delivered', 'read', 'failed']);
-export const statusSchema = Joi.string()
+
+const baseStatusString = Joi.string()
   .valid(...MESSAGE_STATUS_ORDERED)
+  .default('sent');
+
+// Individual schemas
+export const sendStatusStringSchema = baseStatusString
+  .optional()
+  .description('Single message status value (e.g., "sent", "pending", "delivered", "read")');
+
+export const sendStatusArraySchema = Joi.array()
+  .items(baseStatusString)
+  .optional()
+  .description('Array of status values for filtering multiple state (e.g., ["sent", "pending"])');
+
+
+export const sendStatusSchema = Joi.alternatives().try(
+  sendStatusStringSchema,
+  sendStatusArraySchema
+)
+  .optional()
+  .description('Accepts either: single status string, or array of status values for bulk operations')
   .default('sent')
-  .required()
-  .description('Message delivery status');
+  .messages({
+    'alternatives.match': `
+Invalid message status format.
+
+What you can use:
+✓ Single status: "sent", "pending", "delivered", "read", "failed"
+✓ Multiple statuses: ["sent", "pending"], ["delivered"], etc.
+
+What you provided: {{#value}}
+
+Tip: Status represents message delivery state in sequence: ${MESSAGE_STATUS_ORDERED.join(' → ')}`
+  })
+
+
 export const readAtSchema = timestampSchema
   .allow(null)
   .default(null)
@@ -190,53 +271,87 @@ export const getMessagesUOptionsSchema = Joi.object({
   since: Joi.date().iso().optional().allow(null).default(null).description('Retrieve messages sent after this timestamp'),
   until: Joi.date().iso().optional().allow(null).default(null).description('Retrieve messages sent before this timestamp'),
   // filter set conversations
-  messageIds: Joi.array().items(messageIdSchema).optional().allow(null).default(null).description('Filter messages by message id'),
+  messageId: messageIdsSchema.optional(),
+  //messageIds: Joi.array().items(messageIdSchema).optional().allow(null).default(null).description('Filter messages by message id'),
 
   type: Joi.string().valid('private', 'public').required().default('private').description('Filter messages by type'),
 
   senderId: userIdSchema.optional().allow(null).default(null).description('options Filter messages by senderId'),
   recipientId: Joi.string().optional().allow(null).default(null).description('option Filter messages for incoming messages'),
-  status: statusSchema.optional().allow(null).default(null),
+  status: sendStatusSchema.optional().allow(null).default(null),
 
   direction: directionSchema.optional(),
   unreadOnly: Joi.boolean().optional().default(false).description('Retrieve only unread messages'),
-  otherPartyId: userIdSchema.optional().allow(null).default(null).description('Used only with type: "public". option Filter messages where the specified other party is either the sender or receiverId for'),
+  //otherPartyId: userIdSchema.optional().allow(null).default(null).description('Used only with type: "public". option Filter messages where the specified other party is either the sender or receiverId for'),
 }).description('Options for fetching messages');
 
 
 export const getUserConversationUOptionsSchema = Joi.object({
   limit: Joi.number().integer().min(0).max(100).default(20), // Number of messages to fetch
   offset: Joi.number().integer().min(0).default(0), // Offset for pagination
+  // date interval
+  since: Joi.date().iso().optional().allow(null).default(null).description('Retrieve messages sent after this timestamp'),
+  until: Joi.date().iso().optional().allow(null).default(null).description('Retrieve messages sent before this timestamp'),
   type: Joi.string().optional().allow(null).valid('private', 'public').default('private'), // Type of messages to fetch
-  status: statusSchema.optional().allow(null).default(null),
+  status: sendStatusSchema,
   otherPartyId: userIdSchema.required().default(null).description('option Filter messages where the specified other party is either the sender or receiverId'),
 });
 export const getUserConversationPOptionsSchema = getUserConversationUOptionsSchema.clone().keys({
   userId: userIdSchema.required().allow(null).default(null).description('option Filter userId oucoming,incoming messages'),
 });
 
-// Storage Message Simple Message Schema
-export const baseMessageSchema = Joi.object({
-  messageId: messageIdSchema.required(),
+// Storage Message Single Message Schema
+export const messageUSchema = Joi.object({
+  messageId: messageIdSchema.required(),  // single message identifier
   sender: senderSchema.required(),
   recipientId: userIdSchema.required().description('Recipient user ID'),
   content: contentSchema.required(),
-  status: statusSchema.required(),
-  type: Joi.string()
+  status: sendStatusSchema.optional(),
+  type: Joi.string().required()
     .valid('private', 'public')
-    .required()
     .description('Message type')
     .default('private'),
   // Optional fields - exactly matching the interface
   direction: directionSchema.optional(),
-  status: statusSchema.required(),
   readAt: readAtSchema.optional(),
 });
 
-export const persistMessageSchema = baseMessageSchema.clone().keys({
+export const messagePSchema = messageUSchema.clone().keys({
+  status: sendStatusStringSchema.required(),
   createdAt: timestampSchema.description('Message creation timestamp in ISO format'),
   updatedAt: timestampSchema.description('Message creation timestamp in ISO format'),
+  metadata: Joi.object({}).unknown(true).optional().description('Message Metadata'),
 })
+
+
+export const markMessagesAsReadSchema = Joi.object({
+  userId: Joi.string().required(),
+  messageIds: Joi.array().items(Joi.string()).required(),
+});
+export const markMessagesAsDeliveredSchema = markMessagesAsReadSchema.clone();
+
+export const markMessagesAsDeliveredOptionsSchema = Joi.object({
+  senderId: userIdSchema.optional().messages({
+    'string.base': 'senderId must be a string',
+    'any.required': 'senderId is required when messageIds is not provided',
+  }),
+
+  messageIds: Joi.array()
+    .items(messageIdSchema)
+    .optional()
+    .messages({
+      'array.base': 'messageIds must be an array of strings',
+      'string.base': 'Each messageId must be a string',
+      'any.required': 'messageIds is required when senderId is not provided',
+    })
+    .description('An array of message IDs to mark as delivered.'),
+})
+  // Ensure at least one of senderId or messageIds is provided
+  .or('senderId', 'messageIds')
+  .messages({
+    'object.missing': 'Either senderId or messageIds must be provided',
+  });
+
 
 // Mark Messages as Read Schemas
 export const markMessagesAsReadOptionsSchema = Joi.object({
@@ -262,6 +377,17 @@ export const markMessagesAsReadOptionsSchema = Joi.object({
     'object.missing': 'Either senderId or messageIds must be provided',
   });
 
+
+export const markMessagesAsDeliveredResultSchema = Joi.object({
+  marked: Joi.number().integer().min(0).required().messages({
+    'number.base': 'marked must be a number',
+    'number.integer': 'marked must be an integer',
+    'number.min': 'marked cannot be negative',
+    'any.required': 'marked is required',
+  }),
+  updatedMessage: Joi.array().items(messagePSchema),
+}).description('Result of marking messages as delivered');
+
 export const markMessagesAsReadResultSchema = Joi.object({
   marked: Joi.number().integer().min(0).required().messages({
     'number.base': 'marked must be a number',
@@ -269,37 +395,17 @@ export const markMessagesAsReadResultSchema = Joi.object({
     'number.min': 'marked cannot be negative',
     'any.required': 'marked is required',
   }),
-  total: Joi.number().integer().min(0).required().messages({
-    'number.base': 'total must be a number',
-    'number.integer': 'total must be an integer',
-    'number.min': 'total cannot be negative',
-    'any.required': 'total is required',
-  }),
+  updatedMessage: Joi.array().items(messagePSchema),
 }).description('Result of marking messages as read');
 
-/**
- * export const userQuerySchema = Joi.object({
-  state: userConnectionState.optional(),
-  includeOffline: Joi.boolean()
-    .default(true)
-    .description('Include offline users in results'),
 
-  limit: Joi.number().integer().min(1).max(100).default(10)
-    .description('Maximum number of users to retrieve'),
-
-  offset: Joi.number().integer().min(0).default(0)
-    .description('Number of users to skip for pagination')
-});
-
-
- */
 export const userIncludables = ['metadata'];
 export const userQuerySchema = Joi.object({
   include: Joi.array().items(Joi.string().valid(...userIncludables)).allow(null).default([])
     .description(`Can include extra fields: ${userIncludables.join(', ')}`),
 
-  states: Joi.array().items(userConnectionState).optional().allow(null).default(['authenticated', 'offline'])
-    .description('If not specified include all. If specified Include the connection states in results'),
+  state: Joi.array().items(userConnectionState).optional().allow(null).default(['authenticated', 'offline'])
+    .description('If not specified include all. If specified Include the connection state in results'),
 
   limit: Joi.number().integer().min(1).max(100).default(10)
     .description('Maximum number of users to retrieve'),
@@ -326,7 +432,7 @@ export const activeUserSchema = Joi.object({
 
 // Get Messages Result Schema
 export const getMessagesResultSchema = Joi.object({
-  messages: Joi.array().items(baseMessageSchema).required(),
+  messages: Joi.array().items(messageUSchema).required(),
   total: Joi.number().integer().min(0).required(),
   hasMore: Joi.boolean().required(),
 }).description('Result of fetching messages');
@@ -362,9 +468,9 @@ export const schemas = {
   storeMessage: {
     in: Joi.object({
       userId: userIdSchema.required(),
-      simple_message: baseMessageSchema.required(),
+      simple_message: messageUSchema.required(),
     }),
-    out: baseMessageSchema,
+    out: messageUSchema,
   },
   sendMessage: {
     in: Joi.object({
@@ -372,7 +478,7 @@ export const schemas = {
       recipientId: userIdSchema.required(),
       content: contentSchema.required(),
     }),
-    out: baseMessageSchema,
+    out: messageUSchema,
   },
   getAndDeliverPendingMessages: {
     in: Joi.object({
@@ -382,14 +488,14 @@ export const schemas = {
       delivered: Joi.number().integer().min(0).required(),
       total: Joi.number().integer().min(0).required(),
       failed: Joi.number().integer().min(0).required(),
-      pendingMessages: Joi.array().items(baseMessageSchema).required(),
+      pendingMessages: Joi.array().items(messageUSchema).required(),
     }).description('Result of delivering pending messages'),
   },
   loadUserMessages: {
     in: Joi.object({
       userId: userIdSchema.required(),
     }),
-    out: Joi.array().items(baseMessageSchema),
+    out: Joi.array().items(messageUSchema),
   },
   incrementErrors: {
     in: Joi.object({}),
@@ -432,7 +538,7 @@ export const schemas = {
   },
   publicMessages: {
     in: Joi.object({}),
-    out: Joi.array().items(baseMessageSchema),
+    out: Joi.array().items(messageUSchema),
   },
   broadcastPublicMessage: {
     in: Joi.object({

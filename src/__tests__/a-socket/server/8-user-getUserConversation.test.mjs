@@ -100,20 +100,64 @@ describe('Socket.IO Server Tests', () => {
         //   await Promise((resolve, reject) => setInterval(resolve, 1000));
       }, SOCKET_TEST_TIMEOUT);
 
+      test('should mark messages as delivered', async () => {
+        // Send a private message
+        const messageContent = 'Test message to mark as delivered';
+        const since = new Date();
+        const sentMessage = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
+        expect(sentMessage.status).toBe('sent');
+
+        const socketId = senderSocket.id;
+        const options2 = {
+          since,                // get lastest updates
+          limit: 10,
+          offset: 0,
+          type: 'private',
+          otherPartyId: 'recipient',
+        };
+
+        let history = await userManager.getUserConversation(socketId, options2);
+        expect(history.messages[0].status).toBe(sentMessage.status);
+        expect(history.messages[0].messageId).toBe(sentMessage.messageId);
+
+        // Mark the message as delivered
+        const options = {
+          messageIds: [sentMessage.messageId],
+        };
+        const result = await userManager.markMessagesAsDelivered(recipientSocket.id, options);
+
+        // Validate the result
+        expect(result).toBeDefined();
+        expect(result.marked).toBe(1);
+
+        options2.status = ['delivered'];
+        history = await userManager.getUserConversation(socketId, options2);
+        expect(history.messages[0].status).toBe('delivered');
+        expect(history.messages[0].messageId).toBe(sentMessage.messageId);
+      }, SOCKET_TEST_TIMEOUT * 4);
+
       test('should mark messages as read', async () => {
         // Send a private message
         const messageContent = 'Test message to mark as read';
+        const since = new Date();
         const sentMessage = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
         expect(sentMessage.status).toBe('sent');
-        const mess = await userManager._getMessages('recipient', {
+
+        const socketId = senderSocket.id;
+        const options2 = {
+          since,                // get lastest updates
+          limit: 10,
+          offset: 0,
           type: 'private',
-          direction: 'outgoing',
-          messageIds: [sentMessage.messageId]
-        });
+          otherPartyId: 'recipient',
+        };
+
+        let history = await userManager.getUserConversation(socketId, options2);
+        expect(history.messages[0].status).toBe(sentMessage.status);
+        expect(history.messages[0].messageId).toBe(sentMessage.messageId);
 
         // Mark the message as read
         const options = {
-          senderId: senderUser.userId,
           messageIds: [sentMessage.messageId],
         };
         const result = await userManager.markMessagesAsRead(recipientSocket.id, options);
@@ -121,7 +165,12 @@ describe('Socket.IO Server Tests', () => {
         // Validate the result
         expect(result).toBeDefined();
         expect(result.marked).toBe(1);
-      }, SOCKET_TEST_TIMEOUT) * 2;
+
+        options2.status = ['read'];
+        history = await userManager.getUserConversation(socketId, options2);
+        expect(history.messages[0].status).toBe('read');
+        expect(history.messages[0].messageId).toBe(sentMessage.messageId);
+      }, SOCKET_TEST_TIMEOUT * 4);
 
       test('should handle no unread messages', async () => {
         // Attempt to mark non-existent messages as read

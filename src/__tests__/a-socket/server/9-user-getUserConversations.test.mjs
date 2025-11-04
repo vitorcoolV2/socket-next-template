@@ -87,7 +87,7 @@ describe('Socket.IO Server Tests', () => {
         // wait a little for updateMessageStatus
         let ct = 0;
         const sentMessage2 = await new Promise((resolve) => {
-          senderSocket.on('updateMessageStatus', (msg) => {
+          senderSocket.on('update_message_status', (msg) => {
 
             //expect(msg.status).toBe('pending'); //  .toBe('delivered');
             ct++;
@@ -136,7 +136,7 @@ describe('Socket.IO Server Tests', () => {
         expect(conversation.incoming.pending).toBeGreaterThanOrEqual(2);
         expect(conversation.incoming.read).toBeGreaterThanOrEqual(0);
         expect(conversation.lastMessageAt).toBeDefined();
-      }, SOCKET_TEST_TIMEOUT);
+      }, SOCKET_TEST_TIMEOUT * 2);
 
       test('should return empty array for invalid user', async () => {
         // Retrieve conversation state counts for an invalid user

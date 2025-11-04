@@ -2,8 +2,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { SocketProvider } from '../context/SocketContext';
-import { ChatProvider } from '../context/ChatContext';
+import { SocketProvider } from 'a-app/context/SocketContext';
+import { ChatProvider } from 'a-app/context/ChatContext';
 import Chat from './Chat';
 import UserList from './UsersList';
 

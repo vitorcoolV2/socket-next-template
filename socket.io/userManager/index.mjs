@@ -12,12 +12,14 @@ import {
   userBaseSchema,
   userResultSchema,
   userSessionSchema,
-  baseMessageSchema,
-  persistMessageSchema,
+  messageUSchema,
+  messagePSchema,
   validateEventData,
   socketInfoSchema,
   markMessagesAsReadOptionsSchema,
   markMessagesAsReadResultSchema,
+  markMessagesAsDeliveredOptionsSchema,
+  markMessagesAsDeliveredResultSchema,
   typingSchema,
   getUserConversationPOptionsSchema,
   getMessagesUOptionsSchema,
@@ -41,6 +43,7 @@ import {
 
 
 import { cleanupOldMessages as cleanupOldMessagesUtil } from './messageCleanupUtils.mjs';
+import { mapMessage } from 'a-socket/utils.mjs';
 
 
 const cleanupOldMessages = (threshold = 7 * 24 * 60 * 60 * 1000) => {
@@ -67,19 +70,6 @@ const getNormalizedOptions = (options) => {
   return normalizedOptions;
 };
 
-
-function getHighPrecisionISO() {
-  return new Date().toISOString();
-}
-
-// Example Output: "2025-10-06T22:33:35.186Z"
-const messageContextDefault = () => ({
-  type: 'private',
-  status: 'sent',
-  direction: 'outging',
-  timestamp: getHighPrecisionISO(),
-  readAt: null,
-});
 
 
 export const userManager = (options = {}) => {
@@ -115,12 +105,8 @@ export const userManager = (options = {}) => {
 
   // Maps for tracking users, sockets, and messages
   const the_users = new Map(); // userId -> user data 
-
   const activeUsers = new Map(); // socketId -> userid to retrive the user data
 
-  const userConversations = new Map(); // userId -> Map(conversationPartnerId -> messages[])
-
-  const MAX_PUBLIC_MESSAGES = 100; // Maximum number of public messages to retain
 
   // Metrics
   let totalConnections = 0;
@@ -268,7 +254,6 @@ export const userManager = (options = {}) => {
       // Persist the user data
       return await persistence.storeUser(user).then(us => {
 
-
         // Log the successful connection
         if (debug) {
           console.log(`User connected:`, {
@@ -278,6 +263,10 @@ export const userManager = (options = {}) => {
             state: user.state,
           });
         }
+        __io.emit('user_state_updated', {
+          userId: user.userId,
+          state: user.state,
+        })
         return user;
       }).catch((error) => {
         console.error(`Failed to persist user ${user.userId}:`, error.message);
@@ -299,6 +288,7 @@ export const userManager = (options = {}) => {
     if (sockets.some(s => s.state === 'connected')) return 'connected';
     return 'disconnected';
   };
+
 
   /**
    * Disconnect a user
@@ -326,8 +316,8 @@ export const userManager = (options = {}) => {
 
 
       // Call persistence hook for user disconnection        
-      return await persistence.storeUser(user).then(u => {
-        if (user.sockets.length === 0) {
+      return await persistence.storeUser(user).then(async (usr) => {
+        if (usr.sockets.length === 0) {
           activeUsers.delete(socketId);
           activeConnections--;
           disconnections++;
@@ -337,20 +327,15 @@ export const userManager = (options = {}) => {
         // Log the disconnection
         if (debug) console.log(
           isInactive
-            ? `User ${user.userName} disconnected due to inactivity.`
-            : `User ${user.userName} disconnected from socket ${socketId}`
+            ? `User ${usr.userName} disconnected due to inactivity.`
+            : `User ${usr.userName} disconnected from socket ${socketId}`
         );
 
         // Notify other users about the disconnection
-        __io.emit('user_disconnected', {
-          userId: user.userId,
-          userName: user.userName,
-          state: user.state,
-          reason: isInactive ? 'inactivity' : 'manual',
-        });
+        await updateUserState(usr.userId, usr.state);
 
         return {
-          ...user,
+          ...usr,
           socketId,
         };
       });
@@ -551,7 +536,7 @@ export const userManager = (options = {}) => {
       }
 
       // Step 3: Destructure validated options with defaults applied
-      const { states, limit, offset } = validatedOptions;
+      const { state, limit, offset } = validatedOptions;
 
       // Step 4: Load users from persistence if the_users is empty
       await __loadUsers(the_users.size < 50);
@@ -565,9 +550,9 @@ export const userManager = (options = {}) => {
       let filteredUsers = Array.from(the_users.values());
 
       // Apply filters
-      if (states && states.length > 0) {
-        filteredUsers = filteredUsers.filter(user => states.includes(user.state));
-        //if (debug) console.log(`Filtered by states (${JSON.stringify(states)}): ${JSON.stringify(filteredUsers)}`);
+      if (state && state.length > 0) {
+        filteredUsers = filteredUsers.filter(user => state.includes(user.state));
+        //if (debug) console.log(`Filtered by state (${JSON.stringify(state)}): ${JSON.stringify(filteredUsers)}`);
 
       }
 
@@ -672,13 +657,15 @@ export const userManager = (options = {}) => {
       if (!user) {
         const ret = { success: false, error: `No user found for socketId: ${socketId}` };
         if (debug) console.log(ret);
+        throw new Error(ret.error);
         return ret;
       }
 
       // Step 2: Validate the recipient
       if (!the_users.has(recipientId)) {
-        const ret = { success: false, error: `No user found for userId: ${recipientId}` };
+        const ret = { success: false, error: `Recipient not found: ${recipientId}` };
         if (debug) console.log(ret);
+        throw new Error(ret.error);
         return ret;
       }
 
@@ -698,7 +685,7 @@ export const userManager = (options = {}) => {
       };
 
       // Validate the message against the schema
-      const { valid, errors, data: ___msg } = validateEventData(baseMessageSchema, simple_message);
+      const { valid, errors, data: ___msg } = validateEventData(messageUSchema, simple_message);
       if (!valid) {
         const errorMessage = errors.map(e => e.message).join(', ');
         throw new Error(`Validation failed: ${errorMessage}`);
@@ -735,15 +722,17 @@ export const userManager = (options = {}) => {
 
 
       const _idx = MESSAGE_STATUS_ORDERED.indexOf(newStatus) - 1;
-      const fromStatus = MESSAGE_STATUS_ORDERED[_idx];
-      // Update message states in the persistence layer
+      // status can only move forward. means, only can change status previours to there own status
+      const fromStatus = MESSAGE_STATUS_ORDERED.slice(0, _idx + 1);
+      // Update message state in the persistence layer
       const messSender = await persistence.updateMessageStatus(userId, messageId, newStatus, fromStatus);
 
-      return messSender.find(m => m.direction === 'outgoing');
+      const ret = (messSender || []).find(m => m.direction === 'outgoing');
+      return ret;
     }, `Error updating message state for socketId user: ${socketId}`);
   };
 
-  const getAndDeliverPendingMessages = async (socketId) => {
+  const getPendingMessages = async (socketId) => {
     return safeOperation(async () => {
       // Step 1: Validate the user associated with the socketId
       const user = await _failInsecureSocketId(socketId);
@@ -751,28 +740,18 @@ export const userManager = (options = {}) => {
 
       // Step 2 - Mandatory arguments
       const direction = 'incoming';
-      const status = 'pending';        // we want on delivery pendeng, first is find the previous state, right? :)
       const type = 'private';
 
       // Step 2: Define the query options
       const options = {
-        limit: 50, // Maximum number of messages to retrieve
-        offset: 0, // Start from the first message
-        since: null, // Optional: Ignore messages older than a certain date
-        until: null, // Optional: Ignore messages newer than a certain date
-        messageIds: null, // Optional: Filter by specific message IDs
-        direction, // Incoming messages
-        status, // Pending messages
-        type, // Private messages
-        senderId: null, // Optional: Filter by specific sender
-        otherPartyId: userId, // Filter messages for the current user
-        unreadOnly: true, // Only retrieve unread messages
+        limit: 50, // Batch size
+        offset: 0,
+        type: 'private',
+        recipientId: userId,
+        //  messageId: messageIds,
+        direction: 'incoming',
+        status: ['pending'],
       };
-
-      // Step 3: Apply time-based policies (if applicable)
-      const sinceDate = new Date();
-      sinceDate.setDate(sinceDate.getDate() - 7); // Ignore messages older than 7 days
-      options.since = sinceDate.toISOString();
 
       // Step 4: Validate the options against the schema
       const { error: optionsError, value: validOptions } = getMessagesUOptionsSchema.validate(options);
@@ -786,64 +765,56 @@ export const userManager = (options = {}) => {
       }
 
       // Step 5: Retrieve pending messages
-      const messagesResult = await _getMessages(userId, validOptions);
-      const pendingMessages = messagesResult.messages.filter(msg => msg.status === 'pending');
-      const totalPending = pendingMessages.length;
+      const messagesResult = await persistence.getMessages(userId, validOptions);
 
-      // Step 5: Process each pending message
-      const deliveredMessageIds = [];
-      const undeliveredMessageIds = [];
-      const failedMessageIds = [];
-
-      for (const msg of pendingMessages) {
-        try {
-          // Validate the message structure
-          const { valid, errors } = validateEventData(baseMessageSchema, msg);
-          if (!valid) {
-            console.error(`Invalid message ${msg.messageId}:`, errors.map(e => e.message).join(', '));
-            failedMessageIds.push(msg.messageId);
-            continue;
-          }
-
-          // Check if the recipient is online
-          const recipientSockets = Array.from(the_users.get(msg.recipientId)?.sockets || []);
-          if (recipientSockets.length > 0) {
-            // Update the message status to 'delivered'
-            msg.status = 'delivered';
-
-            // Emit the message to the recipient's sockets
-            recipientSockets.forEach(socket => {
-              __io.to(socket.socketId).emit(`${msg.type}_message`, { ...msg, direction: 'incoming' });
-            });
-
-            // Store the updated message
-            await _storeMessage(userId, { ...msg, direction: 'incoming' });
-            await _storeMessage(msg.sender.userId, { ...msg, direction: 'outgoing' });
-
-            // Add the message ID to the list of delivered messages
-            deliveredMessageIds.push(msg.messageId);
-          } else {
-            // Recipient is offline - skip delivery
-            undeliveredMessageIds.push(msg.messageId);
-            continue;
-          }
-        } catch (error) {
-          console.error(`Failed to deliver pending message ${msg.messageId}:`, error.message);
-          failedMessageIds.push(msg.messageId);
-        }
-      }
-
+      messagesResult.messages = messagesResult.messages.map(mapMessage);
       // Return the result
-      return {
-        delivered: deliveredMessageIds,
-        total: totalPending,
-        failed: failedMessageIds.length,
-        undelivered: undeliveredMessageIds.length,
-        pendingMessages: pendingMessages.filter(m => m.status === 'pending'), // Include all processed messages
-      };
+      return messagesResult;
     }, `Error retrieving pending messages for socketId: ${socketId}`);
   };
 
+
+  const getUnreadMessages = async (socketId) => {
+    return safeOperation(async () => {
+      // Step 1: Validate the user associated with the socketId
+      const user = await _failInsecureSocketId(socketId);
+      const userId = user.userId;
+
+      // Step 2 - Mandatory arguments
+      const direction = 'incoming';
+      const type = 'private';
+
+      // Step 2: Define the query options
+      const options = {
+        limit: 50, // Batch size
+        offset: 0,
+        type: 'private',
+        recipientId: userId,
+        //  messageId: messageIds,
+        direction: 'incoming',
+        status: ['sent', 'pending', 'delivered'],
+        unreadOnly: true,
+      };
+
+      // Step 4: Validate the options against the schema
+      const { error: optionsError, value: validOptions } = getMessagesUOptionsSchema.validate(options);
+      if (optionsError) {
+        throw new Error(`Invalid options: ${optionsError.message}`);
+      }
+
+      // Debugging logs
+      if (debug) {
+        console.log(`Fetching pending messages for userId: ${userId} with options:`, validOptions);
+      }
+
+      // Step 5: Retrieve pending messages
+      const messagesResult = await persistence.getMessages(userId, validOptions);
+
+      messagesResult.messages = messagesResult.messages.map(mapMessage);
+      // Return the result
+      return messagesResult;
+    }, `Error retrieving pending messages for socketId: ${socketId}`);
+  };
 
   /**
    * Mark messages as read for a socketId user state in sent,received,!read
@@ -851,93 +822,168 @@ export const userManager = (options = {}) => {
    */
   const markMessagesAsRead = async (socketId, options) => {
     return safeOperation(async () => {
-      // Step 1: Validate the user associated with the socketId
+      // Step 1: Validate user by socket ID
       const user = await validateUserBySocketId(socketId);
       if (!user) return null;
       const userId = user.userId;
 
-      // Overwrite director on mark message
-      //options.direction = "incoming"; // for now socketId user will mark its own copy of message;
-      // should sender outgoing message copy be updated too ?  It whould flag sender of recipient open-2-read
-      // TODO: investigate best pratice. for NOW just socket user OWN messages
-      // MEANS: --- TAKE CARE OF message owner ship issue. the socker (user as sender) outgoing message MUST NOT persist read_at flag
-
-
-      // Step 2: Validate input options against the schema
+      // Step 2: Validate input options
       const { error: optionsError, value: validOps } = markMessagesAsReadOptionsSchema.validate(options);
       if (optionsError) {
         throw new Error(`Invalid options: ${optionsError.message}`);
       }
 
-      const { direction, senderId: conversationPartnerId, messageIds } = validOps;
+      const { senderId: conversationPartnerId, messageIds } = validOps;
 
-      // Step 3: Fetch unread messages from the persistence layer
-      let unreadMessages = [];
-      try {
-        unreadMessages = await persistence.getUnreadMessages(userId, {
-          conversationPartnerId,
-          messageIds,
-          direction: 'incoming',
-        });
+      // Initialize tracking variables
+      let hasMore = true;
+      let totalMarked = 0;
+      const allUpdatedMessage = [];
 
 
-        // Debugging: Log fetched unread messages
-        if (debug) {
-          console.log(
-            `Fetched ${unreadMessages.length} unread messages for userId: ${userId}`,
-            `Matching message IDs: ${messageIds ? messageIds.join(', ') : 'all'}`
+      // Step 3: Process messages in a loop until no more unread messages
+      while (hasMore) {
+        try {
+          // Fetch unread messages in batches
+          const unreadResult = await persistence.getMessages(userId, {
+            limit: 50, // Batch size
+            offset: totalMarked, // Dynamic offset based on marked messages
+            type: 'private',
+            senderId: conversationPartnerId,
+            recipientId: userId,
+            messageId: messageIds,
+            direction: 'incoming',
+            unreadOnly: true,
+          });
+
+          const { messages: unreadMessages, hasMore: fetchedHasMore } = unreadResult;
+
+          // Break if no messages are fetched or no more messages are available
+          if (!fetchedHasMore && unreadMessages.length === 0) {
+            hasMore = false;
+            break;
+          }
+
+          // Mark fetched messages as read
+          const updatedMessage = unreadMessages.map(mapMessage);
+          const result = await persistence.markMessagesAsRead(userId, {
+            messageIds: updatedMessage,
+          });
+
+          // Validate the result
+          const { error: resultError } = markMessagesAsReadResultSchema.validate(result);
+          if (resultError) {
+            console.error(`Invalid result from persistence: ${resultError.message}`);
+            throw new Error(`Failed to validate persistence result: ${resultError.message}`);
+          }
+
+          // Update tracking variables
+          allUpdatedMessage.push(...updatedMessage);
+          totalMarked += updatedMessage.length;
+        } catch (error) {
+          console.error(
+            `Failed to fetch or mark unread messages for userId: ${userId}, socketId: ${socketId}`,
+            error.message
           );
+          throw error;
         }
-
-        // Step 4: Mark the fetched messages as read in the persistence layer
-        const updatedMessageIds = unreadMessages.map(msg => {
-          return msg.messageId;
-        });
-        const result = await persistence.markMessagesAsRead(userId, { direction, messageIds: updatedMessageIds });
-
-        // Step 6: Validate the result against the schema
-        const { error: resultError } = markMessagesAsReadResultSchema.validate(result);
-        if (resultError) {
-          throw new Error(`Invalid result: ${resultError.message}`);
-        }
-
-        return result;
-
-      } catch (error) {
-        console.error(`Failed to fetch unread messages for userId: ${userId}`, error.message);
-        throw error; // Propagate the error
       }
 
-
+      // Return final result
+      const ret = {
+        success: true,
+        message: 'All unread messages marked as read successfully',
+        data: {
+          updatedMessage: allUpdatedMessage,
+          marked: totalMarked,
+          //  total: totalUnreadMessages,
+        },
+      };
+      return ret.data;
     }, `Error marking messages as read for socketId: ${socketId}`);
   };
 
-
-  /**
-  * Load user messages from persistence layer into conversation structure
-  */
-  const _TO_DELETE_loadUserMessages = async (userId) => {
+  const markMessagesAsDelivered = async (socketId, options) => {
     return safeOperation(async () => {
-      if (!userId || typeof userId !== 'string') {
-        throw new Error('Invalid userId provided');
+      // Step 1: Validate user by socket ID
+      const user = await validateUserBySocketId(socketId);
+      if (!user) return null;
+      const userId = user.userId;
+
+      // Step 2: Validate input options
+      const { error: optionsError, value: validOps } = markMessagesAsDeliveredOptionsSchema.validate(options);
+      if (optionsError) {
+        throw new Error(`Invalid options: ${optionsError.message}`);
       }
 
-      // Fetch messages from persistence
-      let messages = [];
-      try {
-        messages = await persistence.getMessages(userId);
-      } catch (error) {
-        if (debug) console.error(`Failed to load messages for user ${userId}:`, error);
-        throw error;
+      const { senderId: conversationPartnerId, messageIds } = validOps;
+
+      // Initialize tracking variables
+      let hasMore = true;
+      let totalMarked = 0;
+      const allUpdatedMessage = [];
+
+      // Step 3: Process messages in a loop until no more undelivered messages
+      while (hasMore) {
+        try {
+          // Fetch undelivered messages in batches
+          const undeliveredResult = await persistence.getMessages(userId, {
+            limit: 50, // Batch size
+            offset: totalMarked, // Dynamic offset based on marked messages
+            type: 'private',
+            senderId: conversationPartnerId,
+            recipientId: userId,
+            messageId: messageIds,
+            direction: 'incoming',
+            status: ['sent', 'pending'],
+
+          });
+
+          const { messages: undeliveredMessages, hasMore: fetchedHasMore } = undeliveredResult;
+
+          // Break if no messages are fetched or no more messages are available
+          if (!fetchedHasMore && undeliveredMessages.length === 0) {
+            hasMore = false;
+            break;
+          }
+
+          // Mark fetched messages as delivered
+          const updatedMessage = undeliveredMessages.map(mapMessage);
+          const ids = updatedMessage.map(m => m.id);
+          const result = await persistence.markMessagesAsDelivered(userId, {
+            messageIds: ids,
+          });
+
+          // Validate the result
+          const { error: resultError } = markMessagesAsDeliveredResultSchema.validate(result);
+          if (resultError) {
+            console.error(`Invalid result from persistence: ${resultError.message}`);
+            throw new Error(`Failed to validate persistence result: ${resultError.message}`);
+          }
+
+          // Update tracking variables
+          allUpdatedMessage.push(...updatedMessage);
+          totalMarked += updatedMessage.length;
+        } catch (error) {
+          console.error(
+            `Failed to fetch or mark undelivered messages for userId: ${userId}, socketId: ${socketId}`,
+            error.message
+          );
+          throw error;
+        }
       }
 
-      // Store in conversation structure
-      if (messages.length > 0) {
-        await Promise.all(messages.map(message => _storeMessage(message)));
-      }
-
-      return messages;
-    }, `Error loading messages for userId: ${userId}`);
+      // Return final result
+      const ret = {
+        success: true,
+        message: 'All undelivered messages marked as delivered successfully',
+        data: {
+          updatedMessage: allUpdatedMessage,
+          marked: totalMarked,
+        },
+      };
+      return ret.data;
+    }, `Error marking messages as delivered for socketId: ${socketId}`);
   };
 
   const __resetData = () => {
@@ -947,7 +993,6 @@ export const userManager = (options = {}) => {
       return;
     }, `Error reseting users`);
   };
-
 
 
   /**
@@ -965,27 +1010,27 @@ export const userManager = (options = {}) => {
 
 
       // Validate the message against the schema
-      const { valid, errors, data: msg } = validateEventData(persistMessageSchema, message);
+      const { valid, errors, data: msg } = validateEventData(messagePSchema, message);
       if (!valid) {
         const errorMessage = errors.map(e => e.message).join(', ');
         throw new Error(`Validation failed: ${errorMessage}`);
       }
 
       // Store the message in the persistence layer
-      await persistence.storeMessage(userId, msg);
+      const res = await persistence.storeMessage(userId, msg);
 
       if (debug) {
         console.log(`Message stored for user ${userId}:`, msg);
       }
 
-      return msg;
+      return res;
     }, `Error storing message for userId: ${userId}`);
   };
 
   /**
    * Get socket IDs for a specific userId
    */
-  const _getUserSockets = async (userId) => {
+  const getUserSockets = async (userId) => {
     return safeOperation(() => {
       if (!userId || typeof userId !== 'string') {
         throw new Error('Invalid userId provided');
@@ -1005,30 +1050,30 @@ export const userManager = (options = {}) => {
   const _getMessages = async (userId, options = {}) => {
     return safeOperation(async () => {
       // Step 1: Validate userId
-      if (!userId || typeof userId !== 'string') {
-        throw new Error('Invalid userId provided');
-      }
-
-      const normalizedOptions = getNormalizedOptions(options);
-
-      // Step 3: Validate options against schema
-      const { value: validOps, error: optionsError } = getMessagesUOptionsSchema.validate(normalizedOptions);
-      if (optionsError) {
-        throw new Error(`Invalid options: ${optionsError.message}`);
-      }
-
-      // Step 4: Determine the userId for the query
-      const __userId = validOps.type === 'public' ? PUBLIC_MESSAGE_USER_ID : userId;
-
-      // Step 5: Apply public message expiration filter
-      if (validOps.type === 'public') {
-        const expireDate = new Date();
-        expireDate.setDate(expireDate.getDate() - PUBLIC_MESSAGE_EXPIRE_DAYS);
-        validOps.since = expireDate.toISOString();
-      }
+      /*     if (!userId || typeof userId !== 'string') {
+             throw new Error('Invalid userId provided');
+           }
+     
+           const normalizedOptions = getNormalizedOptions(options);
+     
+           // Step 3: Validate options against schema
+           const { value: validOps, error: optionsError } = getMessagesUOptionsSchema.validate(normalizedOptions);
+           if (optionsError) {
+             throw new Error(`Invalid options: ${optionsError.message}`);
+           }
+     
+           // Step 4: Determine the userId for the query
+           const userId = validOps.type === 'public' ? PUBLIC_MESSAGE_USER_ID : userId;
+     
+           // Step 5: Apply public message expiration filter
+           if (validOps.type === 'public') {
+             const expireDate = new Date();
+             expireDate.setDate(expireDate.getDate() - PUBLIC_MESSAGE_EXPIRE_DAYS);
+             validOps.since = expireDate.toISOString();
+           }*/
 
       // Step 6: Fetch messages from persistence
-      return await persistence.getMessages(__userId, validOps).then(messagesResp => {
+      return await persistence.getMessages(userId, validOps).then(messagesResp => {
         // Step 7: Extract messages, total, and hasMore
         const { messages, total, hasMore } = messagesResp;
 
@@ -1048,8 +1093,8 @@ export const userManager = (options = {}) => {
         };
 
       }).catch(error => {
-        console.error(`Failed to fetch messages for userId: ${__userId}`, error.message);
-        throw new Error(`Error fetching messages for userId: ${__userId}. Details: ${error.message}`);
+        console.error(`Failed to fetch messages for userId: ${userId}`, error.message);
+        throw new Error(`Error fetching messages for userId: ${userId}. Details: ${error.message}`);
       });
 
 
@@ -1144,27 +1189,18 @@ export const userManager = (options = {}) => {
         direction: 'outgoing',
       };
 
-      const { valid, errors, data: msg } = validateEventData(baseMessageSchema, enrichedMessage);
+      const { valid, errors, data: msg } = validateEventData(messageUSchema, enrichedMessage);
       if (!valid) {
         throw new Error(`Invalid message: ${errors.map(e => e.message).join(', ')}`);
       }
 
       // Store the message for the sender
-      await _storeMessage(user.userId, { ...msg, direction: 'outgoing' });
-
-      // Store the message globally for all users
-      msg.status = 'delivered';
+      const sentMessage = await _storeMessage(user.userId, { ...msg, direction: 'outgoing' });
       msg.direction = 'incoming';
       await _storeMessage(PUBLIC_MESSAGE_USER_ID, { ...msg, direction: 'incoming' });
 
-      // Broadcast the message to all connected users
-      __io.emit('public_message', { ...msg, direction: 'incoming' });
-
-      if (debug) {
-        console.log(`User ${user.userId} broadcasted public message:`, msg);
-      }
-
-      return msg;
+      // Store the message globally for all users
+      return sentMessage;
     }, `Error broadcasting public message for socketId: ${socketId}`);
   };
 
@@ -1186,9 +1222,9 @@ export const userManager = (options = {}) => {
         since: sevenDaysAgo.toISOString(), // Only retrieve messages from the last 7 days
         until: null, // No upper bound for the updated_at
         type: 'public', // Only retrieve public messages
-        //    direction: 'outgoing', // Align with stored direction for public messages
+        direction: 'incoming', // Align with stored direction for public messages
         unreadOnly: false, // Include both read and unread messages
-        otherPartyId: PUBLIC_MESSAGE_USER_ID, // Special ID for public messages
+        recipientId: PUBLIC_MESSAGE_USER_ID, // Special ID for public messages
       };
 
       // Validate the options against the schema
@@ -1198,7 +1234,8 @@ export const userManager = (options = {}) => {
       }
 
       // Retrieve public messages from the global storage
-      const result = await _getMessages(PUBLIC_MESSAGE_USER_ID, validatedOptions);
+      const result = await persistence.getMessages(PUBLIC_MESSAGE_USER_ID, validatedOptions);
+      //const result = await _getMessages(PUBLIC_MESSAGE_USER_ID, validatedOptions);
       //const result = await _getMessages(user.userId, validatedOptions);
 
       return result;
@@ -1224,8 +1261,9 @@ export const userManager = (options = {}) => {
           limit: userOptions.limit,
           offset: userOptions.offset,
           status: userOptions.status,
-          since: null,
-          until: null,
+          since: userOptions.since,
+          until: userOptions.until,
+          messageId: userOptions.messageId,
           type: 'private',
           unreadOnly: false,
           direction: 'incoming',
@@ -1243,8 +1281,9 @@ export const userManager = (options = {}) => {
           limit: userOptions.limit,
           offset: userOptions.offset,
           status: userOptions.status,
-          since: null,
-          until: null,
+          since: userOptions.since,
+          until: userOptions.until,
+          messageId: userOptions.messageId,
           type: 'private',
           direction: 'outgoing',
           unreadOnly: false,
@@ -1289,10 +1328,11 @@ export const userManager = (options = {}) => {
           limit: userOptions.limit,
           offset: userOptions.offset,
           status: userOptions.status,
-          since: null,
-          until: null,
+          since: userOptions.since,
+          until: userOptions.until,
           unreadOnly: false,
           type: 'public',
+          messageId: userOptions.messageId,
           direction: 'incoming',
           otherPartyId: PUBLIC_MESSAGE_USER_ID, // Special ID for public messages
         };
@@ -1345,6 +1385,11 @@ export const userManager = (options = {}) => {
 
       // Step 4: Persist the updated user (if applicable)
       await persistence.storeUser(user); // Uncomment if using persistence
+
+      __io.emit('user_state_updated', {
+        userId: user.userId,
+        state: user.state,
+      })
 
       // Return the updated user
       return user;
@@ -1409,22 +1454,18 @@ export const userManager = (options = {}) => {
           user.state = 'offline';
 
           try {
-            await persistence.storeUser({
-              userId,
-              state: 'offline',
-            });
-
             console.log(
               `User ${user.userName} (${userId}) transitioned to offline due to inactivity.`
             );
 
             // Notify other users about the disconnection
-            __io.emit('user_disconnected', {
+            updateUserState(userId, 'offline');
+            /*__io.emit('user_disconnected', {
               userId,
               userName: user.userName,
               state: 'offline',
               reason: 'inactivity',
-            });
+            });*/
           } catch (error) {
             console.error(`Failed to persist offline state for user ${userId}:`, error.message);
           }
@@ -1448,29 +1489,28 @@ export const userManager = (options = {}) => {
     getConnectionMetrics,
     //
     markMessagesAsRead, // Add this function to the public API
-    getAndDeliverPendingMessages,
+    markMessagesAsDelivered,
+    getPendingMessages,
+    getUnreadMessages,
     //
     getActiveUsers,     // Add this function to the public API
     getUserConnectionMetrics,
     broadcastPublicMessage,
     getPublicMessages,
-    //   typingIndicator,
     getUserConversation,
-    getUsersList: getUsersList,
+    getUsersList,
     updateUserState,
     storeUser,
     _incrementErrors,
-    getUserSockets: _getUserSockets,
+    getUserSockets,
     updateMessageStatus,
     getUserConversationsList,
-    //storeMessage: _storeMessage,
-    // Testing purposes    
-
     getUserBySocketId,
+    //testing
     _checkInactivity: process.env.NODE_ENV === 'test' ? _checkInactivity : undefined, // Expose only in test environment
     _getMessages: process.env.NODE_ENV === 'test' ? _getMessages : undefined, // Expose only in test environment
     // _incrementErrors: process.env.NODE_ENV === 'test' ? _incrementErrors : undefined, // Expose only in test environment
-    _getUserSockets: process.env.NODE_ENV === 'test' ? _getUserSockets : undefined, // Expose only in test environment     
+    _getUserSockets: process.env.NODE_ENV === 'test' ? getUserSockets : undefined, // Expose only in test environment     
     __resetData: process.env.NODE_ENV === 'test' ? __resetData : undefined,
     _getSockeyById: process.env.NODE_ENV === 'test' ? _getSockeyById : undefined,
     _failInsecureSocketId: process.env.NODE_ENV === 'test' ? _failInsecureSocketId : undefined,

@@ -60,3 +60,78 @@ export const waitForEvent = (socket, eventName, timeoutMs = 5000) => {
     ),
   ]);
 };
+
+
+export const sendMessageWaitEvent_old = async (socket, content, recipientId, timeoutMs = 5000) => {
+  const result = new Promise((resolve, reject) => {
+    socket.timeout(timeoutMs).emit('sendMessage', { recipientId, content }, (_, event_) => {
+      if (_) return reject(_);
+
+      const event = Array.isArray(event_) ? event_[0] : event_;
+      return resolve(event.success ? event.result : event.error);
+    });
+    return
+  });
+  return result;
+};
+
+
+/**
+ * Retries an asynchronous function until it succeeds or the timeout is reached.
+ *
+ * @param {Function} fn - The asynchronous function to retry.
+ * @param {number} timeout - Total time (in milliseconds) to keep retrying.
+ * @param {number} interval - Time (in milliseconds) to wait between retries.
+ * @throws {Error} Throws an error if the function does not succeed within the timeout.
+ */
+export const retryWithTimeout = async (fn, timeout, interval) => {
+  const start = Date.now(); // Record the start time
+
+  while (Date.now() - start < timeout) {
+    try {
+      await fn(); // Attempt to execute the function
+      return; // Success: exit the loop if the function resolves without errors
+    } catch (error) {
+      // Log the error for debugging purposes (optional)
+      console.warn(`Retry failed: ${error.message}. Retrying in ${interval}ms...`);
+    }
+
+    // Wait for the specified interval before retrying
+    await new Promise(resolve => setTimeout(resolve, interval));
+  }
+
+  // If the timeout is reached, throw an error
+  throw new Error('Timeout waiting for condition');
+};
+
+
+
+export const sendMessageWaitEvent = async (socket, content, recipientId, timeoutMs = 5000) => {
+  const result = await new Promise((resolve, reject) => {
+
+    const ioTimeout = Math.min(timeoutMs - 100, 100);  // !50,
+    try {
+      socket.timeout(ioTimeout).emit('sendMessage', { recipientId, content, clientTimeout: timeoutMs }, (err, response) => {
+        if (err) {
+          // Socket.IO timeout or network error
+          return reject(err);
+        }
+
+        const event = Array.isArray(response) ? response[0] : response;
+
+        if (event.success === false) {
+          // Server returned explicit error
+          const error = new Error(event.error);
+          error.code = 'SERVER_ERROR';
+          return reject(error);
+        }
+
+        // Success case - return the message object directly
+        return resolve(event.result);
+      });
+    } catch (error) {
+      console.error(error);
+    }
+  });
+  return result;
+};

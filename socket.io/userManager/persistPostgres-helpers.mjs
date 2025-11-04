@@ -121,3 +121,38 @@ export function getMessageStats(filterField, prefix, direction) {
         `MAX(created_at) FILTER (WHERE ${filterField} = $1 AND direction = '${direction}') AS "${prefix}lastMessageAt"`,
     ];
 }
+
+export function renderStaticSQL(query, values) {
+    return query.replace(/\$(\d+)/g, (_, index) => {
+        const value = values[parseInt(index) - 1];
+        if (value === undefined) {
+            throw new Error(`Missing value for placeholder $${index}`);
+        }
+
+        // Handle Date instances
+        if (value instanceof Date) {
+            return `'${value.toISOString()}'`; // Format as ISO 8601 string
+        }
+
+        // Handle arrays
+        if (Array.isArray(value)) {
+            return `ARRAY[${value.map(v => {
+                if (v instanceof Date) {
+                    return `'${v.toISOString()}'`; // Format Date objects
+                }
+                if (typeof v === 'string') {
+                    return `'${v.replace(/'/g, "''")}'`; // Escape single quotes in strings
+                }
+                return v; // Default: Return as-is (e.g., numbers, booleans)
+            }).join(',')}]`;
+        }
+
+        // Handle strings
+        if (typeof value === 'string') {
+            return `'${value.replace(/'/g, "''")}'`; // Escape single quotes
+        }
+
+        // Default: Return the value as-is (e.g., numbers, booleans)
+        return value;
+    });
+}

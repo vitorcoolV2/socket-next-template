@@ -5,8 +5,12 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "esModuleInterop": true,
-    "types": ["jest", "node", "@testing-library/jest-dom"],
-    "isolatedModules": true
+    "types": [
+      "jest",
+      "node",
+      "@testing-library/jest-dom"
+    ],
+    "isolatedModules": true,
   },
   "include": [
     "src/**/*.ts",
@@ -16,5 +20,7 @@
     "**/*.test.mjs",
     "jest.setup.mjs"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import { useSocket } from '../context/SocketContext';
+import { useSocket } from 'a-app/context/SocketContext';
 
 interface InputProps {
     recipientId: string; // The ID of the recipient

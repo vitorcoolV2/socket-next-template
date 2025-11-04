@@ -91,7 +91,7 @@ describe('Socket.IO Server Tests', () => {
 
         // Retrieve users with filters
         const retrievedUsers = await userManager.getUsersList(senderSocket.id, {
-          states: ['authenticated'],
+          state: ['authenticated'],
           limit: 10,              // Retrieve up to 10 users
           offset: 0               // Start from the first user
         });
@@ -127,7 +127,7 @@ describe('Socket.IO Server Tests', () => {
 
         // Retrieve users with strict filters
         const retrievedUsers = await userManager.getUsersList(senderSocket.id, {
-          states: ['disconnected'],
+          state: ['disconnected'],
           limit: 10,
           offset: 0
         });
@@ -142,7 +142,7 @@ describe('Socket.IO Server Tests', () => {
 
         // Retrieve users with pagination beyond available users
         const retrievedUsers = await userManager.getUsersList(senderSocket.id, {
-          states: ['authenticated'],
+          state: ['authenticated'],
           limit: 10,  // Request more than available
           offset: 5   // Offset beyond available users
         });
@@ -156,7 +156,7 @@ describe('Socket.IO Server Tests', () => {
         // Attempt to retrieve users with invalid options
         await expect(
           userManager.getUsersList(senderSocket.id, {
-            states: ['invalid-state'],
+            state: ['invalid-state'],
             limit: 10,
             offset: 0
           })
@@ -168,7 +168,7 @@ describe('Socket.IO Server Tests', () => {
       test('should handle edge case: unauthenticated socketId', async () => {
         // Attempt to retrieve users with an unauthenticated socketId
         const stangeValue = await userManager.getUsersList(senderSocket.id, {
-          states: ['authenticated'],
+          state: ['authenticated'],
           limit: 10,
           offset: 0
         });
@@ -176,7 +176,7 @@ describe('Socket.IO Server Tests', () => {
         expect(stangeValue).not.toBeNull(); // this test validate anomaly. how the ek is the disconnected user diferent from null?
 
         const retrievedUsers = await userManager.getUsersList('invalid-socket-id-xxxx', {
-          states: ['authenticated'],
+          state: ['authenticated'],
           limit: 10,
           offset: 0
         });
@@ -191,7 +191,7 @@ describe('Socket.IO Server Tests', () => {
 
         // Attempt to retrieve users
         const retrievedUsers = await userManager.getUsersList(senderSocket.id, {
-          states: ['authenticated'],
+          state: ['authenticated'],
           limit: 10,
           offset: 0
         });

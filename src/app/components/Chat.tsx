@@ -1,6 +1,12 @@
 // components/Chat.tsx
-import { useEffect, useState, useCallback } from 'react';
-import { useSocket, type Message, type FetchGetUserConversationOptions } from '../context/SocketContext';
+import { useRef, useEffect, useState, useCallback } from 'react';
+import {
+  useSocket,
+  type Message,
+  type FetchGetUserConversationOptions,
+  UserConversationMessageEvent,
+  GetUserConversationResponse
+} from '../context/SocketContext';
 import Input from './Input';
 import { MessageItem } from './MessageItem';
 
@@ -9,24 +15,51 @@ interface ChatProps {
 }
 
 const Chat = ({ recipientId }: ChatProps) => {
-  const { socket, isAuthenticated, getUserConversation, socketUser } = useSocket();
+  const { socket, isAuthenticated, getUserConversation, socketUser, conversationsList } = useSocket();
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [offset, setOffset] = useState(0);
-  const limit = 50;
+  const [recipientName, setRecipientName] = useState<string | null>('');
+  const limit = 500;
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+
+  // Scroll to the bottom of the messages container
+  // Scroll to the bottom of the messages container
+  const scrollToBottom = () => {
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
+  };
+  const scrollToBottom2 = () => {
+    if (messagesContainerRef.current) {
+      const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+      const isNearBottom = scrollHeight - scrollTop - clientHeight < 50; // 50px threshold
+      if (isNearBottom) {
+        messagesContainerRef.current.scrollTop = scrollHeight;
+      }
+    }
+  };
+
+  useEffect(() => {
+    // Scroll to the bottom when new messages are added
+    scrollToBottom();
+  }, [messages]);
 
   // Load conversation messages
   const loadConversation = useCallback(async (loadMore = false) => {
-    if (!isAuthenticated || !socketUser || !socketUser.userId) return;
+    if (!isAuthenticated || !socketUser || !socketUser.userId || !conversationsList) return;
 
     const currentOffset = loadMore ? offset : 0;
 
     setLoading(true);
     setError(null);
 
-    const userId = socketUser.userId || 'undefined';
+    const userId = socketUser.userId;
+    const recipient = conversationsList.find(u => u.otherPartyId === recipientId);
+    setRecipientName(recipient?.otherPartyName || null);
+
 
     try {
       const options: FetchGetUserConversationOptions = {
@@ -40,18 +73,18 @@ const Chat = ({ recipientId }: ChatProps) => {
         //unreadOnly: false
       };
 
-      const response = await getUserConversation(options);
+      const data: GetUserConversationResponse = await getUserConversation(options);
 
       if (loadMore) {
         // Append messages when loading more
-        setMessages(prev => [...prev, ...response.messages]);
+        setMessages(prev => [...prev, ...data.messages]);
       } else {
         // Replace messages for initial load
-        setMessages(response.messages);
+        setMessages(data.messages);
       }
 
-      setHasMore(response.hasMore);
-      setOffset(currentOffset + response.messages.length);
+      setHasMore(data.hasMore);
+      setOffset(currentOffset + data.messages.length);
 
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load messages');
@@ -59,7 +92,7 @@ const Chat = ({ recipientId }: ChatProps) => {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, getUserConversation, recipientId, offset, limit]);
+  }, [isAuthenticated, getUserConversation, conversationsList, recipientId, offset, limit]);
 
   // Load initial messages
   useEffect(() => {
@@ -67,56 +100,54 @@ const Chat = ({ recipientId }: ChatProps) => {
     loadConversation(false);
   }, [recipientId, isAuthenticated]);
 
+
+  const handleIncomingMessage = useCallback((message: Message) => {
+    if (message.senderId === recipientId || message.recipientId === recipientId) {
+      setMessages(prevMessages => {
+        const exists = prevMessages.some(msg => msg.id === message.id);
+        if (!exists) {
+          return [...prevMessages, message];
+        }
+        return prevMessages;
+      });
+    }
+  }, [recipientId]);
+
   // Listen for real-time messages
   useEffect(() => {
     if (!socket) return;
-
-    const handleIncomingMessage = (message: Message) => {
-      // Check if message belongs to this conversation
-      if (message.senderId === recipientId || message.recipientId === recipientId) {
-        console.log('Received real-time message:', message);
-        setMessages(prevMessages => {
-          // Avoid duplicates
-          if (prevMessages.some(msg => msg.id === message.id)) {
-            return prevMessages;
-          }
-          return [...prevMessages, message];
-        });
-
-        // Reload conversation to ensure we have the latest state
-        // This handles message ordering and updates lastMessageAt
-        loadConversation(false);
-      }
-    };
-
-    socket.on('receivedMessage', handleIncomingMessage);
-
-    // Cleanup listeners on unmount
+    socket.on('update_message_status', handleIncomingMessage);
     return () => {
-      socket.off('receivedMessage', handleIncomingMessage);
+      socket.off('update_message_status', handleIncomingMessage);
     };
-  }, [socket, recipientId, loadConversation]);
+  }, [socket, handleIncomingMessage]);
 
   const handleSendMessage = async (content: string) => {
     if (!content.trim() || !socket) return;
 
     try {
       // Emit the message to the server and wait for acknowledgement
-      socket.emit('sendMessage', {
-        recipientId,
-        content: content
-      }, (ack: any) => {
-        if (ack && ack.success) {
-          console.log('Message sent successfully with ack:', ack);
-          // The real message will come via receivedMessage or we can reload
-          // not optimistic message immediately
-          setMessages(prevMessages => [...prevMessages, ack]);
-          loadConversation(false);
-        } else {
-          // Handle send failure
-          setError('Failed to send message');
-        }
-      });
+      socket.emit('sendMessage', { recipientId, content },
+        (ack: UserConversationMessageEvent) => {
+          if (ack && ack.success &&
+            ack.event === 'sendMessage' &&
+            ack.success === true &&
+            ack?.result
+          ) {
+            console.log('Message sent successfully with ack:', ack);
+            /*       setMessages(prevMessages => {
+                     // Check if the message already exists
+                     const exists = prevMessages.some(msg => msg.id === ack.result.id);
+                     if (!exists) {
+                       //        return [...prevMessages, ack.result];
+                     }
+                     return prevMessages;
+                   });*/
+          } else {
+            // Handle send failure
+            setError('Failed to send message');
+          }
+        });
 
     } catch (err) {
       console.error('Error sending message:', err);
@@ -134,16 +165,16 @@ const Chat = ({ recipientId }: ChatProps) => {
   const getMessageKey = (message: Message, index: number) => {
     // Use message.id if available and not a temp ID, otherwise fall back to index
     if (message.id && !message.id.startsWith('temp-')) {
-      return message.id;
+      return `${message.id}-${message.direction}`;
     }
     // For temp messages or messages without ID, create a composite key
-    return `${message.id || `msg-${index}`}-${new Date(message.timestamp).getTime()}`;
+    return `${message.id || `msg-${index}`}-${message.createdAt}`;
   };
 
   if (loading && messages.length === 0) {
     return (
       <div>
-        <h1>Chat with {recipientId}</h1>
+        <h1>Chat with {recipientName}</h1>
         <p>Loading messages...</p>
       </div>
     );
@@ -152,23 +183,31 @@ const Chat = ({ recipientId }: ChatProps) => {
   return (
     <div className="chat-container">
       <div className="chat-header">
-        <h1>Chat with {recipientId}</h1>
-        <p>Status: {isAuthenticated ? 'Connected' : 'Disconnected'}</p>
+        <h1>Chat with {recipientName}</h1>
+        {/* <p>State: {isAuthenticated ? 'Connected' : 'Disconnected'}</p> */}
         {error && (
-          <div className="error-message" style={{ color: 'red' }}>
-            Error: {error}
-            <button onClick={() => setError(null)}>Dismiss</button>
+          <div className="error-message bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded relative">
+            <span>Error: {error}</span>
+            <button
+              onClick={() => setError(null)}
+              className="absolute top-0 right-0 px-2 py-1 text-sm font-semibold text-red-700 hover:text-red-900"
+            >
+              Dismiss
+            </button>
           </div>
         )}
       </div>
 
       {/* Messages Area */}
-      <div className="messages-area">
+      <div
+        className="messages-area overflow-y-auto h-[400px]"
+        ref={messagesContainerRef}
+      >
         {hasMore && (
           <div className="load-more">
             <button
               onClick={handleLoadMore}
-              disabled={loading}
+              disabled={loading || !hasMore}
             >
               {loading ? 'Loading...' : 'Load older messages'}
             </button>
@@ -185,7 +224,7 @@ const Chat = ({ recipientId }: ChatProps) => {
               <MessageItem
                 key={getMessageKey(message, index)}
                 message={message}
-                index={index}
+                recipientName={recipientName || ''}
               />
             ))}
           </ul>

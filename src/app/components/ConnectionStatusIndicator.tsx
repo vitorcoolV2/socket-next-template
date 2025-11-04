@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { useSocket } from '../context/SocketContext';
+import { useSocket } from 'a-app/context/SocketContext';
 
 export const ConnectionStatusIndicator = () => {
     const { isConnected, isAuthenticated, socket } = useSocket();

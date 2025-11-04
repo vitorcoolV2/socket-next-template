@@ -1,6 +1,6 @@
 
 import { PersistenceInterface } from './PersistenceInterface.mjs'
-import { validateOptions, buildDefaultConversation, processConversationRow, getMessageStats } from './persistPostgres-helpers.mjs'
+import { validateOptions, renderStaticSQL, buildDefaultConversation, processConversationRow, getMessageStats } from './persistPostgres-helpers.mjs'
 // userPersistent.mjs
 import pg from 'pg';
 const { Pool } = pg;
@@ -17,18 +17,20 @@ import {
   userBaseSchema,
   userResultSchema,
   userSessionSchema,
-  baseMessageSchema,
+  messageUSchema,
   validateEventData,
   socketInfoSchema,
   markMessagesAsReadOptionsSchema,
   markMessagesAsReadResultSchema,
+  markMessagesAsDeliveredSchema,
   typingSchema,
   getUserConversationUOptionsSchema,
   getMessagesUOptionsSchema,
   activeUserSchema,
   userQuerySchema,
-  statusSchema,
+  sendStatusSchema,
   getConversationsListPOptionsSchema,
+  markMessagesAsReadSchema,
   MESSAGE_STATUS_ORDERED
 } from './schemas.mjs';
 
@@ -301,129 +303,6 @@ export class PostgresPersistence extends PersistenceInterface {
     }
   }
 
-  // mark incoming message as read
-  async markMessagesAsRead(userId, options) {
-    const { direction = 'incoming', messageIds = null } = options;
-
-    // Step 1: Validate inputs
-    if (!userId || typeof userId !== 'string') {
-      throw new Error('Invalid userId provided');
-    }
-    if (messageIds !== null && (!Array.isArray(messageIds) || !messageIds.every(id => typeof id === 'string'))) {
-      throw new Error('Invalid messageIds provided');
-    }
-
-    // Step 2: Handle non-incoming messages
-    if (direction !== 'incoming') {
-      console.warn(`UserId ${userId} attempted to mark outgoing messages as read. Ignoring.`);
-      return {
-        marked: 0,
-        total: 0,
-      };
-    }
-
-    // Step 3: Handle edge cases
-    if (messageIds !== null && messageIds.length === 0) {
-      // No message IDs to update, return early
-      return {
-        marked: 0,
-        total: 0,
-      };
-    }
-
-    // Step 4: Dynamically construct the SQL query
-    let query = `
-    UPDATE messages
-    SET read_at = NOW()
-    WHERE read_at IS NULL
-      AND recipient_id = $1
-  `;
-    const params = [userId];
-
-    if (messageIds !== null) {
-      query += ` AND message_id = ANY($${params.length + 1})`;
-      params.push(messageIds);
-    }
-
-    if (direction) {
-      query += ` AND direction = $${params.length + 1}`;
-      params.push(direction);
-    }
-
-    query += ` RETURNING message_id`;
-
-    // Step 5: Execute the query
-    try {
-      const result = await this.pool.query(query, params);
-
-      // Log the number of rows updated
-      const markedCount = result.rows.length;
-      if (debug) {
-        console.log(
-          `Marked ${markedCount} messages as read for user ${userId}`,
-          `Matching message IDs: ${messageIds ? messageIds.join(', ') : 'all'}`,
-          `Direction: ${direction}`
-        );
-      }
-
-      return {
-        marked: markedCount,
-        total: messageIds ? messageIds.length : 'all',
-      };
-    } catch (error) {
-      console.error(`Failed to mark messages as read for userId: ${userId}`, error.message);
-      throw error; // Propagate the error
-    }
-  }
-
-  async ____TO_DELETE_onUserAuthenticated(user) {
-    await this.ensureInitialized(); // Ensure the database is initialized
-    try {
-      await this.pool.query(
-        'UPDATE user_sessions SET state = $1, last_activity = $2 WHERE user_id = $3',
-        ['authenticated', new Date(), user.userId]
-      );
-    } catch (error) {
-      console.error('Error in onUserAuthenticated:', error);
-      throw error;
-    }
-  }
-
-
-  async ____TO_DELETE_onUserDisconnected(uSession) {
-    await this.ensureInitialized(); // Ensure the database is initialized
-    try {
-      // select user_sessions sockets as [{sessionId,state,connectedAt,sessionId}] where user_id = ${user.userId}
-      await this.pool.query(
-        `UPDATE user_sessions 
-         SET sockets = array_remove(sockets, (socket)=> socket.socketId $1), // !!! to GPT pseudo code
-             last_activity = $2
-         WHERE user_id = $3`,
-        [uSession.socketId, new Date(), uSession.userId]
-      );
-
-      // Remove user if no more socket connections. never delete user_session. update user_session.sockets, by removing
-
-    } catch (error) {
-      console.error('Error in onUserDisconnected:', error);
-      throw error;
-    }
-  }
-
-  async ____TO_DELETE_onUserActivity(user) {
-    await this.ensureInitialized(); // Ensure the database is initialized
-    try {
-      await this.pool.query(
-        'UPDATE user_sessions SET last_activity = $1 WHERE user_id = $2',
-        [new Date(), user.userId]
-      );
-    } catch (error) {
-      console.error('Error in onUserActivity:', error);
-      throw error;
-    }
-  }
-
-
   /**
    * Message persistence
    */
@@ -464,7 +343,8 @@ export class PostgresPersistence extends PersistenceInterface {
           status = EXCLUDED.status,
           updated_at = EXCLUDED.updated_at,
           read_at = EXCLUDED.read_at,
-          metadata = EXCLUDED.metadata;
+          metadata = EXCLUDED.metadata
+        RETURNING *
       `;
 
 
@@ -488,69 +368,151 @@ export class PostgresPersistence extends PersistenceInterface {
 
       // Execute the query
       console.log(query, values);
-      await this.pool.query(query, values);
+      const result = await this.pool.query(query, values);
+
+      const finalMessage = {
+        ...message,
+        status: result.rows[0].status,
+        createdAt: result.rows[0].created_at,
+        updatedAt: result.rows[0].updated_at,
+        readAt: result.rows[0].read_at,
+        //metadata : result.rows[0].metadata,
+      };
 
       // Log the operation
       if (debug) console.log(`Upserted message ${messageId} for user ${userId} in database persistence`);
 
       // Return the message object
-      return message;
+      return finalMessage;
     } catch (error) {
       console.error('Error in storeMessage:', error.message);
       throw error; // Re-throw the error for upstream handling
     }
   }
 
-  async getUnreadMessages(userId, options = {}) {
-    const { conversationPartnerId, messageIds, direction } = options;
+  // reciving user mark (incoming.outgoing) message with status "read", read_at= <NOW>
 
-    // Base query to fetch unread messages for the user
-    let query = `
-    SELECT 
-        message_id AS "messageId",
-        sender_id AS "senderId",
-        sender_name AS "senderName",
-        recipient_id AS "recipientId",
-        content,
-        message_type AS "type",
-        direction,
-        status,
-        updated_at,
-        read_at AS "readAt",
-        metadata
-    FROM messages
-    WHERE recipient_id = $1
-      AND read_at IS NULL
-  `;
-    const params = [userId];
-
-    // Add filters based on provided options
-    if (conversationPartnerId) {
-      query += ` AND sender_id = $${params.length + 1}`;
-      params.push(conversationPartnerId);
-    }
-
-    if (messageIds && messageIds.length > 0) {
-      // Dynamically generate placeholders for message IDs
-      const placeholders = messageIds.map((_, i) => `$${params.length + i + 1}`).join(', ');
-      query += ` AND message_id IN (${placeholders})`;
-      params.push(...messageIds);
-    }
-
-    // Add direction filter if provided
-    if (direction === 'incoming') {
-      query += ` AND direction = 'incoming'`;
-    } else if (direction === 'outgoing') {
-      query += ` AND direction = 'outgoing'`;
-    }
-
+  async markMessagesAsRead(userId, options) {
+    const { messageIds } = options;
     try {
-      // Execute the query with the constructed parameters
+      // Step 1: Validate inputs using Joi
+      const { error: validationError } = markMessagesAsReadSchema.validate({ userId, messageIds });
+      if (validationError) {
+        throw new Error(`Invalid input: ${validationError.message}`);
+      }
+
+      // Step 2: Construct the SQL query
+      let query = `
+        WITH updated_messages AS (
+          UPDATE messages
+          SET read_at = NOW(), status = 'read', updated_at = NOW()
+          WHERE read_at IS NULL
+            AND direction IN ('incoming', 'outgoing')
+            AND recipient_id = $1
+            AND message_id = ANY ($2)
+          RETURNING *
+        )
+        SELECT message_id AS "messageId",
+            sender_id AS "senderId",
+            sender_name AS "senderName",
+            recipient_id AS "recipientId",
+            content,
+            message_type AS "type",
+            direction,
+            status,
+            created_at,
+            updated_at,
+            read_at
+        FROM updated_messages;
+      `;
+      const params = [userId, messageIds];
+
+      // Step 3: Execute the query
+      if (debug) {
+        const debugSql = renderStaticSQL(query, params);
+        console.log(debugSql);
+      }
       const result = await this.pool.query(query, params);
-      return result.rows;
+
+      // Step 4: Log the number of rows updated
+      const markedCount = result.rows.length;
+      if (debug) {
+        console.log(
+          `Marked ${markedCount} messages as read for user ${userId}`,
+          `Matching message IDs: ${messageIds.join(', ')}`,
+        );
+      }
+
+      // Step 4: Return the result
+      return {
+        marked: markedCount,
+        updatedMessage: result.rows.map(this.mapMessages),
+      };
     } catch (error) {
-      console.error(`Failed to fetch unread messages for userId: ${userId}`, error.message);
-      throw error; // Propagate the error
+      console.error(`Failed to mark messages as read for userId: ${userId}`, error.message);
+      throw new Error(`Database error: Failed to mark messages as read for userId: ${userId}. Details: ${error.message}`);
+    }
+  }
+
+  async markMessagesAsDelivered(userId, options) {
+    const { messageIds } = options;
+    try {
+      // Step 1: Validate inputs using Joi
+      const { error: validationError } = markMessagesAsDeliveredSchema.validate({ userId, messageIds });
+      if (validationError) {
+        throw new Error(`Invalid input: ${validationError.message}`);
+      }
+
+      // Step 2: Construct the SQL query
+      // delivered makes sense before read_at not null. if is read, is delivered. 
+      let query = `
+      WITH updated_messages AS (
+        UPDATE messages
+        SET status = 'delivered', updated_at = NOW()
+        WHERE read_at IS NULL
+          AND direction IN ('incoming', 'outgoing')
+          AND recipient_id = $1
+          AND message_id = ANY ($2)
+        RETURNING *
+        )
+        SELECT message_id AS "messageId",
+            sender_id AS "senderId",
+            sender_name AS "senderName",
+            recipient_id AS "recipientId",
+            content,
+            message_type AS "type",
+            direction,
+            status,
+            created_at,
+            updated_at,
+            read_at
+        FROM updated_messages;
+    `;
+      const params = [userId, messageIds];
+
+      // Step 3: Execute the query
+      if (debug) {
+        console.log(`Executing query: ${query}`, `With parameters: ${JSON.stringify(params)}`);
+      }
+      const result = await this.pool.query(query, params);
+
+      // Step 4: Log the number of rows updated
+      const markedCount = result.rows.length;
+      if (debug) {
+        console.log(
+          `Marked ${markedCount} messages as delivered for user ${userId}`,
+          `Matching message IDs: ${messageIds.join(', ')}`,
+        );
+      }
+
+      // Step 5: Return the result
+      return {
+        marked: markedCount,
+        updatedMessage: result.rows.map(this.mapMessages),
+      };
+    } catch (error) {
+      console.error(`Failed to mark messages as delivered for userId: ${userId}`, error.message);
+      throw new Error(`Database error: Failed to mark messages as delivered for userId: ${userId}. Details: ${error.message}`);
     }
   }
 
@@ -601,16 +563,16 @@ export class PostgresPersistence extends PersistenceInterface {
         return [];
       }
 
-      const { states = null, limit = 10, offset = 0, include = [] } = validOptions;
+      const { state = null, limit = 10, offset = 0, include = [] } = validOptions;
 
       // Build the WHERE clause dynamically and prepare parameters
       const whereClauses = [];
       const queryParams = [];
       let paramIndex = 1;
 
-      if (states && states.length > 0) {
-        whereClauses.push(`state = ANY($${paramIndex})`);
-        queryParams.push(states);
+      if (state && state.length > 0) {
+        whereClauses.push(`state = ANY ($${paramIndex})`);
+        queryParams.push(state);
         paramIndex++;
       }
 
@@ -682,9 +644,9 @@ export class PostgresPersistence extends PersistenceInterface {
         SELECT DISTINCT sender_id, sender_name 
         FROM messages 
         WHERE 
-          (direction = 'incoming' AND sender_id = ANY($1)) 
+          (direction = 'incoming' AND sender_id = ANY ($1)) 
         OR
-          (direction = 'outgoing' AND recipient_id = ANY($1)) 
+          (direction = 'outgoing' AND recipient_id = ANY ($1)) 
     `;
       const values = [senderIds];
 
@@ -838,6 +800,25 @@ export class PostgresPersistence extends PersistenceInterface {
     }
   }
 
+  mapMessages(row) {
+    return {
+      messageId: row.messageId,
+      sender: {
+        userId: row.senderId,
+        userName: row.senderName,
+      },
+      recipientId: row.recipientId,
+      content: row.content,
+      type: row.type,
+      direction: row.direction,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      readAt: row.read_at,
+      metadata: row.metadata || {},
+    }
+  }
+
   /**
    * Retrieve all messages for a user from the database
    */
@@ -855,8 +836,9 @@ export class PostgresPersistence extends PersistenceInterface {
       offset = 0,
       since = null,
       until = null,
+      //
       type = null,
-      messageIds = null,
+      messageId = null,
       direction = null,
       unreadOnly = false,
       senderId = null,
@@ -864,10 +846,23 @@ export class PostgresPersistence extends PersistenceInterface {
       status = null,
     } = validOps;
 
-    try {
-      // Determine the recipientId for the query
-      //const recipientId = type === 'public' ? PUBLIC_MESSAGE_USER_ID : _userId;
 
+    // Normalize type to always be an array
+    const normalizedType = Array.isArray(type) ? type
+      : typeof type === 'string' ? [type]
+        : [];
+
+    // Normalize status to always be an array
+    const normalizedFromStatus = Array.isArray(status) ? status
+      : typeof status === 'string' ? [status]
+        : [];
+
+    // Normalize message identifier to always be an array
+    const normalizedMessageId = Array.isArray(messageId) ? messageId
+      : typeof messageId === 'string' ? [messageId]
+        : [];
+
+    try {
       // Construct the base query
       let query = `
       SELECT 
@@ -879,93 +874,67 @@ export class PostgresPersistence extends PersistenceInterface {
         message_type AS "type",
         direction,
         status,
-        created_at as createdAt,
-        updated_at as updatedAt,
-        read_at AS "readAt",
+        created_at,
+        updated_at,
+        read_at,
         metadata
       FROM messages
-      WHERE recipient_id = $1
+      WHERE message_type = ANY ($1)
     `;
-      const params = [recipientId];
+      const params = [normalizedType];
 
       // Add filters dynamically
-      if (type) {
-        query += ` AND message_type = $${params.length + 1}`;
-        params.push(type);
-      }
-
-      if (direction) {
-        query += ` AND direction = $${params.length + 1}`;
-        params.push(direction);
+      if (messageId) {
+        query += ` AND message_id = ANY ($${params.length + 1})\n`;
+        params.push(normalizedMessageId);
       }
 
       if (status) {
-        query += ` AND status = $${params.length + 1}`;
-        params.push(status);
+        query += ` AND status = ANY ($${params.length + 1})\n`;
+        params.push(normalizedFromStatus);
+      }
+
+      if (direction) {
+        query += ` AND direction = $${params.length + 1}\n`;
+        params.push(direction);
       }
 
       if (unreadOnly) {
-        query += ` AND read_at IS NULL`;
+        query += ` AND read_at IS NULL\n`;
       }
 
       if (since) {
-        query += ` AND updated_at >= $${params.length + 1}`;
+        query += ` AND updated_at >= $${params.length + 1}\n`;
         params.push(new Date(since).toISOString());
       }
 
       if (until) {
-        query += ` AND updated_at <= $${params.length + 1}`;
+        query += ` AND updated_at <= $${params.length + 1}\n`;
         params.push(new Date(until).toISOString());
       }
 
       if (senderId) {
-        query += ` AND sender_id = $${params.length + 1}`;
+        query += ` AND sender_id = $${params.length + 1}\n`;
         params.push(senderId);
       }
       if (recipientId) {
-        query += ` AND recipient_id = $${params.length + 1}`;
+        query += ` AND recipient_id = $${params.length + 1}\n`;
         params.push(recipientId);
       }
 
-      // For public messages, apply the expiration filter
-      /*      if (type === 'public') {
-              const expireDate = new Date();
-              expireDate.setDate(expireDate.getDate() - PUBLIC_MESSAGE_EXPIRE_DAYS);
-              query += ` AND updated_at >= $${params.length + 1}`;
-              params.push(expireDate.toISOString());
-            } else if (type !== 'public' && otherPartyId) {
-              // Ignore otherPartyId for public messages
-              query += ` AND (sender_id = $${params.length + 1} OR recipient_id = $${params.length + 2})`;
-              params.push(otherPartyId, otherPartyId);
-            }
-      
-      */
-
       // Add sorting and pagination
-      query += ` ORDER BY updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+      query += ` ORDER BY updated_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}\n`;
       params.push(limit, offset);
 
       // Execute the query
-      console.log(query, params);
+      if (debug) {
+        const finalSQl = renderStaticSQL(query, params);
+        console.log('getMessages sql:', finalSQl);
+      }
       const result = await this.pool.query(query, params);
 
       // Transform the rows into the desired format
-      const messages = result.rows.map(row => ({
-        messageId: row.messageId,
-        sender: {
-          userId: row.senderId,
-          userName: row.senderName,
-        },
-        recipientId: row.recipientId,
-        content: row.content,
-        type: row.type,
-        direction: row.direction,
-        status: row.status,
-        createdAt: row.createdAt,
-        updatedAt: row.updatedAt,
-        readAt: row.readAt,
-        metadata: row.metadata || {},
-      }));
+      const messages = result.rows.map(this.mapMessages);
 
       // Return the paginated result
       return {
@@ -974,7 +943,7 @@ export class PostgresPersistence extends PersistenceInterface {
         hasMore: result.rowCount > limit,
       };
     } catch (error) {
-      console.error(`Failed to fetch messages for userId: ${_userId}`, error.message);
+      console.error(`Failed to fetch messages`, error.message);
       throw error; // Propagate the error
     }
   }
@@ -1013,40 +982,50 @@ export class PostgresPersistence extends PersistenceInterface {
     }
   }
 
-  async updateMessageStatus(userId, messageId, status, fromStatus) {
+  async updateMessageStatus(userId, messageId, status, fromStatus = []) {
     await this.ensureInitialized(); // Ensure the database is initialized
 
-    // Update both sender and recipient copies of the message
 
+    // Normalize fromStatus to always be an array
+    const normalizedFromStatus = Array.isArray(fromStatus) ? fromStatus
+      : typeof fromStatus === 'string' ? [fromStatus]
+        : [];
+
+    // Update both sender and recipient copies of the message
     try {
       const query = `
-        UPDATE messages
-        SET status = $1, updated_at = $5
-        WHERE status = $2 
-          AND message_id = $3
-          AND sender_id = $4 
-        RETURNING   
-          message_id AS "messageId",
-          sender_id AS "senderId",
-          sender_name AS "senderName",
-          recipient_id AS "recipientId",
-          content,
-          message_type AS "type",
-          direction,
-          status,
-          created_at as createdAt,
-          updated_at as updatedAt,
-          read_at AS "readAt";
+      UPDATE messages
+      SET status = $1, updated_at = $2
+      WHERE status = ANY ($3)
+        AND message_id = $4
+        AND sender_id = $5
+      RETURNING   
+        message_id AS "messageId",
+        sender_id AS "senderId",
+        sender_name AS "senderName",
+        recipient_id AS "recipientId",
+        content,
+        message_type AS "type",
+        direction,
+        status,
+        created_at,
+        updated_at,
+        read_at;
       `;
-      const values = [status, fromStatus, messageId, userId, new Date()];
 
-      if (debug) console.log('Executing query:', query, values);
+      const values = [status, new Date(), normalizedFromStatus, messageId, userId];
+
+
+      if (debug) {
+        const renderedQuery = renderStaticSQL(query, values);
+        console.log('Rendered Query:', renderedQuery);
+      }
       const result = await this.pool.query(query, values);
 
       // Check if any rows were updated
       if (result.rowCount === 0) {
         console.warn(
-          `No rows updated for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus}, toStatus: ${status}`
+          `No rows updated for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus.join(',')}, toStatus: ${status}`
         );
         return null; // Indicate that no rows were updated
       } else if (result.rowCount < 2) {
@@ -1058,15 +1037,15 @@ export class PostgresPersistence extends PersistenceInterface {
       // Log updated rows
       if (debug) {
         console.log(
-          `Updated status from "${fromStatus}" to "${status}" for message: ${messageId}, userId: ${userId}`,
+          `Updated status from "${fromStatus.join(',')}" to "${status}" for message: ${messageId}, userId: ${userId}`,
           result.rows
         );
       }
 
-      return result.rows; // Return all updated rows for visibility
+      return result.rows.map(this.mapMessages); // Return all updated rows for visibility
     } catch (error) {
       console.error(
-        `Failed to update message status for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus}, toStatus: ${status}`,
+        `Failed to update message status for userId: ${userId}, messageId: ${messageId}, fromStatus: ${fromStatus.join(',')}, toStatus: ${status}`,
         error.message
       );
       throw error; // Re-throw the error for upstream handling

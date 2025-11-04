@@ -79,8 +79,6 @@ describe('Socket.IO Server Tests', () => {
   describe('Messaging', () => {
     describe('Private Messages', () => {
       test('should send and receive a private message', async () => {
-        //const u1 = await userManager.storeUser(senderSocket.id, { userId: 'sender', userName: 'Sender' }, true);
-        //const u2 = await userManager.storeUser(recipientSocket.id, { userId: 'recipient', userName: 'Recipient' }, true);
 
         const messageContent = 'Hello, world!';
         const message = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);

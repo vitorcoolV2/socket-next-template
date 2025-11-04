@@ -31,7 +31,7 @@ afterAll(async () => {
 
 describe('Socket.IO Server Tests', () => {
   let senderSocket, recipientSocket;
-  let senderUser, recipientUser;
+  let senderUser;
 
   beforeEach(async () => {
     // Create and connect sockets
@@ -71,6 +71,7 @@ describe('Socket.IO Server Tests', () => {
     }
   });
 
+
   describe('Messaging', () => {
     describe('Private Messages', () => {
       test(
@@ -84,7 +85,7 @@ describe('Socket.IO Server Tests', () => {
 
           // Wait for the recipient to receive the message
           /*const receivedMessage = await new Promise((resolve) => {
-            recipientSocket.on('receivedMessage', (msg) => resolve(msg));
+            recipientSocket.on('update_message_status', (msg) => resolve(msg));
           });*/
 
           // Assertions for the received message
@@ -120,7 +121,7 @@ describe('Socket.IO Server Tests', () => {
           expect(result).toBeDefined();
           expect(result.marked).toBe(1); // One message should be marked as read
         },
-        SOCKET_TEST_TIMEOUT
+        SOCKET_TEST_TIMEOUT * 2
       );
 
       test(

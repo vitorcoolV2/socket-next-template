@@ -14,7 +14,7 @@ import {
   userBaseSchema,
   userResultSchema,
   userSessionSchema,
-  baseMessageSchema,
+  messageUSchema,
   validateEventData,
   socketInfoSchema,
   markMessagesAsReadOptionsSchema,
