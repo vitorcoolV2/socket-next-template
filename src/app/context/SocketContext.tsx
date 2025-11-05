@@ -2,8 +2,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useUser, useAuth } from '@clerk/nextjs';
-import { success } from 'zod';
-import { bool, boolean, string } from 'joi';
 
 export type UserState = 'disconnected' | 'connected' | 'authenticated' | 'offline';
 
@@ -104,7 +102,9 @@ export interface BaseEvent {
   error?: string;
 }
 
-export interface UserConversationMessageEvent extends BaseEvent { };
+export interface UserConversationMessageEvent extends BaseEvent {
+  result: Message;
+};
 
 export interface FetchGetUserConversationsListOptions {
   limit?: number;
@@ -158,6 +158,7 @@ interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
   isAuthenticated: boolean;
+  isLoading: boolean;
   socketUser: User | null;
   conversationsList: UserRenderData[];  // context responsable for deliver final conversations List
   // do not need to expose getUsersList,getUserConversationsList. Keep commented 
@@ -172,6 +173,7 @@ const SocketContext = createContext<SocketContextType>({
   socket: null,
   isConnected: false,
   isAuthenticated: false,
+  isLoading: false,
   socketUser: null,
   conversationsList: [],
   /*getUsersList: async () => {
@@ -303,96 +305,101 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     };
   };
 
-  const addAndMergeSystemUserState = (
-    users: UserRenderData[], // Fetched users from getUsersList
-    prevConv: UserRenderData[] // Previous conversations
-  ): UserRenderData[] => {
-    if (!socketUser) {
-      return []; // Return an empty array if there's no logged-in user
-    }
-
-    // Step 1: Update existing conversations with user state
-    const updatedConversations = prevConv.map((conversation) => {
-      const matchingUser = users.find((user) => user.userId === conversation.otherPartyId);
-      if (matchingUser) {
-        return {
-          ...conversation,
-          state: matchingUser.state, // Update the state of the existing conversation
-        };
+  const addAndMergeSystemUserState = useCallback(
+    (
+      users: UserRenderData[], // Fetched users from getUsersList
+      prevConv: UserRenderData[] // Previous conversations
+    ): UserRenderData[] => {
+      if (!socketUser) {
+        return []; // Return an empty array if there's no logged-in user
       }
-      return conversation; // No matching user, leave the conversation unchanged
-    });
 
-    // Step 2: Add new users as conversations
-    const newConversations = users
-      .filter((user) => !prevConv.some((conv) => conv.otherPartyId === user.userId))
-      .map((user) => {
-        return userRenderDataDefaults(
-          socketUser?.userId || '',
-          socketUser?.userName || '',
-          user.userId,
-          user.userName,
-          user.state,
-          ['private'],
-        );
+      // Step 1: Update existing conversations with user state
+      const updatedConversations = prevConv.map((conversation) => {
+        const matchingUser = users.find((user) => user.userId === conversation.otherPartyId);
+        if (matchingUser) {
+          return {
+            ...conversation,
+            state: matchingUser.state, // Update the state of the existing conversation
+          };
+        }
+        return conversation; // No matching user, leave the conversation unchanged
       });
 
-    // Step 3: Combine updated and new conversations
-    return [...updatedConversations, ...newConversations];
-  };
+      // Step 2: Add new users as conversations
+      const newConversations = users
+        .filter((user) => !prevConv.some((conv) => conv.otherPartyId === user.userId))
+        .map((user) => {
+          return userRenderDataDefaults(
+            socketUser?.userId || '',
+            socketUser?.userName || '',
+            user.userId,
+            user.userName,
+            user.state,
+            ['private'], // Default type is 'private'
+          );
+        });
+
+      // Step 3: Combine updated and new conversations
+      return [...updatedConversations, ...newConversations];
+    },
+    [socketUser] // Dependencies: Recreate only if `socketUser` changes
+  );
 
 
-  // Merge fetched users into conversations list
-  const addAndMergeConversationsListStats = (
-    conversations: UserConversationMetrics[], // Fetched conversations from getUserConversationsList
-    prevConv: UserRenderData[] // Previous conversations
-  ): UserRenderData[] => {
-    if (!socketUser) {
-      return []; // Return an empty array if there's no logged-in user
-    }
-
-    // Step 1: Update existing conversations with new metrics
-    const updatedConversations = prevConv.map((conversation) => {
-      const matchingConversation = conversations.find(
-        (conv) => conv.otherPartyId === conversation.otherPartyId
-      );
-      if (matchingConversation) {
-        return {
-          ...conversation,
-          startedAt: matchingConversation.startedAt || conversation.startedAt, // Update or retain existing value
-          lastMessageAt: matchingConversation.lastMessageAt || conversation.lastMessageAt, // Update or retain existing value
-          incoming: {
-            ...conversation.incoming,
-            ...matchingConversation.incoming, // Merge incoming metrics
-          },
-          outgoing: {
-            ...conversation.outgoing,
-            ...matchingConversation.outgoing, // Merge outgoing metrics
-          },
-          types: matchingConversation.types || conversation.types, // Update or retain types
-          state: matchingConversation.state || conversation.state, // Update or retain state
-        };
+  const addAndMergeConversationsListStats = useCallback(
+    (
+      conversations: UserConversationMetrics[], // Fetched conversations from getUserConversationsList
+      prevConv: UserRenderData[] // Previous conversations
+    ): UserRenderData[] => {
+      if (!socketUser) {
+        return []; // Return an empty array if there's no logged-in user
       }
-      return conversation; // No matching conversation, leave it unchanged
-    });
 
-    // Step 2: Add new conversations from the fetched data
-    const newConversations = conversations
-      .filter((conv) => !socketUser?.userId && !prevConv.some((c) => c.otherPartyId === conv.otherPartyId))
-      .map((conv) =>
-        userRenderDataDefaults(
-          socketUser?.userId || '', // Ensure non-null userId
-          socketUser?.userName || '', // Ensure non-null userName
-          conv.otherPartyId,
-          conv.otherPartyName,
-          conv.state || 'offline', // Default to 'offline' if state is undefined
-          conv.types || ['private'] // Use fetched types or default to ['private']
-        )
-      );
+      // Step 1: Update existing conversations with new metrics
+      const updatedConversations = prevConv.map((conversation) => {
+        const matchingConversation = conversations.find(
+          (conv) => conv.otherPartyId === conversation.otherPartyId
+        );
+        if (matchingConversation) {
+          return {
+            ...conversation,
+            startedAt: matchingConversation.startedAt || conversation.startedAt, // Update or retain existing value
+            lastMessageAt: matchingConversation.lastMessageAt || conversation.lastMessageAt, // Update or retain existing value
+            incoming: {
+              ...conversation.incoming,
+              ...matchingConversation.incoming, // Merge incoming metrics
+            },
+            outgoing: {
+              ...conversation.outgoing,
+              ...matchingConversation.outgoing, // Merge outgoing metrics
+            },
+            types: matchingConversation.types || conversation.types, // Update or retain types
+            state: matchingConversation.state || conversation.state, // Update or retain state
+          };
+        }
+        return conversation; // No matching conversation, leave it unchanged
+      });
 
-    // Step 3: Combine updated and new conversations
-    return [...updatedConversations, ...newConversations];
-  };
+      // Step 2: Add new conversations from the fetched data
+      const newConversations = conversations
+        .filter((conv) => !prevConv.some((c) => c.otherPartyId === conv.otherPartyId))
+        .map((conv) =>
+          userRenderDataDefaults(
+            socketUser?.userId || '', // Ensure non-null userId
+            socketUser?.userName || '', // Ensure non-null userName
+            conv.otherPartyId,
+            conv.otherPartyName,
+            conv.state || 'offline', // Default to 'offline' if state is undefined
+            conv.types || ['private'] // Use fetched types or default to ['private']
+          )
+        );
+
+      // Step 3: Combine updated and new conversations
+      return [...updatedConversations, ...newConversations];
+    },
+    [socketUser] // Dependencies: Recreate only if `socketUser` changes
+  );
 
   // Function to get user conversations list
   const getUserConversationsList = useCallback(
@@ -452,22 +459,13 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     if (isLoaded && isAuthenticated) {
       Promise.all([
-        getUsersList({ state: ['authenticated', 'offline'] }), // Fetch users
-        getUserConversationsList({ limit: 50, offset: 0 }), // Fetch conversations
+        getUsersList({ state: ['authenticated', 'offline'] }),
+        getUserConversationsList({ limit: 50, offset: 0 }),
       ])
         .then(([usersData, conversationsData]) => {
-          // Update the state using functional setState
           setConversationsList((prevConversationsList) => {
-            // Step 1: Merge fetched users into the existing list
             const mergedUsers = addAndMergeSystemUserState(usersData, prevConversationsList);
-
-            // Step 2: Merge fetched conversations into the updated list
-            const finalConversations = addAndMergeConversationsListStats(
-              conversationsData,
-              mergedUsers
-            );
-
-            // Return the final merged list
+            const finalConversations = addAndMergeConversationsListStats(conversationsData, mergedUsers);
             return finalConversations;
           });
         })
@@ -475,20 +473,20 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
           console.error('Failed to fetch users or conversations:', error);
         });
     }
-  }, [isLoaded, isAuthenticated, getUsersList, getUserConversationsList]);
+  }, [isLoaded, isAuthenticated, getUsersList, getUserConversationsList, addAndMergeSystemUserState, addAndMergeConversationsListStats]);
 
   // ACK message received
   useEffect(() => {
     if (!isAuthenticated || !socket || !socketUser) return;
 
-    const handleUpdateMessageStatus = (msg: Message, ack: Function) => {
+    type AckCallback = (response: { success: boolean; message: string }) => void;
+    const handleUpdateMessageStatus = (msg: Message, ack: AckCallback) => {
       console.log('Received updateMessageStatus event:', msg);
 
       if (ack && msg && socketUser && msg.recipientId === socketUser.userId) {
         console.log('Invoking ack with:', { success: true, message: 'received' });
         ack({ success: true, message: 'received' });
       } else {
-
         console.warn('Acknowledgment callback or recipient ID mismatch:', { ack, msg, socketUser });
       }
     };
@@ -611,6 +609,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     // connection
     isConnected,
     isAuthenticated,
+    isLoading,
     socketUser,
     conversationsList,
     // getUsersList,
@@ -618,6 +617,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     getUserConversation,
     connect,
     disconnect,
+
   };
 
   return (

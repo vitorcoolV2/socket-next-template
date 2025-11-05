@@ -48,7 +48,7 @@ describe('PostgreSQL Database Capability Tests', () => {
     try {
       await pool.query(`DROP TABLE IF EXISTS ${testTableName}`);
       await pool.query(`DROP TABLE IF EXISTS temp_test_table`);
-    } catch (error) {
+    } catch {
       // Ignore cleanup errors
     }
 

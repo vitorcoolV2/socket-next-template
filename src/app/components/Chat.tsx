@@ -32,6 +32,7 @@ const Chat = ({ recipientId }: ChatProps) => {
       messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
     }
   };
+  /*
   const scrollToBottom2 = () => {
     if (messagesContainerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
@@ -40,7 +41,7 @@ const Chat = ({ recipientId }: ChatProps) => {
         messagesContainerRef.current.scrollTop = scrollHeight;
       }
     }
-  };
+  };*/
 
   useEffect(() => {
     // Scroll to the bottom when new messages are added
@@ -92,13 +93,13 @@ const Chat = ({ recipientId }: ChatProps) => {
     } finally {
       setLoading(false);
     }
-  }, [isAuthenticated, getUserConversation, conversationsList, recipientId, offset, limit]);
+  }, [isAuthenticated, getUserConversation, conversationsList, recipientId, offset, limit, socketUser]);
 
   // Load initial messages
   useEffect(() => {
     setOffset(0);
     loadConversation(false);
-  }, [recipientId, isAuthenticated]);
+  }, [recipientId, isAuthenticated, loadConversation]);
 
 
   const handleIncomingMessage = useCallback((message: Message) => {

@@ -1,0 +1,69 @@
+# ──────────────────────────────────────────────────────────────
+#  .dockerignore – ONE FILE for BOTH Dockerfiles
+# ──────────────────────────────────────────────────────────────
+
+# 1. Node / NPM
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# 2. Build artefacts (Next.js, CRA, Vite, etc.)
+.next
+out
+dist
+build
+.cache
+.vercel
+
+# 3. Local dev / IDE
+.git
+.gitignore
+.vscode
+.idea
+.env*
+.env.local
+.env.development
+.env.production
+
+# 4. Logs / temp
+*.log
+*.tmp
+*.swp
+.DS_Store
+Thumbs.db
+
+# 5. Tests / coverage (not needed at runtime)
+__tests__
+tests
+coverage
+cypress
+*.spec.*
+*.test.*
+
+# 6. Documentation
+README.md
+LICENSE
+CHANGELOG.md
+docs/
+src/__tests__
+
+# 7. **KEEP** the Dockerfiles themselves
+!devops/react-app/Dockerfile
+!devops/socket-io/Dockerfile
+
+# 8. **KEEP** the shared package files
+!package.json
+!package-lock.json
+
+
+# 9. **KEEP** everything that is actually used
+!.env.build*
+!src/
+!socket.io/
+!public/
+!next.config.*
+!tailwind.config.*
+!postcss.config.*
+!tsconfig.json
+!jsconfig.json

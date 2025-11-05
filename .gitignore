@@ -54,3 +54,5 @@ next-env.d.ts
 /public/test*.html
 *.snap
 #test-keys.json
+
+devops/kuma/uptime-kuma-data/*

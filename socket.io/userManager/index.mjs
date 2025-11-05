@@ -15,15 +15,12 @@ import {
   messageUSchema,
   messagePSchema,
   validateEventData,
-  socketInfoSchema,
   markMessagesAsReadOptionsSchema,
   markMessagesAsReadResultSchema,
   markMessagesAsDeliveredOptionsSchema,
   markMessagesAsDeliveredResultSchema,
-  typingSchema,
   getUserConversationPOptionsSchema,
   getMessagesUOptionsSchema,
-  activeUserSchema,
   userQuerySchema,
   getConversationsListUOptionsSchema,
   getConversationsListPOptionsSchema,
@@ -42,34 +39,7 @@ import {
 } from '../config.mjs';
 
 
-import { cleanupOldMessages as cleanupOldMessagesUtil } from './messageCleanupUtils.mjs';
 import { mapMessage } from 'a-socket/utils.mjs';
-
-
-const cleanupOldMessages = (threshold = 7 * 24 * 60 * 60 * 1000) => {
-  return cleanupOldMessagesUtil(userMessages, debug, threshold);
-};
-
-
-function normalizeTimestamp(timestamp) {
-  const date = new Date(timestamp);
-  if (isNaN(date.getTime())) {
-    throw new Error(`Invalid timestamp: ${timestamp}`);
-  }
-  return date.toISOString();
-}
-
-const getNormalizedOptions = (options) => {
-  const normalizedOptions = { ...options };
-  if (options.since) {
-    normalizedOptions.since = normalizeTimestamp(options.since);
-  }
-  if (options.until) {
-    normalizedOptions.until = normalizeTimestamp(options.until);
-  }
-  return normalizedOptions;
-};
-
 
 
 export const userManager = (options = {}) => {
@@ -252,22 +222,22 @@ export const userManager = (options = {}) => {
       activeConnections++;
 
       // Persist the user data
-      return await persistence.storeUser(user).then(us => {
+      return await persistence.storeUser(user).then(usr => {
 
         // Log the successful connection
         if (debug) {
           console.log(`User connected:`, {
-            userId: user.userId,
-            userName: user.userName,
+            userId: usr.userId,
+            userName: usr.userName,
             socketId,
-            state: user.state,
+            state: usr.state,
           });
         }
         __io.emit('user_state_updated', {
-          userId: user.userId,
-          state: user.state,
+          userId: usr.userId,
+          state: usr.state,
         })
-        return user;
+        return usr;
       }).catch((error) => {
         console.error(`Failed to persist user ${user.userId}:`, error.message);
         // Clean up resources if persistence fails
@@ -738,9 +708,6 @@ export const userManager = (options = {}) => {
       const user = await _failInsecureSocketId(socketId);
       const userId = user.userId;
 
-      // Step 2 - Mandatory arguments
-      const direction = 'incoming';
-      const type = 'private';
 
       // Step 2: Define the query options
       const options = {
@@ -779,10 +746,6 @@ export const userManager = (options = {}) => {
       // Step 1: Validate the user associated with the socketId
       const user = await _failInsecureSocketId(socketId);
       const userId = user.userId;
-
-      // Step 2 - Mandatory arguments
-      const direction = 'incoming';
-      const type = 'private';
 
       // Step 2: Define the query options
       const options = {
@@ -1049,31 +1012,10 @@ export const userManager = (options = {}) => {
 
   const _getMessages = async (userId, options = {}) => {
     return safeOperation(async () => {
-      // Step 1: Validate userId
-      /*     if (!userId || typeof userId !== 'string') {
-             throw new Error('Invalid userId provided');
-           }
-     
-           const normalizedOptions = getNormalizedOptions(options);
-     
-           // Step 3: Validate options against schema
-           const { value: validOps, error: optionsError } = getMessagesUOptionsSchema.validate(normalizedOptions);
-           if (optionsError) {
-             throw new Error(`Invalid options: ${optionsError.message}`);
-           }
-     
-           // Step 4: Determine the userId for the query
-           const userId = validOps.type === 'public' ? PUBLIC_MESSAGE_USER_ID : userId;
-     
-           // Step 5: Apply public message expiration filter
-           if (validOps.type === 'public') {
-             const expireDate = new Date();
-             expireDate.setDate(expireDate.getDate() - PUBLIC_MESSAGE_EXPIRE_DAYS);
-             validOps.since = expireDate.toISOString();
-           }*/
+
 
       // Step 6: Fetch messages from persistence
-      return await persistence.getMessages(userId, validOps).then(messagesResp => {
+      return await persistence.getMessages(userId, options).then(messagesResp => {
         // Step 7: Extract messages, total, and hasMore
         const { messages, total, hasMore } = messagesResp;
 
@@ -1210,6 +1152,7 @@ export const userManager = (options = {}) => {
   const getPublicMessages = async (socketId) => {
     return safeOperation(async () => {
       const user = await _failInsecureSocketId(socketId);
+      if (!user) return null;
 
       // Calculate the updated_at for 7 days ago
       const sevenDaysAgo = new Date();

@@ -7,7 +7,6 @@ const validToken = MOCK_TOKENS.validUser;
 const expiredToken = MOCK_TOKENS.expiredUser;
 
 
-const eternalToken = MOCK_TOKENS.eternalUser;
 
 // Define the mock function outside jest.mock()
 const mockVerifyToken = jest.fn();
@@ -18,16 +17,11 @@ jest.mock('a-socket/jwt-passport/index.mjs', () => ({
 }));
 
 describe('Passport Middleware', () => {
-  let mockIo;
   let mockSocket;
 
   beforeEach(() => {
     // Mock Socket.IO instance
-    mockIo = {
-      sockets: {
-        sockets: new Map(),
-      },
-    };
+
 
     // Mock socket object
     mockSocket = {

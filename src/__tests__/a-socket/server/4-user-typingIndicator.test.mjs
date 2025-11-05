@@ -46,11 +46,12 @@ afterEach(async () => {
 
 describe('Socket.IO Server Tests', () => {
   let senderSocket, recipientSocket;
-  let senderUser, recipientUser;
+
+  let recipientUser;
   beforeEach(async () => {
     // Create and connect sockets using the utility function
     senderSocket = await createClientSocket(BASE_URL);
-    senderUser = await userManager.storeUser(senderSocket.id, {
+    await userManager.storeUser(senderSocket.id, {
       userId: 'sender',
       userName: 'Sender'
     }, true);

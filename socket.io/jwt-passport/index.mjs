@@ -9,11 +9,11 @@ import { Mutex } from 'async-mutex';
 const cacheMutex = new Mutex();
 
 // --- Internal Constants and Helpers ---
-const debug = false; process.env.NODE_ENV !== 'production';
+const debug = process.env.NODE_ENV !== 'production';
 const clientCache = new Map();
 
 
-import { algSchema, jwksKeySchema, passportSchema } from './schemas.mjs';
+import { /*algSchema, jwksKeySchema,*/ passportSchema } from './schemas.mjs';
 
 // Add this function to clear the cache
 export function clearJwksClientCache() {

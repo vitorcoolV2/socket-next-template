@@ -1,7 +1,7 @@
 import { startServer, stopServer, users as userManager } from 'a-socket/server.mjs';
 import { v4 as uuidv4 } from 'uuid';
 
-import { createClientSocket, sendMessageWaitEvent, retryWithTimeout } from '../utils.mjs';
+import { createClientSocket, sendMessageWaitEvent } from '../utils.mjs';
 
 
 const PORT = process.env.PORT || 3001; // Use a different port to avoid conflicts
@@ -34,17 +34,17 @@ afterAll(async () => {
 
 describe('Socket.IO Server Tests', () => {
   let senderSocket, recipientSocket;
-  let senderUser, recipientUser;
+
   beforeEach(async () => {
     // Create and connect sockets using the utility function
     senderSocket = await createClientSocket(BASE_URL);
-    senderUser = await userManager.storeUser(senderSocket.id, {
+    await userManager.storeUser(senderSocket.id, {
       userId: 'sender',
       userName: 'Sender'
     }, true);
 
     recipientSocket = await createClientSocket(BASE_URL);
-    recipientUser = await userManager.storeUser(recipientSocket.id, {
+    await userManager.storeUser(recipientSocket.id, {
       userId: 'recipient',
       userName: 'Recipient'
     }, true);
@@ -132,7 +132,7 @@ describe('Socket.IO Server Tests', () => {
         let receivedMessage = null;
         let statusUpdates = [];
 
-        recipientSocket.on('update_message_status', (msg, ack) => {
+        recipientSocket.on('update_message_status', (msg) => {
           receivedMessage = msg;
           // Intentionally NOT calling ack() - simulate unresponsive client
         });
@@ -245,8 +245,7 @@ describe('Socket.IO Server Tests', () => {
       );
 
       test('when cant not get acknowledgment from recipient, should update message status to pending', async () => {
-        // Arrange: Simulate recipient being offline
-        const recipientId = 'recipient';
+        // Arrange: Simulate recipient being offline        
         const content = 'Test message';
 
         // Act: Send message

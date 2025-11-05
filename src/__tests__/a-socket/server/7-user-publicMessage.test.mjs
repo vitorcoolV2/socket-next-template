@@ -5,7 +5,7 @@ const PORT = process.env.PORT || 3001; // Use a different port to avoid conflict
 const BASE_URL = `http://localhost:${PORT}`;
 
 const SERVER_START_TIMEOUT = 10000; // Increased timeout for server startup
-const HTTP_TEST_TIMEOUT = 200;
+
 const SOCKET_TEST_TIMEOUT = 5000;
 
 jest.setTimeout(10000); // Increase global timeout
@@ -44,7 +44,7 @@ afterEach(async () => {
 
 describe('Socket.IO Server Tests', () => {
   let senderSocket, otherSocket;
-  let senderUser, otherUser;
+  let senderUser;
 
   beforeEach(async () => {
     // Create and connect sockets

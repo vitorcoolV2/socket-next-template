@@ -1,0 +1,13 @@
+services:
+  socket-io-server:
+    build:
+      context: ../..
+      dockerfile: devops/socket.io/Dockerfile
+    image: socket-io-server:latest
+    container_name: socket-io-server
+    ports:
+      - "3001:3001"
+    env_file:
+      # ← optional, .env is auto-loaded anyway
+      - .env
+    restart: unless-stopped

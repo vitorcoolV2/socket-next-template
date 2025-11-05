@@ -1,7 +1,7 @@
 import axios from 'axios';
 import { startServer, stopServer, users as userManager } from 'a-socket/server.mjs';
 import { INACTIVITY_THRESHOLD } from 'a-socket/config.mjs';
-import { createClientSocket, waitForEvent } from '../utils.mjs';
+import { createClientSocket } from '../utils.mjs';
 
 const PORT = process.env.PORT || 3001;
 const BASE_URL = `http://localhost:${PORT}`;
@@ -9,8 +9,6 @@ const BASE_URL = `http://localhost:${PORT}`;
 const SERVER_START_TIMEOUT = 10000; // < seconds
 const HTTP_TEST_TIMEOUT = 200; // <1 second for HTTP tests
 const SOCKET_TEST_TIMEOUT = 5000; // <5 seconds for socket tests
-const SEND_MESSAGE_TIMEOUT = 6000;
-
 
 jest.setTimeout(10000); // Set global timeout
 
@@ -39,11 +37,11 @@ afterAll(async () => {
 
 
 describe('Socket.IO Server Tests', () => {
-  let clientSocket, clientUser;
+  let clientSocket;
   beforeEach(async () => {
     // Connect client for each test
     clientSocket = await createClientSocket(BASE_URL);
-    clientUser = await userManager.storeUser('client-socket', {
+    await userManager.storeUser('client-socket', {
       userId: 'client',
       userName: 'Client',
     }, true);
@@ -195,13 +193,13 @@ describe('Socket.IO Server Tests', () => {
       }, true);
 
       await userManager._checkInactivity();
-      const u4 = await userManager.getUsersList('test-socket-id')
+      await userManager.getUsersList('test-socket-id')
 
 
       // Simulate inactivity by setting lastActivity to a past timestamp
       const inactiveTime = Date.now() - (INACTIVITY_THRESHOLD * 2 + 1000); // Exceeds threshold
       user.lastActivity = inactiveTime;
-      const user2 = await userManager.storeUser('test-socket-id', user);  // CAN DEBUG storeUser.... this line when i F11, it does not drill down. even so results value
+      await userManager.storeUser('test-socket-id', user);  // CAN DEBUG storeUser.... this line when i F11, it does not drill down. even so results value
 
       // Run the inactivity check. will be some as  const ud = await userManager.disconnectUser('test-socket-id');  expect(ud.state).toBe('offline');
       await userManager._checkInactivity();

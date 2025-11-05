@@ -5,7 +5,6 @@ const PORT = process.env.PORT || 3001; // Use a different port to avoid conflict
 const BASE_URL = `http://localhost:${PORT}`;
 
 const SERVER_START_TIMEOUT = 10000; // Increased timeout for server startup
-const HTTP_TEST_TIMEOUT = 200;
 const SOCKET_TEST_TIMEOUT = 10000;
 
 
@@ -48,12 +47,12 @@ afterEach(async () => {
 });
 describe('Socket.IO Server Tests', () => {
   let senderSocket, recipientSocket;
-  let senderUser, recipientUser;
+  let recipientUser;
 
   beforeEach(async () => {
     // Create and connect sockets
     senderSocket = await createClientSocket(BASE_URL);
-    senderUser = await userManager.storeUser(senderSocket.id, {
+    await userManager.storeUser(senderSocket.id, {
       userId: 'sender',
       userName: 'Sender',
     }, true);

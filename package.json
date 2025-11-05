@@ -90,7 +90,7 @@
     "postcss-preset-env": "^10.3.1",
     "prettier": "^3.6.2",
     "prisma": "^6.16.1",
-    "tailwindcss": "^4.1.13",
+    "tailwindcss": "^4.1.16",
     "text-encoding": "^0.7.0",
     "ts-jest": "^29.4.4",
     "typescript": "^5.9.3",

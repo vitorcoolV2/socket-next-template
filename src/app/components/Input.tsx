@@ -89,7 +89,9 @@ const Input = ({ recipientId, onSendMessage, disableSystem = false, disableEvent
                 }}
                 onChange={(e) => {
                     setInput(e.target.value);
-                    !disableSystem && handleTypingIndicator(); // Trigger typing indicator on input change
+                    if (!disableSystem) {
+                        handleTypingIndicator(); // Trigger typing indicator on input change
+                    }
                 }}
                 placeholder="Type a message..."
                 disabled={disableSystem} // Disable input field if the system is disabled

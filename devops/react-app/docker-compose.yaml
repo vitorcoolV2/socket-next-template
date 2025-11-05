@@ -1,0 +1,14 @@
+services:
+  react-app:
+    build:
+      context: ../../
+      dockerfile: devops/react-app/Dockerfile
+
+    image: react-app:latest
+    container_name: react-app
+    ports:
+      - "3000:3000"
+    env_file:
+      # ← optional, .env is auto-loaded anyway
+      - .env
+    restart: unless-stopped

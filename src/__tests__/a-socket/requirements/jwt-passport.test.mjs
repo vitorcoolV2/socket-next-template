@@ -124,7 +124,7 @@ describe('JWT Clerk Complete Test Suite', () => {
     test('should throw error for invalid signature', async () => {
       // Generate a different key pair to create invalid signature
       const crypto = await import('crypto');
-      const { privateKey: wrongKey, publicKey: wrongPubKey } = crypto.generateKeyPairSync('rsa', {
+      const { privateKey: wrongKey/*, publicKey: wrongPubKey*/ } = crypto.generateKeyPairSync('rsa', {
         modulusLength: 2048,
         publicKeyEncoding: { type: 'spki', format: 'pem' },
         privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
@@ -238,12 +238,13 @@ describe('JWT Clerk Complete Test Suite', () => {
     test('should not use cache JWKS when passport keys and defined. Will not fetch issuer keys', async () => {
       clearJwksClientCache();
       // First call - this should create the JWKS client
-      const ret = await verifyTokenLegacy(testTokens.validUser, passportData);
+      await verifyTokenLegacy(testTokens.validUser, passportData);
       expect(jwksClient).toHaveBeenCalledTimes(0);
 
       // Second call - this should reuse the cached client
       const { keys, ...passportData2 } = passportData;
-      const ret2 = await verifyTokenLegacy(testTokens.adminUser, passportData2);
+      expect(keys).toBeDefined();
+      await verifyTokenLegacy(testTokens.adminUser, passportData2);
 
       // JWKS client should be created only once
       // Assert that jwksClient was called only once

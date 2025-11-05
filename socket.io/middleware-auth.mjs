@@ -1,6 +1,5 @@
 import { verifyToken } from './jwt-passport/index.mjs';
 import { PASSPORT_PATH, debug } from './config.mjs';
-import { v4 as uuidv4 } from 'uuid';
 
 // Load passport data dynamically
 const loadPassportData = async () => {
@@ -117,5 +116,5 @@ export const testMiddleware = async (socket, next) => {
     next(new Error(`Authentication failed: ${error.message} `));
   }
 };
-
+/* eslint-disable import/no-anonymous-default-export */
 export default { passportMiddleware, testMiddleware };

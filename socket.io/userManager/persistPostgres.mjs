@@ -1,6 +1,6 @@
 
 import { PersistenceInterface } from './PersistenceInterface.mjs'
-import { validateOptions, renderStaticSQL, buildDefaultConversation, processConversationRow, getMessageStats } from './persistPostgres-helpers.mjs'
+import { validateOptions, renderStaticSQL, getMessageStats } from './persistPostgres-helpers.mjs'
 // userPersistent.mjs
 import pg from 'pg';
 const { Pool } = pg;
@@ -8,30 +8,15 @@ const { Pool } = pg;
 
 import {
   debug,
-  PUBLIC_MESSAGE_USER_ID,
-  PUBLIC_MESSAGE_EXPIRE_DAYS,
 } from '../config.mjs';
 
 // Import schemas
 import {
-  userBaseSchema,
-  userResultSchema,
-  userSessionSchema,
-  messageUSchema,
-  validateEventData,
-  socketInfoSchema,
-  markMessagesAsReadOptionsSchema,
-  markMessagesAsReadResultSchema,
   markMessagesAsDeliveredSchema,
-  typingSchema,
-  getUserConversationUOptionsSchema,
   getMessagesUOptionsSchema,
-  activeUserSchema,
   userQuerySchema,
-  sendStatusSchema,
   getConversationsListPOptionsSchema,
   markMessagesAsReadSchema,
-  MESSAGE_STATUS_ORDERED
 } from './schemas.mjs';
 
 
@@ -247,7 +232,7 @@ export class PostgresPersistence extends PersistenceInterface {
 
     try {
       // Validate the incoming user data against the schema
-      const { userId, userName, sockets, sessionId, connectedAt, lastActivity, state, ...metadata } = user;
+      const { userId, userName, sockets, /*sessionId,*/ connectedAt, lastActivity, state, ...metadata } = user;
 
       // Ensure metadata is serializable
       const sanitizedMetadata = sanitizeObject(metadata);

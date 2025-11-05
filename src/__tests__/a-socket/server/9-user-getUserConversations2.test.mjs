@@ -31,18 +31,19 @@ afterAll(async () => {
 
 describe('Socket.IO Server Tests', () => {
   let senderSocket, recipientSocket;
-  let SU, RU;
+  let sUser;
+
 
   beforeEach(async () => {
     // Create and connect sockets
     senderSocket = await createClientSocket(BASE_URL);
-    SU = await userManager.storeUser(senderSocket.id, {
+    sUser = await userManager.storeUser(senderSocket.id, {
       userId: 'sender',
       userName: 'Sender',
     }, true);
 
     recipientSocket = await createClientSocket(BASE_URL);
-    RU = await userManager.storeUser(recipientSocket.id, {
+    await userManager.storeUser(recipientSocket.id, {
       userId: 'recipient',
       userName: 'Recipient',
     }, true);
@@ -99,9 +100,9 @@ describe('Socket.IO Server Tests', () => {
         const result = await userManager.getUserConversationsList(senderSocket.id, options);
 
         // Validate the result, The senderSocker sent messages to two distinct users
-        expect(result.filter(r => r.userId === SU.userId).length).toBeGreaterThanOrEqual(2);
+        expect(result.filter(r => r.userId === sUser.userId).length).toBeGreaterThanOrEqual(2);
         // Validate that one of targets users is sender it self
-        const conversation = result.find(r => r.otherPartyId === SU.userId);
+        const conversation = result.find(r => r.otherPartyId === sUser.userId);
         // Validate 'sender' incoming messages from it self. should be one
         expect(conversation.incoming.sent).toBeGreaterThanOrEqual(1);
         expect(conversation.outgoing.sent).toBeGreaterThanOrEqual(1);

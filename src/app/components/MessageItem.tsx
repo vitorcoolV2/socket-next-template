@@ -47,6 +47,9 @@ export const MessageItem = React.memo(({ message }: MessageItemProps) => {
   );
 });
 
+// Set the displayName for the MessageItem component
+MessageItem.displayName = 'MessageItem';
+
 // Helper function to determine status text
 const getStatusText = (status: string): string => {
   switch (status) {

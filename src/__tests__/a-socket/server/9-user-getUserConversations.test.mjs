@@ -86,7 +86,8 @@ describe('Socket.IO Server Tests', () => {
 
         // wait a little for updateMessageStatus
         let ct = 0;
-        const sentMessage2 = await new Promise((resolve) => {
+        //const sentMessage2 = 
+        await new Promise((resolve) => {
           senderSocket.on('update_message_status', (msg) => {
 
             //expect(msg.status).toBe('pending'); //  .toBe('delivered');

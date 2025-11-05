@@ -110,7 +110,7 @@ io.use(async (socket, next) => {
 io.use(async (socket, next) => {
   try {
     const pendingMessages = await users.getPendingMessages(socket.id);
-    const { hasMore, messages, total } = pendingMessages;
+    const { hasMore, messages } = pendingMessages;
 
     if (!hasMore && messages.length === 0) {
       return next();
@@ -123,7 +123,8 @@ io.use(async (socket, next) => {
     });
 
     const messageIds = messages.map(m => m.id);
-    const result = await users.markMessagesAsDelivered(socket.id, {
+    //const result = 
+    await users.markMessagesAsDelivered(socket.id, {
       messageIds,
     });
 
@@ -142,7 +143,7 @@ io.on('connection', (socket) => {
   // Handle disconnection
   socket.on('disconnect', (reason) => {
     console.log(`User ${socket.id} disconnected: ${reason}`);
-    users.disconnectUser(socket.id).then((user) => {
+    users.disconnectUser(socket.id).then(() => {
       console.log(`User ${socket.user?.userName} (${socket.user?.userId}) disconnected`);
     }).catch((error) => {
       console.error(`Error during disconnect: ${error.message}`);

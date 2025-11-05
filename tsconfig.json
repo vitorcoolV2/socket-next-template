@@ -27,20 +27,21 @@
     "paths": {
       "a-app/*": [
         "./src/app/*"
+      ],
+      "@/*": [
+        "src/*"
       ]
     }
   },
   "include": [
-    "next-env.d.ts",
-    "src/**/*",
-    "socket.io/server.ts",
     ".next/types/**/*.ts",
-    "src/__tests__/requirements/events.test.mjs",
-    "____/schemas2",
-    "src/server",
-    "____/types",
+    "next-env.d.ts",
     "scripts/gen-test-tokens.mjs",
-    "scripts/test-validation.mjs"
+    "scripts/test-validation.mjs",
+    "socket.io/server.ts",
+    "src/**/*",
+    "src/server",
+    "out/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"

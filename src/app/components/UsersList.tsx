@@ -1,9 +1,17 @@
 import React, { useState, useMemo } from 'react';
-import { useSocket, Message, UserRenderData } from 'a-app/context/SocketContext';
+import { useSocket, UserRenderData } from 'a-app/context/SocketContext';
 import { ConnectionStatusIndicator } from './ConnectionStatusIndicator';
 
 interface UserListProps {
     setRecipient: (otherPartyId: string) => void;
+}
+
+interface MessageStatsProps {
+    unread: number;
+    sent: number;
+    pending: number;
+    delivered: number;
+    read: number;
 }
 
 const UserList = ({ setRecipient }: UserListProps) => {
@@ -32,7 +40,7 @@ const UserList = ({ setRecipient }: UserListProps) => {
                 acc.push(user);
             }
             return acc;
-        }, [] as any[]);
+        }, [] as UserRenderData[]);
 
         return uniqueUsers
             .map((user): UserRenderData => ({
@@ -95,7 +103,7 @@ const UserList = ({ setRecipient }: UserListProps) => {
     };
 
     // Enhanced message stats component
-    const MessageStats = ({ incoming, outgoing }: { incoming: any; outgoing: any }) => {
+    const MessageStats = ({ incoming, outgoing }: { incoming: MessageStatsProps; outgoing: MessageStatsProps }) => {
         if (incoming.unread === 0 && incoming.sent === 0 && outgoing.sent === 0) {
             return null;
         }

@@ -5,25 +5,15 @@ import { PersistenceInterface } from './PersistenceInterface.mjs'
 import {
   debug,
   PUBLIC_MESSAGE_USER_ID,
-  PUBLIC_MESSAGE_EXPIRE_DAYS,
+
 } from '../config.mjs';
 
 
 // Import schemas
 import {
-  userBaseSchema,
-  userResultSchema,
-  userSessionSchema,
-  messageUSchema,
-  validateEventData,
-  socketInfoSchema,
-  markMessagesAsReadOptionsSchema,
-  markMessagesAsReadResultSchema,
-  typingSchema,
-  getUserConversationUOptionsSchema,
+
   getMessagesUOptionsSchema,
-  activeUserSchema,
-  userQuerySchema
+
 } from './schemas.mjs';
 
 function sanitizeObject(obj) {

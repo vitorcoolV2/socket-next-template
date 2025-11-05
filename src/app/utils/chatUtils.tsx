@@ -61,19 +61,6 @@ export const generateUniqueId = (): string => {
   return Math.random().toString(36).substr(2, 9);
 };
 
-export const createPrivateMessage = (
-  recipientId: string,
-  content: string,
-  sender: Sender,
-): PrivateMessage => ({
-  isPrivate: true,
-  messageId: generateUniqueId(),
-  type: 'private',
-  timestamp: new Date().toISOString(),
-  content,
-  sender,
-  recipientId,
-});
 
 export const createPublicMessage = (content: string, sender: Sender): PublicMessage => ({
   messageId: generateUniqueId(),

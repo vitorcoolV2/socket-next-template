@@ -13,7 +13,7 @@ export const sendMessageHandler = async (socket, { recipientId, content, clientT
   try {
     const __io = __users.getIO();
     const effectiveTimeout = clientTimeout || DEFAULT_REQUEST_TIMEOUT;
-    const { handlerTimeout, deliveryTimeout } = getSafeTimeouts(effectiveTimeout);
+    const { deliveryTimeout } = getSafeTimeouts(effectiveTimeout);
 
     // Input validation
     if (!recipientId || !content) {
@@ -53,7 +53,7 @@ export const sendMessageHandler = async (socket, { recipientId, content, clientT
     try {
       finalMessage = mapMessage(await __users.updateMessageStatus(socket.id, msg.id, finalStatus));
       notifyStatus(finalMessage, finalStatus);
-    } catch (error) {
+    } catch {
       finalMessage = msg;
       notifyStatus(finalMessage, finalStatus, true);
     }

@@ -6,7 +6,6 @@ const PORT = process.env.PORT || 3001;
 const BASE_URL = `http://localhost:${PORT}`;
 
 const SERVER_START_TIMEOUT = 5000; // < seconds
-const HTTP_TEST_TIMEOUT = 200; // <1 second for HTTP tests
 const SOCKET_TEST_TIMEOUT = 5000; // <5 seconds for socket tests
 
 
@@ -33,12 +32,12 @@ afterAll(async () => {
 
 describe('Socket.IO Server Tests', () => {
   let senderSocket, recipientSocket;
-  let senderUser, recipientUser;
+  let senderUser;
 
   beforeEach(async () => {
     // Create and connect sockets using the utility function
     senderSocket = await createClientSocket(BASE_URL);
-    senderUser = await userManager.storeUser(senderSocket.id, {
+    await userManager.storeUser(senderSocket.id, {
       userId: 'sender',
       userName: 'Sender'
     }, true);
@@ -69,7 +68,7 @@ describe('Socket.IO Server Tests', () => {
     describe('Private Messages', () => {
 
       test('should send and receive a private message', async () => {
-        const uu = await userManager.getUserBySocketId(senderSocket.id);
+        await userManager.getUserBySocketId(senderSocket.id);
 
         const messageContent = 'Hello, world!';
         const message = await userManager.sendMessage(senderSocket.id, 'recipient', messageContent);
