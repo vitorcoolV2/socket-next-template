@@ -12,3 +12,9 @@ services:
       # ← optional, .env is auto-loaded anyway
       - .env
     restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    external: true

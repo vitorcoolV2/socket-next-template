@@ -26,12 +26,8 @@ RUN set -a && \
     set +a && \
     npm run build                           
 
-# Install serve to run the production build
-#RUN npm install -g serve
-
 # Expose port 3000
 EXPOSE 3000
 
-# Start the app
-#CMD ["serve", "-s", "out", "-l", "3000"]
+
 CMD ["npm","start"]

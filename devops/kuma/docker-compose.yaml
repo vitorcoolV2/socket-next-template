@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   uptime-kuma:
     image: louislam/uptime-kuma:1
@@ -15,3 +13,11 @@ services:
     # Optional: Add labels for better organization
     labels:
       - "traefik.enable=false" # If using Traefik reverse proxy
+    networks:
+      - app-network
+    dns:
+      - 172.23.0.4 # Pi-hole IP
+
+networks:
+  app-network:
+    external: true

@@ -55,4 +55,7 @@ next-env.d.ts
 *.snap
 #test-keys.json
 
-devops/kuma/uptime-kuma-data/*
+devops/kuma/uptime*
+devops/pihole/etc*
+Downloads
+devops/winboat/*

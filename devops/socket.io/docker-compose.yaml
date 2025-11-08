@@ -1,7 +1,7 @@
 services:
   socket-io-server:
     build:
-      context: ../..
+      context: ../../
       dockerfile: devops/socket.io/Dockerfile
     image: socket-io-server:latest
     container_name: socket-io-server
@@ -11,3 +11,11 @@ services:
       # ← optional, .env is auto-loaded anyway
       - .env
     restart: unless-stopped
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    external: true
+
+#    driver: bridge
