@@ -59,3 +59,4 @@ devops/kuma/uptime*
 devops/pihole/etc*
 Downloads
 devops/winboat/*
+devops/nginx/step*
