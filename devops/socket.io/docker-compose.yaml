@@ -1,4 +1,21 @@
 services:
+  socket-io-db:
+    image: postgres:15
+    container_name: socket-io-db
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: socket_user
+      POSTGRES_DB: socket_db
+      POSTGRES_HOST_AUTH_METHOD: md5
+    volumes:
+      - ./hedgedoc-db-data:/var/lib/postgresql/data # Persistent storage for PostgreSQL data
+    restart: always
+    networks:
+      - app-network
+    dns:
+      - 172.28.0.2
+
   socket-io-server:
     build:
       context: ../../
@@ -17,5 +34,3 @@ services:
 networks:
   app-network:
     external: true
-
-#    driver: bridge

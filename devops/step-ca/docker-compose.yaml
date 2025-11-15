@@ -1,0 +1,92 @@
+services:
+  step-ca:
+    image: smallstep/step-ca:latest
+    container_name: step-ca
+    user: "1001:1001"
+    ports:    
+      - "8443:8443"
+    volumes:
+      - ./step:/home/step
+    env_file:
+      - .env
+    environment:
+      - DOCKER_STEPCA_INIT_NAME=${CA_NAME}
+      - DOCKER_STEPCA_INIT_DNS_NAMES=${CA_DNS_NAMES}
+      - DOCKER_STEPCA_INIT_ADDRESS=${CA_ADDRESS}
+      - DOCKER_STEPCA_INIT_PROVISIONER=${CA_PROVISIONER}
+      - DOCKER_STEPCA_INIT_PASSWORD=${CA_PASSWORD}
+      - DOCKER_STEPCA_INIT_ACME=${CA_INIT_ACME}
+      - DOCKER_STEPCA_INIT_REMOTE_MANAGEMENT=${CA_INIT_REMOTE_MANAGEMENT}
+      - DOCKER_STEPCA_INIT_SSH=${CA_INIT_SSH}
+      - DOCKER_STEPCA_INIT_FORCE=true
+    command: >
+      sh -c "
+        step-ca /home/step/config/ca.json --password-file=/home/step/secrets/password
+        step ca provisioner add acme --type ACME
+      "
+    restart: unless-stopped
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.30
+    dns:
+      - 172.28.0.2
+    stdin_open: true
+    tty: true
+    healthcheck:
+      test: ["CMD", "step", "ca", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  step-acme:
+    image: smallstep/step-cli:latest
+    container_name: step-acme
+    user: "1001:1001"
+    profiles:
+      - cli
+    volumes:
+      - ./step:/home/step
+    env_file:
+      - .env
+    environment:
+      - STEPDEBUG=1
+      - HOST_NAME=${HOST_NAME}
+    command: >
+      sh -c "
+        # Wait for Step CA to become healthy
+        until step ca health --ca-url https://$HOST_NAME:8443 2>/dev/null; do
+          echo 'Waiting for https:/$HOST_NAME:8443 (step CA) to become ready...'
+          sleep 5
+        done
+        
+        # Retrieve the root CA fingerprint
+        FINGERPRINT=$$(step certificate fingerprint /home/step/certs/root_ca.crt)
+        echo \"Root CA Fingerprint: $$FINGERPRINT\"
+        
+        # Bootstrap the client
+        step ca bootstrap \
+          --ca-url https://$HOST_NAME:8443 \
+          --fingerprint $$FINGERPRINT \
+          --force || echo 'Bootstrap completed with warnings.'
+        
+        # Verify the connection to the CA
+        echo 'Verifying connection to Step CA...'
+        step ca health
+        
+        # Inspect the root certificate
+        echo 'Inspecting root certificate...'
+        step certificate inspect /home/step/certs/root_ca.crt
+        
+        # Keep the container running
+        tail -f /dev/null
+      "
+    depends_on:
+      step-ca:
+        condition: service_healthy
+    networks:
+      - app-network
+      
+networks:
+  app-network:
+    external: true

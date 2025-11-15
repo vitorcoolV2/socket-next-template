@@ -3,16 +3,32 @@
 # Exit on error
 set -e
 
-# Define array of Compose file directories relative to devops/
-COMPOSE_FILES=("portainer" "kuma"  "pihole" "socket-io" "react-app" )
+#!/bin/bash
+
+# Change to script directory
+cd "$(dirname "$0")"
+
+echo "Working directory: $(pwd)"
+
+
+COMPOSE_FILES=( "pihole" "step-ca" "authelia" "traefik" )
+# "socket.io" "react-app" "hedgedoc"  "kuma" )
 
 # Function to relaunch a Compose service
-relaunchCompose() {
+downCompose() {
   local dir=$1
   echo "Processing $dir..."
-  cd "devops/$dir" || { echo "Directory devops/$dir not found"; exit 1; }
+  cd "$dir" || { echo "Directory $dir not found"; exit 1; }
   docker-compose down
+  cd - > /dev/null || exit 1
+}
+
+upCompose() {
+  local dir=$1
+  echo "Processing $dir..."
+  cd "$dir" || { echo "Directory $dir not found"; exit 1; }
   docker-compose up -d
+  sleep 5
   cd - > /dev/null || exit 1
 }
 
@@ -24,9 +40,14 @@ else
   echo "app-network already exists, reusing it."
 fi
 
+
+# Relaunch each service in reverse order
+for ((i=${#COMPOSE_FILES[@]}-1; i>=0; i--)); do
+  downCompose "${COMPOSE_FILES[i]}"
+done
 # Relaunch each service
 for file in "${COMPOSE_FILES[@]}"; do
-  relaunchCompose "$file"
+  upCompose "$file"
 done
 
 echo "All services relaunched."

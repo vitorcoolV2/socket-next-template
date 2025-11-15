@@ -9,14 +9,12 @@ services:
       - ./uptime-kuma-data:/app/data # Persistent storage for monitors/settings
     environment:
       - TZ=Europe/Lisbon # Optional: Set your timezone (e.g., for Portugal)
-    restart: always
-    # Optional: Add labels for better organization
-    labels:
-      - "traefik.enable=false" # If using Traefik reverse proxy
     networks:
       - app-network
-    dns:
-      - 172.23.0.4 # Pi-hole IP
+    #labels:
+    #  - "traefik.enable=true"
+    restart: unless-stopped
+
 
 networks:
   app-network:

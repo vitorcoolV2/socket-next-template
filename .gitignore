@@ -53,10 +53,20 @@ next-env.d.ts
 .vscode
 /public/test*.html
 *.snap
-#test-keys.json
 
-devops/kuma/uptime*
+
+# DEVOPS
 devops/pihole/etc*
-Downloads
+devops/kuma/uptime*
+devops/step-ca/step*
+devops/authelia/data/*
+devops/authelia/share
+devops/traefik/traefik/
+.fingerprint
+*.zip
+devops/_*.sh
+# next installs. first need stable secure home2500.local
+devops/hedgedoc
+devops/iredmail
+devops/nginx
 devops/winboat/*
-devops/nginx/step*
