@@ -1,20 +1,29 @@
 services:
   uptime-kuma:
     image: louislam/uptime-kuma:1
-    container_name: uptime-kuma
+    container_name: kuma
     ports:
       - "3002:3001" # Change 3001 to your preferred host port
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./uptime-kuma-data:/app/data # Persistent storage for monitors/settings
+      - ./kuma-config.json:/app/config.json:ro
     environment:
       - TZ=Europe/Lisbon # Optional: Set your timezone (e.g., for Portugal)
+      - TRUST_PROXY=1
+      - PROXY_HEADERS=1
+      # These might work for newer versions
+      #- UPTIME_KUMA_DISABLE_LOGIN=true
+      # Custom headers that Authelia will send
+      #- PROXY_HEADER_USER=Remote-User
+      #- PROXY_HEADER_EMAIL=Remote-Email
+      #- PROXY_HEADER_GROUPS=Remote-Groups
     networks:
       - app-network
-    #labels:
-    #  - "traefik.enable=true"
-    restart: unless-stopped
+    dns:
+      - 172.28.0.2
 
+    restart: unless-stopped
 
 networks:
   app-network:

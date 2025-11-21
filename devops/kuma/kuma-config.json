@@ -1,0 +1,7 @@
+{
+  "trustProxy": true,
+  "disableAuth": true,
+  "proxyHeaderUser": "Remote-User",
+  "proxyHeaderEmail": "Remote-Email", 
+  "proxyHeaderGroups": "Remote-Groups"
+}

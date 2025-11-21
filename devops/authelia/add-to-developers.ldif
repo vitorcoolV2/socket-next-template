@@ -1,0 +1,4 @@
+dn: cn=developers,ou=groups,dc=home2500,dc=local
+changetype: modify
+add: uniqueMember
+uniqueMember: cn=test,ou=users,dc=home2500,dc=local

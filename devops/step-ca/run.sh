@@ -34,5 +34,9 @@ echo "FINGERPRINT=$FINGERPRINT"
 
 
 echo "Step ACME CLIENT start"
-docker compose --profile cli up step-acme
+docker compose --profile cli up step-acme -d
+
+./renew-host2500.local.sh
+./renew-openldap.app-network.sh
+./renew-step-ca.app-network.sh
 

@@ -1,0 +1,30 @@
+{
+  "name": "authelia-ldap-setup",
+  "version": "1.0.0",
+  "description": "A script to verify and setup LDAP groups and users based on Authelia's access control rules.",
+  "main": "setup-native.js",
+  "scripts": {
+    "start": "node state1-inspect-network.js"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "type": "module",
+  "author": "home2500",
+  "license": "MIT",
+  "keywords": [
+    "authelia",
+    "ldap",
+    "setup",
+    "access-control",
+    "domain-names",
+    "groups",
+    "users"
+  ],
+
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "ldapjs": "^3.0.7",
+    "node-fetch": "^3.3.2"
+  }
+}

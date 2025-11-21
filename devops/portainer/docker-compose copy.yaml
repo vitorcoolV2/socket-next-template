@@ -1,0 +1,41 @@
+services:
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: portainer
+    ports:
+      - "9001:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer_data:/data
+    env_file:
+      - .env
+    environment:
+      PORTAINER_AUTH_LDAP_ENABLED: true
+      PORTAINER_AUTH_LDAP_URL: 'ldap://openldap.app-network:389'
+      PORTAINER_AUTH_LDAP_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      PORTAINER_AUTH_LDAP_ANONYMOUS_SEARCH: false
+      PORTAINER_AUTH_LDAP_SEARCH_BASE: 'ou=users,dc=home2500,dc=local'
+      PORTAINER_AUTH_LDAP_USERNAME: 'cn=admin,dc=home2500,dc=local'
+      PORTAINER_AUTH_LDAP_FILTER: '(cn=%s)'
+      # User configuration
+      PORTAINER_AUTH_LDAP_USER_ID_ATTRIBUTE: 'cn'
+      PORTAINER_AUTH_LDAP_USER_SEARCH_BASE: 'ou=users,dc=home2500,dc=local'
+      PORTAINER_AUTH_LDAP_USER_FILTER: '(cn=%s)'      
+      PORTAINER_AUTH_LDAP_USER_NAME_ATTRIBUTE: 'displayName'
+      # Group configuration (optional)
+      PORTAINER_AUTH_LDAP_GROUP_SEARCH_BASE: 'ou=groups,dc=home2500,dc=local'
+      PORTAINER_AUTH_LDAP_GROUP_FILTER: '(objectClass=groupOfUniqueNames)'
+      PORTAINER_AUTH_LDAP_GROUP_MEMBERSHIP_ATTRIBUTE: 'uniqueMember'
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.45
+    dns: 172.28.0.2
+
+    restart: unless-stopped      
+
+volumes:
+  portainer_data:
+
+networks:
+  app-network:
+    external: true

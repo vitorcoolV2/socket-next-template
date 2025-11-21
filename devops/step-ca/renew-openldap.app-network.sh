@@ -1,5 +1,5 @@
 #!/bin/bash
-# generate-certs.sh - Gerar certificados TLS do Step CA para Traefik
+# generate-certs.sh 
 
 set -e  # Sai no primeiro erro
 
@@ -10,7 +10,7 @@ if [ -f .env ]; then
     set +a
 fi
 
-HOST_NAME="home2500.local"
+HOST_NAME="openldap.app-network"
 CERTS_TARGET_DIR="step/web-certs/$HOST_NAME"
 CONTAINER_PATH="/home/step/web-certs/$HOST_NAME"
 
@@ -40,18 +40,22 @@ docker exec step-ca mkdir -p $CONTAINER_PATH
 # Gerar certificado
 echo "📄 Gerando certificado para ${HOST_NAME}..."
 docker exec -t step-ca step ca certificate ${HOST_NAME} \
-    $CONTAINER_PATH/traefik.cert.pem \
-    $CONTAINER_PATH/traefik.key.pem \
+    $CONTAINER_PATH/cert.pem \
+    $CONTAINER_PATH/key.pem \
     --provisioner admin \
     --provisioner-password-file /home/step/secrets/password \
-    --san "*.${HOST_NAME}" --san "${HOST_NAME}" --san "localhost" \
-    --san "pihole.${HOST_NAME}" --san "kuma.${HOST_NAME}" \
-    --san "traefik.${HOST_NAME}" --san "auth.${HOST_NAME}" \
+    --san "${HOST_NAME}" \
+    --kty RSA \
+    --size 2048 \
     --force
 
 # Copiar CA intermediária
 echo "📋 Copiando CA intermediária..."
-docker exec step-ca cp /home/step/certs/intermediate_ca.crt $CONTAINER_PATH/intermediate-ca.cert.pem
+docker exec step-ca cp /home/step/certs/intermediate_ca.crt $CONTAINER_PATH/intermediate-ca.crt
+
+echo "📋 Copiando CA root..."
+docker exec step-ca cp /home/step/certs/root_ca.crt $CONTAINER_PATH/root_ca.crt
+
 
 # Verificar geração no container
 echo "🔍 Verificando certificados no container:"
@@ -68,12 +72,12 @@ ls -la $CERTS_TARGET_DIR/
 # Validar certificados
 echo "🔐 Validando certificados..."
 echo "1. Informações do certificado:"
-openssl x509 -in ${CERTS_TARGET_DIR}/traefik.cert.pem -text -noout | grep -E "Subject:|Not Before|Not After|DNS:"
+openssl x509 -in ${CERTS_TARGET_DIR}/cert.pem -text -noout | grep -E "Subject:|Not Before|Not After|DNS:"
 
 echo "2. Verificando correspondência chave-certificado:"
-CERT_MODULUS=$(openssl x509 -in ${CERTS_TARGET_DIR}/traefik.cert.pem -noout -modulus 2>/dev/null | openssl md5)
-KEY_MODULUS=$(openssl rsa -in ${CERTS_TARGET_DIR}/traefik.key.pem -noout -modulus 2>/dev/null | openssl md5 2>/dev/null || 
-              openssl ec -in ${CERTS_TARGET_DIR}/traefik.key.pem -noout -text 2>/dev/null | grep -A5 "pub:" | tail -1 | tr -d ' :' | openssl md5)
+CERT_MODULUS=$(openssl x509 -in ${CERTS_TARGET_DIR}/cert.pem -noout -modulus 2>/dev/null | openssl md5)
+KEY_MODULUS=$(openssl rsa -in ${CERTS_TARGET_DIR}/key.pem -noout -modulus 2>/dev/null | openssl md5 2>/dev/null || 
+              openssl ec -in ${CERTS_TARGET_DIR}/key.pem -noout -text 2>/dev/null | grep -A5 "pub:" | tail -1 | tr -d ' :' | openssl md5)
 
 if [ "$CERT_MODULUS" = "$KEY_MODULUS" ] && [ -n "$CERT_MODULUS" ]; then
     echo "✅ Chave e certificado correspondem!"
@@ -84,6 +88,3 @@ fi
 
 echo "🎉 Certificados gerados com sucesso!"
 echo "📁 Local: ./${CERTS_TARGET_DIR}/"
-echo ""
-echo "⏳ Reinicie o Traefik para usar os novos certificados:"
-echo "   docker-compose restart traefik"

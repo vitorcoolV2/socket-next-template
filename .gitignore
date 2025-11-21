@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+/**/node_modules
 /.pnp
 .pnp.*
 .yarn/*
@@ -32,6 +33,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+.secret*
 
 # vercel
 .vercel
@@ -60,13 +62,19 @@ devops/pihole/etc*
 devops/kuma/uptime*
 devops/step-ca/step*
 devops/authelia/data/*
-devops/authelia/share
+devops/authelia/share/*
 devops/traefik/traefik/
 .fingerprint
 *.zip
 devops/_*.sh
 # next installs. first need stable secure home2500.local
+!devops/authelia/data/authelia/config/configuration.yml
+devops/authelia/data
+devops/authelia/ldap*
+
+
 devops/hedgedoc
 devops/iredmail
 devops/nginx
 devops/winboat/*
+*_Backup_*

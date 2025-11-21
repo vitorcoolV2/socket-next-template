@@ -25,5 +25,18 @@ sudo chmod 600 traefik/certs/home2500.local/traefik.key.pem
 
 echo "RUN TREAFIK"
 
-docker compose up  -d traefik 
+docker compose up  -d  
 
+sleep 3
+
+##### RUN EXPECTED from step-ca, authelia
+curl -k -H "Host: auth.home2500.local" https://localhost/ | grep "base href"
+
+# Test whoami service
+curl -k -H "Host: whoami.home2500.local" https://localhost/
+
+curl -k -H "Host: pihole.home2500.local" https://localhost/
+
+curl -k -H "Host: portainer.home2500.local" https://localhost/
+
+curl -k -H "Host: kuma.home2500.local" https://localhost/

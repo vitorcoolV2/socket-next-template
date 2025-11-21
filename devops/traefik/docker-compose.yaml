@@ -17,16 +17,15 @@ services:
         ipv4_address: 172.28.0.10      
     dns:
       - 172.28.0.2
-    extra_hosts:
-      - "step-ca.local:172.28.0.30"
     
     environment:
-      - STEPCA_URL=https://step-ca.local:8443
+      - STEPCA_URL=https://step-ca.app-network:8443
     restart: unless-stopped
 
 
   whoami:
     image: containous/whoami
+    container_name: whoami
     labels:
       - "traefik.http.routers.whoami.rule=Host(`whoami.home2500.local`)"
       - "traefik.http.routers.whoami.tls=true"
