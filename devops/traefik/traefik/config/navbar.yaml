@@ -1,0 +1,16 @@
+http:
+  services:
+    # Navbar Service
+    navbar:
+      loadBalancer:
+        servers:
+          - url: 'http://navbar:80'
+
+  routers:
+    # Navbar Router - PUBLIC (no auth required)
+    navbar:
+      rule: 'Host(`navbar.home2500.local`)'
+      entryPoints: ['websecure']
+      service: 'navbar'
+      #middlewares: ['public-navbar']
+      tls: {}

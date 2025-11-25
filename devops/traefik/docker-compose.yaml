@@ -1,27 +1,45 @@
-
 services:
   # Traefik Reverse Proxy - Main entry point
   traefik:
     image: traefik:v2.9
-    container_name: traefik  # Using your desired container name
+    container_name: traefik # Using your desired container name
     ports:
-      - "80:80"    # HTTP traffic
-      - "443:443"  # HTTPS traffic
+      - "80:80" # HTTP traffic
+      - "443:443" # HTTPS traffic
       - "8081:8080" # Dashboard
     user: root
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro    
-      - ./traefik:/etc/traefik:ro       
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik:/etc/traefik:ro
     networks:
       app-network:
-        ipv4_address: 172.28.0.10      
+        ipv4_address: 172.28.0.10
     dns:
       - 172.28.0.2
-    
+
     environment:
       - STEPCA_URL=https://step-ca.app-network:8443
     restart: unless-stopped
 
+  navbar:
+    image: nginx:alpine
+    container_name: navbar
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx/navbar.html:/usr/share/nginx/html/index.html
+      - ./nginx/conf.d/:/etc/nginx/conf.d/ # Mount empty directory to override defaults
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.12
+    dns:
+      - 172.28.0.2
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.navbar.rule=Host(`navbar.home2500.local`)"
+      - "traefik.http.routers.navbar.entrypoints=websecure"
+      - "traefik.http.routers.navbar.tls=true"
+      - "traefik.http.services.navbar.loadbalancer.server.port=80"
+    restart: unless-stopped
 
   whoami:
     image: containous/whoami
@@ -31,9 +49,10 @@ services:
       - "traefik.http.routers.whoami.tls=true"
     networks:
       app-network:
-        ipv4_address: 172.28.0.11      
+        ipv4_address: 172.28.0.11
     dns:
       - 172.28.0.2
+    restart: unless-stopped
 
 networks:
   app-network:

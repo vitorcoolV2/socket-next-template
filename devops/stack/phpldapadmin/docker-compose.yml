@@ -1,0 +1,21 @@
+services:
+
+  phpldapadmin:
+    image: osixia/phpldapadmin:latest
+    container_name: phpldapadmin
+    env_file:
+      - .env
+    environment:
+      PHPLDAPADMIN_LDAP_HOSTS: openldap.app-network
+      PHPLDAPADMIN_HTTPS: false
+    ports:
+      - "8086:443"
+      - "8085:80"
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.20
+    restart: unless-stopped
+
+networks:
+  app-network:
+    external: true

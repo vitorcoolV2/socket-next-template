@@ -1,0 +1,97 @@
+theme: dark
+
+log:
+  level: info
+
+authentication_backend:
+  ldap:
+    implementation: custom
+    address: ldap://openldap.app-network:389
+    base_dn: dc=home2500,dc=local
+    additional_users_dn: ou=users
+    additional_groups_dn: ou=groups
+
+    # Admin user for searches
+    user: cn=admin,dc=home2500,dc=local
+    password: KjnFUyRJx7e4CiVa9k
+
+    # CORRECT FILTERS WITH REQUIRED PLACEHOLDERS
+    users_filter: '(&({username_attribute}={input})(objectClass=inetOrgPerson))'
+    groups_filter: '(|(uniqueMember={dn})(member={dn}))'
+
+    # Attributes
+    attributes:
+      username: uid
+      mail: mail
+      display_name: displayName
+
+access_control:
+  default_policy: deny
+  rules:
+    - domain: 'kuma.home2500.local'
+      policy: one_factor
+      subject: 'group:developers'
+
+    - domain: 'pihole.home2500.local'
+      policy: one_factor
+      subject: 'group:developers'
+
+    - domain: 'traefik.home2500.local'
+      policy: one_factor
+      subject: 'group:developers'
+      resources:
+        - '^/api/.*$'
+        - '^/$'
+        - '^/dashboard/.*$'
+        - '^/dashboard$'
+
+    - domain: 'portainer.home2500.local'
+      policy: one_factor
+      subject: 'group:developers'
+
+    - domain: 'whoami.home2500.local'
+      policy: one_factor
+      subject: 'group:users'
+
+    - domain: 'navbar.home2500.local'
+      policy: one_factor
+      subject: 'group:users'
+
+    # Allow public access to static resources
+    - domain: '*.home2500.local'
+      policy: bypass
+      resources:
+        - '^/.well-known/.*'
+        - '^/static/.*'
+        - '^/favicon.ico$'
+
+    # Except auth itself
+    - domain: 'auth.home2500.local'
+      policy: bypass
+
+session:
+  name: authelia_session
+  expiration: 1h
+  inactivity: 5m
+  cookies:
+    - name: authelia_session
+      domain: home2500.local
+      authelia_url: https://auth.home2500.local
+  same_site: lax
+
+server:
+  address: tcp://0.0.0.0:9091/
+
+# PostgreSQL Storage Configuration
+storage:
+  postgres:
+    address: postgresql
+    database: authelia
+    username: authelia
+
+notifier:
+  filesystem:
+    filename: /config/authelia_notifications
+
+identity_validation:
+  reset_password:

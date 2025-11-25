@@ -14,6 +14,9 @@ sudo rm -rf ./data/postgres       ## volume out
 # get UNLOCK_PASSWORD,ADMIN_PASSWORD
 . .env
 mkdir -p data/authelia/secrets    ## make sure
+
+sudo chown $USER:$USER data/authelia/secrets   
+
 # recover .env secrets
 echo "$UNLOCK_PASSWORD" > ./data/authelia/secrets/STORAGE_PASSWORD
 echo "$ADMIN_PASSWORD" > ./data/authelia/secrets/AUTHENTICATION_BACKEND_LDAP_PASSWORD

@@ -1,0 +1,15 @@
+# Add to your Traefik dynamic config
+http:
+  routers:
+    whoami-public:
+      rule: 'Host(`whoami.home2500.local`)'
+      entryPoints: ['websecure']
+      service: 'whoami'
+      middlewares: ['public-default'] # This should show navbar without login
+      tls: {}
+
+  services:
+    whoami:
+      loadBalancer:
+        servers:
+          - url: 'http://whoami:80'

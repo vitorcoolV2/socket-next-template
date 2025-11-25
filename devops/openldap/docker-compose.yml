@@ -1,0 +1,33 @@
+services:
+  openldap:
+    image: osixia/openldap:latest
+    container_name: openldap
+    env_file:
+      - .env
+    environment:
+      LDAP_ORGANISATION: ${LDAP_ORGANISATION}
+      LDAP_DOMAIN: ${LDAP_DOMAIN}
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD}
+      # Enable TLS
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: ldap.crt
+      LDAP_TLS_KEY_FILENAME: ldap.key
+      LDAP_TLS_CA_CRT_FILENAME: ca.crt
+      LDAP_TLS_VERIFY_CLIENT: "try"
+    ports:
+      - "389:389" # LDAP
+      - "636:636" # LDAPS      
+    volumes:
+      - ./ldap/data:/var/lib/ldap
+      - ./ldap/config:/etc/ldap/slapd.d
+      # Add certificates volume            
+      - ./ldap/tls:/container/service/slapd/assets/certs
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.3 # Static IP for authelia
+    #dns: 172.28.0.2
+    restart: unless-stopped
+
+networks:
+  app-network:
+    external: true

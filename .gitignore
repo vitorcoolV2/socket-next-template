@@ -34,6 +34,8 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 .secret*
+.fingerprint
+
 
 # vercel
 .vercel
@@ -42,10 +44,16 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+
+# never 
+*.zip
+devops/_*.sh
+
 # More
 ~*
 *~
 .env*
+# except
 !.env.*template
 !.env.*example
 
@@ -57,24 +65,27 @@ next-env.d.ts
 *.snap
 
 
-# DEVOPS
+# DEVOPS CORE containers - pihole,step-ca,openldap,authelia,traefik
 devops/pihole/etc*
-devops/kuma/uptime*
 devops/step-ca/step*
-devops/authelia/data/*
-devops/authelia/share/*
-devops/traefik/traefik/
-.fingerprint
-*.zip
-devops/_*.sh
-# next installs. first need stable secure home2500.local
-!devops/authelia/data/authelia/config/configuration.yml
-devops/authelia/data
+devops/openldap/ldap/*
+# authelia home2500.local
+devops/authelia/authelia/
+devops/authelia/data/authelia/config/authelia_notifications
+devops/authelia/data/postgres/
+devops/authelia/secrets
 devops/authelia/ldap*
+#traefik
+devops/traefik/traefik/certs/*
+# except
+!devops/traefik/traefik/config/*
+!devops/traefik/traefik/traefik.yml
 
 
-devops/hedgedoc
-devops/iredmail
-devops/nginx
-devops/winboat/*
+##### the stack not exposed
+devops/stack/kuma/uptime*
+devops/stack/hedgedoc
+devops/stack/iredmail
+devops/stack/nginx
+devops/stack/winboat/*
 *_Backup_*
