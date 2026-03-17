@@ -1,0 +1,66 @@
+services:
+  init-vault:
+    image: alpine
+    container_name: init-vault
+    volumes:
+      - vault_storage:/vault/data
+    command: chown -R 100:1000 /vault/data && echo "vault initialized"
+    restart: no
+    networks:
+      - app-network    
+
+
+  vault:
+    image: hashicorp/vault:1.21.1
+    container_name: vault
+    ports:
+      - "8200:8200" # Porta API/UI
+      - "8201:8201" # Cluster
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.6
+
+
+    environment:
+      - VAULT_SKIP_VERIFY=true
+      - VAULT_ADDR=${VAULT_ADDR}      
+      #- VAULT_CACERT=${MOUNT_VAULT_CACERT}
+      - SKIP_SETCAP=true
+    cap_add:
+      - IPC_LOCK
+      - NET_BIND_SERVICE
+    restart: always
+    volumes:
+      - vault_storage:/vault/data
+      - ../vault/config/certs:/vault/config/certs:ro
+      - ../vault/config/vault-active.hcl:/vault/config/vault.hcl:ro # Configuration files    
+    command: vault server -config=/vault/config/vault.hcl
+    #command: server -dev -dev-root-token-id=root
+    healthcheck:
+      #test: [ "CMD", "vault", "status" ]
+      test: ["CMD-SHELL", "vault status || [ $? -eq 2 ]"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      - "docker-volume-backup.stop-during-backup=true"
+
+
+networks:
+  app-network:
+    name: app-network
+    external: true
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+        - gateway: 172.28.0.1
+
+volumes:
+  vault_storage:
+    name: vault_home2500_data

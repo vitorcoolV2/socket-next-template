@@ -1,0 +1,240 @@
+:root {
+    /* Behavior Overrides */
+    --pf-global--BackgroundColor--100: transparent !important;
+    --pf-global--link--TextDecoration: none !important;
+    --pf-global--link--TextDecoration--hover: none !important;
+
+    /* Shared Glassmorphism Constants */
+    --bkdrop-blur: blur(3px) saturate(250%);
+    --bkdrop-null-glass: saturate(50%);
+
+
+    --transition-speed: 0.3s ease;
+
+    --login-bgcolor: transparent;
+    --card-bgcolor: #cfcee848 !important;
+    --card-hover-bgcolor: rgba(255, 255, 255, 0.48) !important;
+    --card-shbxcolor: rgba(0, 0, 0, 0.4) 0px 8px 32px 0px !important;
+    --card-hover-shbxcolor: rgba(49, 49, 55, 0.5) !important;
+    --card-border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+/* Global Input Styles (Shared) */
+
+ak-locale-context {
+    --bkdrop-hot-glass: var(--bkdrop-null-glass) !important;
+    --pf-c-form-control--BackgroundColor: rgba(255, 255, 255, 0.05) !important;
+    --ak-flow-background: url("/static/dist/assets/images/home2500.jpg") !important;
+}
+
+/* 2. Estado Ativo (Quando o tema é Light ou Dark) */
+ak-locale-context[theme="light"],
+ak-locale-context[theme="dark"] {
+    --bkdrop-hot-glass: saturate(180%) brightness(0.8) contrast(1.2) hue-rotate(10deg) !important;
+}
+
+/* --- LIGHT THEME --- */
+ak-locale-context[theme="light"] {
+    /* Backgrounds */
+    --ak-flow-background: url("/static/dist/assets/images/home2500.jpg") !important;
+    --link-color: rgb(54, 43, 185) !important;
+    --link-color-hover: rgb(61, 47, 218) !important;
+
+    --page-bgcolor: rgba(223, 213, 205, 0.23) !important;
+    --page-content-bgcolor: rgba(174, 174, 174, 0.2) !important;
+    --slank-bgcolor: #afafaf52;
+    --login-bgcolor: rgba(204, 211, 221, 0.47) !important;
+
+    /* Cards */
+
+    --card-bgcolor: #cfcee848 !important;
+    --card-hover-bgcolor: rgba(255, 255, 255, 0.48) !important;
+    --card-shbxcolor: rgba(0, 0, 0, 0.4) 0px 8px 32px 0px !important;
+    --card-hover-shbxcolor: rgba(49, 49, 55, 0.5) !important;
+
+    /* Sections & Links */
+    --card-section-bgcolor: rgba(0, 0, 0, 0.13) !important;
+    --card-section-dropshcolor: rgba(192, 180, 179, 0.6);
+    --card-link-dropshcolor: rgba(192, 180, 179, 0.6);
+}
+
+/* --- DARK THEME --- */
+ak-locale-context[theme="dark"] {
+    /* Brand Accent & Identity */
+    --ak-accent: #4f46e5 !important;
+    --pf-global--primary-color--100: var(--ak-accent) !important;
+    --pf-global--link--Color: var(--ak-accent) !important;
+    --pf-c-form-control--focus--border-bottom--color: var(--ak-accent) !important;
+
+    /* UI Containers */
+    --ak-sidebar-background: rgba(10, 10, 10, 0.75) !important;
+    --ak-header-background: rgba(10, 10, 10, 0.4) !important;
+
+    /* Backgrounds */
+    --ak-flow-background: url("/static/dist/assets/images/home2500-dark.jpg") !important;
+    --link-color: #468ed7 !important;
+    --link-color-hover: #8ac4ff !important;
+
+    --page-bgcolor: transparent !important;
+    --page-content-bgcolor: rgba(0, 0, 0, 0.18);
+    --slank-bgcolor: #1c1c1c52;
+    --login-bgcolor: rgba(3, 12, 32, 0.53) !important;
+
+    /* Cards */
+    --card-bgcolor: rgba(49, 49, 55, 0.5);
+    --card-hover-bgcolor: rgba(41, 41, 47, 0.66) !important;
+    --card-shbxcolor: rgba(0, 0, 0, 0.4) 0px 8px 32px 0px !important;
+    --card-hover-shbxcolor: rgba(79, 70, 229, 0.4) !important;
+
+    /* Sections & Links */
+    --card-section-bgcolor: rgba(255, 255, 255, 0.22) !important;
+    --card-section-dropshcolor: rgba(192, 180, 179, 0.6);
+    --card-link-dropshcolor: rgba(192, 180, 179, 0.6);
+
+}
+
+.pf-c-button.pf-m-control {
+    background-color: var(--page-content-bgcolor) !important;
+}
+
+/* Page & Background Layout */
+.pf-c-page {
+    background-color: var(--page-bgcolor) !important;
+}
+
+.pf-c-card a {
+    color: var(--link-color, var(--pf-global--link--Color)) !important;
+    text-decoration: none !important;
+    position: relative;
+    transition: color 0.3s ease;
+    display: inline-block;
+}
+
+.pf-c-card a::after {
+    content: '';
+    /*position: absolute;   strange behavior - activate underscore */
+    height: 2px;
+    bottom: -2px;
+    left: 0;
+    width: 100%;
+    background-color: var(--link-color);
+
+    /* ESTADO INICIAL: Linha encolhida */
+    transform: scaleX(0);
+    transform-origin: right bottom;
+
+    /* A MÁGICA: Transição suave */
+    transition: transform 0.25s ease-out;
+}
+
+.pf-c-card a:hover {
+    color: var(--link-color-hover, var(--pf-global--link--Color)) !important;
+    filter: brightness(1.2);
+    transition: filter 0.3s;
+}
+
+.pf-c-card a:hover::after {
+    /* Estado final: expandido (escala 1) */
+    transform: scaleX(1);
+    transform-origin: left bottom;
+}
+
+
+
+
+.pf-c-login,
+.background-wrapper {
+    background-image: var(--ak-flow-background) !important;
+    background-size: cover !important;
+    background-position: center !important;
+    background-attachment: fixed !important;
+}
+
+/* Card glass effect */
+div.pf-c-card {
+    background-color: var(--card-bgcolor) !important;
+    box-shadow: var(--card-shbxcolor) !important;
+    border: var(--card-border) !important;
+    border-radius: 12px !important;
+    backdrop-filter: var(--bkdrop-blur) !important;
+    transition: transform var(--transition-speed), box-shadow var(--transition-speed), background-color var(--transition-speed) !important;
+}
+
+div.pf-c-card:hover {
+    background-color: var(--card-hover-bgcolor) !important;
+    box-shadow: var(--card-hover-shbxcolor) !important;
+    transform: translateY(-2px);
+}
+
+/* Login Main Box */
+.pf-c-login__main {
+    /*default*/
+    background-color: var(--login-bgcolor) !important;
+    border: var(--card-border) !important;
+    box-shadow: var(--card-shbxcolor) !important;
+    backdrop-filter: var(--bkdrop-hot-glass) !important;
+    background-size: cover !important;
+
+    /* --- Transição ANIMACAO -opcional --- */
+    /* O timing de 0.4s com ease-out é o padrão para interfaces "premium" */
+    -webkit-backdrop-filter: var(--bkdrop-hot-glass) !important;
+    transition:
+        backdrop-filter 0.4s ease-out,
+        background-color 0.4s ease,
+        box-shadow 0.4s ease,
+        transform 0.4s cubic-bezier(0.165, 0.84, 0.44, 1) !important;
+    /* Melhora performance de animação */
+    will-change: backdrop-filter, transform;
+
+    border-radius: 12px !important;
+    margin-top: 2.5rem;
+}
+
+div.pf-c-login__main:hover {
+    /* --- Transição de Filtro --- */
+    /* Aqui aplicas o teu novo estado (glass-glass) */
+    backdrop-filter: var(--glass-glass) !important;
+
+
+    /* --- Efeito de Profundidade smoth (Opcional) --- */
+    /* Um zoom de 2% no objeto ajuda a vender o efeito de vidro */
+    -webkit-backdrop-filter: var(--glass-glass) !important;
+    transform: scale(1.0);
+}
+
+
+/* SET TRANSPARENCY , DISABLE ALL BACKGROUND EFFECT */
+.ak-login-container {
+    background-color: #00000000 !important;
+    /*#4a4a4a70 !important;*/
+    background-image: none !important;
+    box-shadow: none !important;
+    padding-right: var(--pf-global--spacer--lg);
+
+}
+
+/* 1. Elimina a imagem default que aparece por trás/baixo */
+.pf-c-background-image,
+.pf-c-background-image::before,
+.pf-c-login::before {
+    background-image: none !important;
+    background-color: var(--ak-accent) !important;
+    display: none !important;
+}
+
+.background-default-slant {
+    stroke: none !important;
+    background-color: var(--slank-bgcolor) !important;
+}
+
+
+/*  card expandable  */
+div.pf-c-expandable-section {
+    background-color: var(--card-section-bgcolor) !important;
+}
+
+/*body:not(:has(.ak-interface-admin)) */
+div.pf-c-expandable-section a:hover {
+    filter: drop-shadow(0 0 8px --card-section-dropshcolor) !important;
+    text-decoration: none !important;
+}

@@ -1,0 +1,167 @@
+version: 1
+## file: authentik/blueprint-home2500.yaml
+metadata:
+  name: Home2500 Infrastructure
+  slug: blueprint-home2500
+  labels:
+    Domain: "home2500.local"
+    blueprints.goauthentik.io/instantiate: "true"
+    
+entries:  
+  # --- 1. GROUPS ---
+  - model: authentik_core.group
+    id: group-admins
+    identifiers: { name: "Home-Admins" }
+  - model: authentik_core.group
+    id: group-developers
+    identifiers: { name: "Home-Developers" }    
+  - model: authentik_core.group
+    id: group-users
+    identifiers: { name: "Home-Users" }
+
+  # --- 2. PROVIDERS (The Anchor is defined here) ---
+  - model: authentik_providers_proxy.proxyprovider
+    id: prov-pihole
+    identifiers: { name: "pihole-provider" }
+    attrs: &proxy_defaults
+      internal_host: "http://authentik-server.app-network:9000"
+      external_host: "https://pihole.home2500.local"
+      mode: "forward_single"
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+
+  - model: authentik_providers_proxy.proxyprovider
+    id: prov-mailcrab
+    identifiers: { name: "mailcrab-provider" }
+    attrs:
+      <<: *proxy_defaults
+      internal_host: "http://mailcrab.app-network:1080"
+      external_host: "https://mailcrab.home2500.local"
+
+  - model: authentik_providers_proxy.proxyprovider
+    id: prov-traefik
+    identifiers: { name: "traefik-provider" }
+    attrs:
+      <<: *proxy_defaults
+      external_host: "https://traefik.home2500.local"
+
+  - model: authentik_providers_proxy.proxyprovider
+    id: prov-whoami
+    identifiers: { name: "whoami-provider" }
+    attrs:
+      <<: *proxy_defaults
+      internal_host: "http://whoami.app-network:80"
+      external_host: "https://whoami.home2500.local"
+
+  # NOVO: O Gate do Vault para evitar o bypass da UI
+  - model: authentik_providers_proxy.proxyprovider
+    id: prov-vault-sso-gate
+    identifiers: { name: "vault-provider" }
+    attrs:
+      mode: "forward_single"
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      internal_host: "https://vault.app-network:443"
+      external_host: "https://vault.home2500.local"      
+
+  # --- 3. APPLICATIONS ---
+  - model: authentik_core.application
+    id: app-pihole
+    identifiers: { slug: "pihole" }
+    attrs:
+      name: "Pi-hole"
+      provider: !KeyOf prov-pihole
+      group: "Infraestrutura"
+      meta_launch_url: "https://pihole.home2500.local/admin/"
+      meta_icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/pihole.png"
+
+  - model: authentik_core.application
+    id: app-traefik
+    identifiers: { slug: "traefik" }
+    attrs:
+      name: "Traefik"
+      provider: !KeyOf prov-traefik
+      group: "Infraestrutura"
+      meta_launch_url: "https://traefik.home2500.local/dashboard/"
+      meta_icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/traefik.png"
+
+  - model: authentik_core.application
+    id: app-mailcrab
+    identifiers: { slug: "mailcrab" }
+    attrs:
+      name: "MailCrab"
+      provider: !KeyOf prov-mailcrab
+      group: "Ferramentas"
+      meta_icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/mail-crab.png"
+
+  - model: authentik_core.application
+    id: app-whoami
+    identifiers: { slug: "whoami" }
+    attrs:
+      name: "Whoami"
+      provider: !KeyOf prov-whoami
+      group: "Ferramentas"
+      meta_icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/traefik.png"
+
+  - model: authentik_core.application
+    id: app-vault
+    identifiers: { slug: "vault" }
+    attrs:
+      name: "Vault (OIDC)"
+      provider: !KeyOf prov-vault-sso-gate
+      group: "Infraestrutura"
+      meta_icon: "https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/hashicorp-vault.png"
+
+
+  # --- 4. ACCESS BINDINGS ---
+  # only Admin Access
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-pihole, group: !KeyOf group-admins }
+    attrs: { order: 0 }
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-traefik, group: !KeyOf group-admins }
+    attrs: { order: 0 }
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-mailcrab, group: !KeyOf group-admins }
+    attrs: { order: 0 }
+  # vault
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-vault, group: !KeyOf group-admins }
+    attrs: { order: 0 }          
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-vault, group: !KeyOf group-developers }
+    attrs: { order: 1 }
+ 
+  # whomai
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-whoami, group: !KeyOf group-admins }
+    attrs: { order: 0 }  
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-whoami, group: !KeyOf group-developers }
+    attrs: { order: 1 }  
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-whoami, group: !KeyOf group-users }
+    attrs: { order: 2 }
+
+  # --- 5. OUTPOST SYNC ---
+  - model: authentik_outposts.outpost
+    identifiers: { name: "authentik Embedded Outpost" }
+    attrs:
+      providers:
+        - !KeyOf prov-whoami
+        - !KeyOf prov-pihole
+        - !KeyOf prov-mailcrab
+        - !KeyOf prov-traefik
+        - !KeyOf prov-vault-sso-gate
+
+      config:
+        log_level: info
+        # O URL que o Browser do utilizador vê (Obrigatório para redirecionar para HTTPS)
+        authentik_host: "https://auth.home2500.local"
+        # O URL que o Outpost usa internamente para validar tokens (opcional, mas recomendado)
+        authentik_host_browser: "https://auth.home2500.local"
+        authentik_host_insecure: false
+        refresh_interval: minutes=5
+        object_naming_template: ak-outpost-%(name)s
+        docker_network: "app-network"
+        docker_map_ports: true

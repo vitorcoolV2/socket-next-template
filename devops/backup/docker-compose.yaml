@@ -1,0 +1,43 @@
+services:
+  backrest:
+    image: garethgeorge/backrest:latest
+    container_name: backup
+    restart: always
+    environment:
+      - BACKREST_CONFIG=/config/config.json
+      - BACKREST_DATA=/data
+      # .vars 2 template self authentik outpost formation. ../authentik/blueprints/blueprint-home2500-_DIR_NAME.yaml.tpl
+      - PORT=9898  
+    volumes:
+      - ./config:/config
+      # Aceder aos volumes docker
+      - /var/lib/docker/volumes:/backup/source:ro
+      # Fontes de Backup (Sources)
+      - ../traefik/traefik:/backup/source_traefik:ro
+      - ../vault/config:/backup/source_vault:ro
+      - ../authentik/blueprints:/backup/source_authentik-blueprints:ro
+      - ../.env:/backup/source_global_env:ro
+      - ../pihole/etc-pihole:/backup/source_pihole_etc:ro
+      - ../pihole/etc-dnsmasq.d:/backup/source_pihole_dnsmasq:ro
+      # ultimo
+      - /mnt/ssd980/backups/backrest:/data
+    ports:
+      - "8086:9898"
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.15
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backup.rule=Host(`backup.home2500.local`)"
+      - "traefik.http.routers.backup.entrypoints=websecure"
+      - "traefik.http.routers.backup.tls=true"
+      - "traefik.http.routers.backup.middlewares=authentik-sso@file,security-headers@file"
+
+      # Define o serviço explicitamente
+      - "traefik.http.routers.backup.service=backup-service"
+      - "traefik.http.services.backup-service.loadbalancer.server.port=9898"
+      - "traefik.http.services.backup-service.loadbalancer.passhostheader=true"
+
+networks:
+  app-network:
+    external: true

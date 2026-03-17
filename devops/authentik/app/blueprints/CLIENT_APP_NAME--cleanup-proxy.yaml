@@ -1,0 +1,29 @@
+version: 1
+## tpl: authentik/app/blueprints/CLIENT_APP_NAME--cleanup-proxy.yaml
+## yaml: authentik/blueprints/home2500_{{$CLIENT_APP_NAME}}--cleanup-proxy.yaml
+metadata:
+  name: "Home2500 {{$CLIENT_APP_NAME}} cleanup proxy"
+  slug: blueprint-home2500-{{$CLIENT_APP_NAME}}-cleanup-proxy
+entries:
+  # 1. Remover Bindings PRIMEIRO (eles dependem da App existir para serem encontrados via !Find)
+  - model: authentik_policies.policybinding
+    identifiers: 
+      target: !Find [authentik_core.application, [slug, "{{$CLIENT_APP_NAME}}"]]
+    state: absent
+    # Permitimos que este passo falhe silenciosamente caso a App já não exista
+    conditions:
+      - !Find [authentik_core.application, [slug, "{{$CLIENT_APP_NAME}}"]]
+
+  # 2. Remover Application
+  - model: authentik_core.application
+    identifiers:
+      slug: "{{$CLIENT_APP_NAME}}"
+    attrs:
+      name: "{{$CLIENT_APP_BLUE_LABEL}}"
+    state: absent
+
+  # 3. Remover o Provider
+  - model: authentik_providers_proxy.proxyprovider
+    identifiers:
+      name: "{{$CLIENT_APP_NAME}}-provider"
+    state: absent

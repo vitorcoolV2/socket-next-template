@@ -1,0 +1,173 @@
+services:
+  mailcrab:
+    image: marlonb/mailcrab:latest
+    container_name: mailcrab
+    ports:
+      - "1080:1080"
+      - "1025:1025"
+    networks:
+      - app-network
+
+    restart: unless-stopped
+
+  postgresql:
+    #image: docker.io/library/postgres:16-alpine
+    image: tensorchord/pgvecto-rs:pg16-v0.2.1
+    container_name: authentik-db
+    restart: unless-stopped
+    networks:
+      - app-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      #- ./create-db-user.sh:/script/create-db-user.sh:ro
+    secrets:
+      - AUTHENTIK_POSTGRESQL__PASSWORD
+    environment:
+      POSTGRES_PASSWORD_FILE: /run/secrets/AUTHENTIK_POSTGRESQL__PASSWORD
+      POSTGRES_USER: authentik
+    healthcheck:
+      # Usamos apenas o nome fixo da DB se a variável falhar, ou garantimos a flag -d
+      test: ["CMD-SHELL", "pg_isready -d authentik -U authentik"]
+      start_period: 20s
+      interval: 30s
+      retries: 5
+      timeout: 5s      
+
+      #test: [ "CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}" ]
+   
+    deploy:
+      resources:
+        limits:
+          memory: 1G # Limita o banco a 1GB
+    labels:
+      - "docker-volume-backup.stop-during-backup=true"
+      - "docker-volume-backup.pre-backup-command=pg_dumpall -U authentik > /var/lib/postgresql/data/dump.sql"
+
+  redis:
+    image: docker.io/library/redis:alpine
+    container_name: authentik-redis    
+    restart: unless-stopped      
+    networks:
+      - app-network
+
+    command: >
+      sh -c 'exec redis-server 
+      --requirepass "$(cat /run/secrets/AUTHENTIK_REDIS__PASSWORD)"
+      --maxmemory 1gb
+      --maxmemory-policy noeviction
+      --save 60 1 
+      --appendonly yes'
+    volumes:
+      - redis_data:/data
+    #command: sh -c "exec redis-server --requirepass \"$$(cat /run/secrets/AUTHENTIK_REDIS__PASSWORD)\""
+    secrets:
+      - AUTHENTIK_REDIS__PASSWORD
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      start_period: 10s
+      interval: 10s
+      retries: 5
+      timeout: 5s
+    
+
+  server:
+    image: ghcr.io/goauthentik/server:2024.10.3 # Versão estável
+    container_name: authentik-server
+    restart: unless-stopped    
+    env_file:
+      - /run/user/1000/home2500/authentik/.secret
+    command: server
+    # until curl -s -k "https://auth.${INTERNAL_DOMAIN}/api/v3/core/config/" | grep -q "version" > /dev/null; do sleep 5; done
+    environment:
+      AUTHENTIK_COOKIE_DOMAIN: "home2500.local"
+      AUTHENTIK_REDIS__HOST: redis      
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik      
+      AUTHENTIK_BLUEPRINTS_DIR: /blueprints
+      AUTHENTIK_ERROR_REPORTING__ENABLED: true
+      ### mailcrab relation
+      # Configuração SMTP para o Authentik
+      AUTHENTIK_EMAIL__HOST: mailcrab
+      AUTHENTIK_EMAIL__PORT: 1025
+      AUTHENTIK_EMAIL__USE_TLS: false
+      AUTHENTIK_EMAIL__USE_SSL: false
+      # O MailCrab não precisa de user/pass, mas o Authentik pode exigir valores vazios
+      AUTHENTIK_EMAIL__USER: "fake"
+      AUTHENTIK_EMAIL__FROM: "admin@home2500.local"
+      
+    volumes:
+      - media_data:/media                       
+      #- ./data/custom-templates:/templates
+      - ./blueprints:/blueprints/_home2500_CORE
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.10 # IP fixo para o Authentik
+
+    depends_on:
+      - postgresql
+      - redis
+      - mailcrab
+    deploy:
+      resources:
+        limits:
+          memory: 2G # Limita o Authentik a 2GB
+
+  worker:
+    image: ghcr.io/goauthentik/server:2024.10.3
+    container_name: authentik-worker
+    restart: unless-stopped
+    command: worker
+    env_file:
+      - /run/user/1000/home2500/authentik/.secret
+    environment:
+      AUTHENTIK_COOKIE_DOMAIN: "home2500.local"
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_POSTGRESQL__HOST: postgresql
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_BLUEPRINTS_DIR: /blueprints
+      ### mailcrab relation
+      # Configuração SMTP para o Authentik
+      AUTHENTIK_EMAIL__HOST: mailcrab
+      AUTHENTIK_EMAIL__PORT: 1025
+      AUTHENTIK_EMAIL__USE_TLS: false
+      AUTHENTIK_EMAIL__USE_SSL: false
+      # O MailCrab não precisa de user/pass, mas o Authentik pode exigir valores vazios
+      AUTHENTIK_EMAIL__USER: "internal"
+      AUTHENTIK_EMAIL__FROM: "authentik@home2500.local"
+    user: root
+    volumes:
+      - media_data:/media                       
+      #- ./data/custom-templates:/templates
+      - ./blueprints:/blueprints/_home2500_CORE
+      - /var/run/docker.sock:/var/run/docker.sock  
+    networks:
+      - app-network
+
+    depends_on:
+      - postgresql
+      - redis
+
+# --- DEFINIÇÃO DOS FICHEIROS DE SEGREDOS ---
+secrets:
+  AUTHENTIK_POSTGRESQL__PASSWORD:
+    file: /run/user/1000/home2500/authentik/AUTHENTIK_POSTGRESQL__PASSWORD
+  AUTHENTIK_REDIS__PASSWORD:
+    file: /run/user/1000/home2500/authentik/AUTHENTIK_REDIS__PASSWORD
+  
+
+networks:
+  app-network:
+    external: true
+
+# Definir os volumes no final do arquivo
+volumes:
+  postgres_data:
+  redis_data:
+  media_data:

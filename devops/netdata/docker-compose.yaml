@@ -1,0 +1,75 @@
+services:
+  netdata:
+    image: netdata/netdata:stable
+    container_name: netdata
+    cap_add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+      - SYS_ADMIN
+      - NET_ADMIN
+    environment:
+      - NETDATA_DISABLE_CLOUD=1
+      - NETDATA_EXTRA_DEB_PACKAGES=curl
+      - NETDATA_COLLECTOR_GO_D=enabled
+      - NETDATA_CLAIM_TOKEN=
+      - NETDATA_USER=root # Garante permissão total de execução
+      - PGID=999 # Tente colocar o ID do grupo docker aqui (geralmente 999 ou 998)
+      - SEND_EMAIL=no
+      - SEND_SLACK=no
+    pid: host
+    ports:
+      - "19999:19999"
+    networks:
+      app-network:
+        ipv4_address: 172.28.0.14
+    security_opt:
+      - apparmor:unconfined
+    hostname: netdata
+    restart: unless-stopped
+    privileged: true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+    
+    volumes:
+      # MONTAGEM DO ARQUIVO DE CONFIGURAÇÃO
+      - ./netdata.conf:/etc/netdata/netdata.conf:ro
+      - ./go.d.conf:/etc/netdata/go.d.conf:ro
+      # This "provisions" the password by injecting the config file directly
+      - ./go.d/:/etc/netdata/go.d/
+      # volumes
+      - netdata_config:/etc/netdata
+      - netdata_lib:/var/lib/netdata
+      - netdata_cache:/var/cache/netdata
+      # host system mounts
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/resolve.conf:/etc/resolve.conf:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      # Adicionando montagens críticas que faltavam para o monitoramento do host
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /etc/os-release:/host/etc/os-release:ro
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.netdata.rule=Host(`netdata.home2500.local`)"
+      - "traefik.http.routers.netdata.entrypoints=websecure"
+      - "traefik.http.routers.netdata.tls=true"
+      # Aqui usamos o nome do middleware que os teus logs confirmam que existe:
+      - "traefik.http.routers.netdata.middlewares=authentik-sso@file,security-headers@file"
+      # 👇 ADICIONA/GARANTE ESTA LINHA
+      - "traefik.http.services.netdata.loadbalancer.passhostheader=true"
+      - "traefik.http.services.netdata.loadbalancer.server.port=19999"
+
+volumes:
+  netdata_config:
+  netdata_lib:
+  netdata_cache:
+
+
+networks:
+  app-network:
+    external: true

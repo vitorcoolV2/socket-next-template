@@ -1,0 +1,6 @@
+assets["assets/home2500.jpg"]="/web/dist/assets/images/home2500.jpg"
+assets["assets/home2500-dark.jpg"]="/web/dist/assets/images/home2500-dark.jpg"
+assets["assets/authentik-home2500.svg"]="/web/dist/assets/icons/authentik-home2500.svg"
+assets["assets/home2500-icon.svg"]="/web/dist/assets/icons/home2500-icon.svg"
+assets["assets/home2500.css"]="/web/dist/custom.css"
+assets["js/theme-toggle.js"]="/web/dist/theme-toggle.js"

@@ -1,0 +1,48 @@
+services:
+  opencode:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - USERNAME=${USER}
+        - USER_UID=${UID}
+        - USER_GID=${GID}     
+    image: opencode-${UID}-${GID}:latest  
+     
+    container_name: opencode
+    #hostname: opencode-dev
+    stdin_open: true  # Keep STDIN open for interactive commands
+    tty: true         # Allocate a pseudo-TTY
+    working_dir: /home/${USER}
+    user: ${USER}    
+    volumes:
+      ##  persist user run time
+      - ./workspace:/home/${USER}/
+      ##  use host instaled opencode    
+      - /home/${USER}/.local/share/opencode:/home/${USER}/.local/share/opencode
+      - /home/${USER}/.local/state/opencode:/home/${USER}/.local/state/opencode
+      - /home/${USER}/.local/bin/opencode:/home/${USER}/.local/bin/opencode
+      ## same config
+      - /home/${USER}/.config/opencode:/home/${USER}/.config/opencode
+      - /home/${USER}/.opencode:/home/${USER}/.opencode
+      ## ssh
+      - /home/${USER}/.ssh:/home/${USER}/.ssh:ro
+      ### bash
+      - /home/${USER}/.bashrc:/home/${USER}/.bashrc
+      # Docker socket mount for DinD (Docker in Docker) scenarios
+      # - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - DEBIAN_FRONTEND=noninteractive
+      - TERM=xterm-256color
+      - EDITOR=vim
+      - USER=${USER}
+      - HOME=/home/${USER}
+    networks:
+      - app-network
+    command: /bin/bash  # Keep container running with bash
+    restart: unless-stopped
+
+# Use existing external network
+networks:
+  app-network:
+    external: true

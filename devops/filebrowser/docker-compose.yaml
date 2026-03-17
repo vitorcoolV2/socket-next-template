@@ -1,0 +1,52 @@
+services:
+  filebrowser:
+    image: filebrowser/filebrowser:s6
+    container_name: filebrowser
+    #user: "1000:1000" # Usando o teu ID que confirmaste (vitor:1000)
+    restart: unless-stopped
+    environment:
+      - FB_AUTH_METHOD=proxy
+      - FB_AUTH_HEADER=X-Authentik-Username
+      - FB_DATABASE=/database/filebrowser.db
+      - FB_CONFIG=/config/settings.json
+      ### 
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Lisbon
+      - APP_PORT=80
+      - APP_BLUE_GROUP=Ferramentas
+    networks:
+      - app-network
+
+    ports:
+      - "8081:80"
+    volumes:
+      # Onde os teus ficheiros reais vão morar (ajusta o path da esquerda)
+      - /mnt/ssd980/data:/data
+      # Base de dados das configurações e utilizadores
+      - ./database/filebrowser.db:/database/filebrowser.db
+      # Ficheiro de configurações (opcional, mas recomendado)
+      - ./config/settings.json:/config/settings.json
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-S", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.filebrowser.rule=Host(`filebrowser.home2500.local`)"
+      - "traefik.http.routers.filebrowser.entrypoints=websecure"
+      - "traefik.http.routers.filebrowser.tls=true"
+      # Aqui usamos o nome do middleware que os teus logs confirmam que existe:
+      - "traefik.http.routers.filebrowser.middlewares=authentik-sso@file,security-headers@file"
+      # Only allow users in the "Admins" group in Authentik
+      #- "traefik.http.routers.filebrowser.middlewares=authentik-sso@file,group-check@file"
+      #- "traefik.http.middlewares.authentik-sso.forwardauth.authResponseHeaders=X-Authentik-Username"
+      # 👇 ADICIONA/GARANTE ESTA LINHA
+      - "traefik.http.services.filebrowser.loadbalancer.passhostheader=true"
+      - "traefik.http.services.filebrowser.loadbalancer.server.port=80"
+
+
+networks:
+  app-network:
+    external: true

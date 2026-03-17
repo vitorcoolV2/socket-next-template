@@ -1,0 +1,21 @@
+/* define home2500 extended emotion on light/dark color */
+
+/* --- LIGHT THEME --- */
+ak-locale-context[theme="light"] {
+    /* Backgrounds */
+    --ak-flow-background: url("/static/dist/assets/images/home2500.jpg") !important;
+    --page-bgcolor: rgba(223, 213, 205, 0.23) !important;
+    --slank-bgcolor: #afafaf52;
+    --login-bgcolor: rgba(204, 211, 221, 0.47) !important;
+
+    /* Cards */
+    --card-bgcolor: #cfcee848 !important;
+    --card-hover-bgcolor: #cfcee878 !important;
+    --card-shbxcolor: rgba(0, 0, 0, 0.4) 0px 8px 32px 0px !important;
+    --card-hover-shbxcolor: rgba(49, 49, 55, 0.5) !important;
+
+    /* Sections & Links */
+    --card-section-bgcolor: rgba(255, 255, 255, 0.33) !important;
+    --card-section-dropshcolor: rgba(192, 180, 179, 0.6);
+    --card-link-dropshcolor: rgba(192, 180, 179, 0.6);
+}

@@ -1,0 +1,38 @@
+version: 1
+## tpl: authentik/app/blueprints/CLIENT_APP_NAME--cleanup-oidc.yaml
+## yaml: authentik/blueprints/home2500_{{$CLIENT_APP_NAME}}--cleanup-oidc.yaml
+metadata:
+  name: "Home2500 {{$CLIENT_APP_NAME}} cleanup oidc"
+  slug: blueprint-home2500-{{$CLIENT_APP_NAME}}-cleanup-oidc
+entries:
+  # 1. Remover Bindings
+  # Nota: Em vez de !Find, usamos a lógica de identificadores do binding 
+  # se soubermos a relação, ou deixamos o Authentik limpar em cascata.
+  # No entanto, para ser explícito:
+  - model: authentik_policies.policybinding
+    identifiers:
+      # Procurar binding pelo alvo (App) e grupo
+      target: !Find [authentik_core.application, [slug, "{{$CLIENT_APP_NAME}}"]]
+      group: !Find [authentik_core.group, [name, "Home-Admins"]]
+    state: absent
+    # O 'allow_failure' é mais seguro aqui que o 'conditions'
+    allow_failure: true
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_core.application, [slug, "{{$CLIENT_APP_NAME}}"]]
+      group: !Find [authentik_core.group, [name, "Home-Developers"]]
+    state: absent
+    allow_failure: true
+
+  # 2. Remover Application
+  - model: authentik_core.application
+    identifiers:
+      slug: "{{$CLIENT_APP_NAME}}"
+    state: absent
+
+  # 3. Remover o Provider
+  - model: authentik_providers_oauth2.oauth2provider
+    identifiers:
+      name: "{{$CLIENT_APP_NAME}}-provider"
+    state: absent

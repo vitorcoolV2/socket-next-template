@@ -1,0 +1,58 @@
+{
+  "modno":  3,
+  "version":  4,
+  "instance":  "home2500-backup",
+  "repos":  [
+    {
+      "id":  "ssd980-main-repo",
+      "uri":  "/data",
+      "guid":  "ea04f3eaaa1a43f419bbea93f1d542dea69be8c3d32955c2cee2a37096242701",
+      "password":  "tw+wO03Z429xpRUR1sp9dTpeKthDs29N586933un4TlFpOfO",
+      "prunePolicy":  {
+        "schedule":  {
+          "cron":  "0 0 1 * *",
+          "clock":  "CLOCK_LAST_RUN_TIME"
+        },
+        "maxUnusedPercent":  10
+      },
+      "checkPolicy":  {
+        "schedule":  {
+          "cron":  "0 0 1 * *",
+          "clock":  "CLOCK_LAST_RUN_TIME"
+        }
+      },
+      "commandPrefix":  {}
+    }
+  ],
+  "plans":  [
+    {
+      "id":  "Daily-Critical-Data",
+      "repo":  "ssd980-main-repo",
+      "paths":  [
+        "/backup/source/authentik_postgres_data",
+        "/backup/source/vault_home2500_data"
+      ],
+      "schedule":  {
+        "cron":  "0 3 * * *",
+        "clock":  "CLOCK_LOCAL"
+      },
+      "retention":  {
+        "policyTimeBucketed":  {
+          "hourly":  24,
+          "daily":  7,
+          "weekly":  4
+        }
+      }
+    }
+  ],
+  "auth":  {
+    "disabled":  true
+  },
+  "sync":  {
+    "identity":  {
+      "keyId":  "ecdsa.gQrBXyPtQbuekzKtfc5lZnpvT3xrhE_FhEQTbI2Z7gY",
+      "ed25519priv":  "-----BEGIN EC PRIVATE-----\nMHcCAQEEIPYlYXt2kQG37qSeN73BMo9LuSlApMMNzgC2P8Y68O9ZoAoGCCqGSM49\nAwEHoUQDQgAEVI4mF1pmoxPKxjWxGHhRF9GrH/s4UT/rld93VaDXx3EfVMU/7om3\n3UrLXs9b1zB11N1HmALSgdZTnd9eMxODbQ==\n-----END EC PRIVATE-----\n",
+      "ed25519pub":  "-----BEGIN EC PUBLIC-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEVI4mF1pmoxPKxjWxGHhRF9GrH/s4\nUT/rld93VaDXx3EfVMU/7om33UrLXs9b1zB11N1HmALSgdZTnd9eMxODbQ==\n-----END EC PUBLIC-----\n"
+    }
+  }
+}

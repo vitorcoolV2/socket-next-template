@@ -1,0 +1,11 @@
+{
+    "port": 80,
+    "address": "0.0.0.0",
+    "database": "/database/filebrowser.db",
+    "root": "/data",
+    "auth": {
+        "method": "proxy",
+        "header": "X-Authentik-Username"
+    },
+    "log": "stdout"
+}

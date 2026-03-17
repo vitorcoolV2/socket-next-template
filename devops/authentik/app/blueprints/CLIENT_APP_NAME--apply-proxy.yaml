@@ -1,0 +1,40 @@
+version: 1
+## tpl: authentik/app/blueprints/CLIENT_APP_NAME--apply-proxy.yaml
+## yaml: authentik/blueprints/home2500_{{$CLIENT_APP_NAME}}--apply-proxy.yaml
+metadata:
+  name: Home2500 {{$CLIENT_APP_NAME}} apply proxy
+  slug: blueprint-home2500-{{$CLIENT_APP_NAME}}-apply-proxy
+  labels:
+    Domain: "{{$CLIENT_APP_NAME}}.{{$DOMAIN}}"
+    
+entries:  
+  - model: authentik_providers_proxy.proxyprovider
+    id: prov-{{$CLIENT_APP_NAME}}
+    identifiers:
+      name: "{{$CLIENT_APP_NAME}}-provider"
+    attrs:
+      internal_host: "http://{{$CLIENT_APP_INTERNAL_NS}}:{{$CLIENT_APP_SERVICE_PORT}}"
+      external_host: "https://{{$CLIENT_APP_NS}}"
+      mode: "forward_single"
+      intercept_header_auth: true
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+
+  - model: authentik_core.application
+    id: app-{{$CLIENT_APP_NAME}}
+    identifiers:
+      slug: "{{$CLIENT_APP_NAME}}"
+    attrs:
+      name: "{{$CLIENT_APP_BLUE_LABEL}}"
+      provider: !KeyOf prov-{{$CLIENT_APP_NAME}}
+      group: "{{$CLIENT_APP_BLUE_GROUP}}"
+      meta_launch_url: "https://{{$CLIENT_APP_NS}}/"      
+      meta_icon: "{{$AUTHENTIK_URL}}/static/dist/assets/icons/home2500-icon.svg"
+
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-{{$CLIENT_APP_NAME}}, group: !Find [authentik_core.group, [name, "Home-Admins"]] }
+    attrs: { order: 0 }          
+  - model: authentik_policies.policybinding
+    identifiers: { target: !KeyOf app-{{$CLIENT_APP_NAME}}, group: !Find [authentik_core.group, [name, "Home-Developers"]] }
+    attrs: { order: 1 }      
+

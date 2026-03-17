@@ -1,0 +1,320 @@
+/* background transparency */
+
+.pf-c-background-image::before {
+    display: none
+}
+
+.pf-c-login,
+.pf-c-background-image {
+    background-image: var(--ak-flow-background) !important;
+    --pf-c-login__main--BackgroundColor: var(--login-bgcolor) !important;
+}
+
+:root {
+    --pf-global--BackgroundColor--100: transparent !important;
+
+    /* Define o estado padrão como nenhum sublinhado */
+    --pf-global--link--TextDecoration: none !important;
+
+    /* Define o que acontece quando passas o rato (opcional) */
+    --pf-global--link--TextDecoration--hover: underline !important;
+}
+
+ak-locale-context[theme="light"] {
+    --ak-flow-background: url("/static/dist/assets/images/home2500.jpg") !important;
+    --slank-bgcolor: #afafaf52;
+}
+
+ak-locale-context[theme="dark"] {
+    --ak-flow-background: url("/static/dist/assets/images/home2500.jpg") !important;
+    --slank-bgcolor: #1c1c1c52;
+}
+
+ak-locale-context[theme="dark"] {
+    /* O "Azul/Roxo" Home2500 com brilho */
+    --ak-accent: #4f46e5 !important;
+    --pf-global--primary-color--100: var(--ak-accent) !important;
+    --pf-global--link--Color: var(--ak-accent) !important;
+
+    /* Cores de fundo do painel lateral e topo */
+    --ak-sidebar-background: rgba(10, 10, 10, 0.75) !important;
+    --ak-header-background: rgba(10, 10, 10, 0.4) !important;
+}
+
+ak-locale-context {
+    /* Inputs transparentes */
+    --pf-c-form-control--BackgroundColor: rgba(255, 255, 255, 0.05) !important;
+    --pf-c-form-control--border-width--base: 1px !important;
+    --pf-c-form-control--Color: #fff !important;
+
+    /* Foco no input com o teu glow */
+    --pf-c-form-control--focus--border-bottom--color: var(--ak-accent) !important;
+}
+
+/* 1. Ataca o wrapper que viste no inspetor (image_eff1c4) */
+.background-wrapper {
+    background-image: var(--ak-flow-background) !important;
+    background-size: auto important;
+    background-position: center !important;
+    background-attachment: fixed !important;
+    background-size: cover;
+    /*background-color: rgba(255, 255, 255, 0.411) !important;*/
+}
+
+/* 2. Remove o "slant" (aquela divisão diagonal cinzenta) */
+/*.background-default-slant {
+    background-color: var(--slank-bgcolor) !important;
+}*/
+
+.background-default-slant {
+
+    stroke: none !important;
+    opacity: 0.5;
+    background-color: var(--slank-bgcolor) !important;
+}
+
+
+ak-locale-context[theme="light"] {
+    --page-bgcolor: rgba(223, 213, 205, 0.23) !important;
+
+    --card-bgcolor: #cfcee848 !important;
+    --card-hover-bgcolor: #cfcee878 !important;
+    --card-shbxcolor: rgba(0, 0, 0, 0.4) 0px 8px 32px 0px !important;
+    --card-hover-shbxcolor: rgba(49, 49, 55, 0.5) !important;
+
+    --card-section-bgcolor: rgba(255, 255, 255, 0.33) !important;
+    --card-section-dropshcolor: rgba(192, 180, 179, 0.6);
+    --card-link-dropshcolor: rgba(192, 180, 179, 0.6);
+
+    --login-bgcolor: rgba(204, 211, 221, 0.47) !important;
+}
+
+ak-locale-context[theme="dark"] {
+    --page-bgcolor: transparent !important;
+
+
+    --card-bgcolor: rgba(49, 49, 55, 0.5);
+    --card-shbxcolor: rgba(0, 0, 0, 0.4) 0px 8px 32px 0px !important;
+
+    --card-hover-bgcolor: rgba(41, 41, 47, 0.66) !important;
+    --card-hover-shbxcolor: rgba(49, 49, 55, 0.5) !important;
+
+    --card-section-bgcolor: rgba(255, 255, 255, 0.22) !important;
+    --card-section-dropshcolor: rgba(192, 180, 179, 0.6);
+    --card-link-dropshcolor: rgba(192, 180, 179, 0.6);
+
+    --login-bgcolor: rgba(3, 12, 32, 0.53) !important;
+}
+
+.pf-c-page {
+    background-color: var(--page-bgcolor) !important;
+}
+
+div.pf-c-card {
+
+    background-color: var(--card-bgcolor) !important;
+    box-shadow: var(--card-shbxcolor) !important;
+
+    border: 1px solid rgba(255, 255, 255, 0.08) !important;
+
+    border-radius: 12px !important;
+
+    backdrop-filter: blur(2px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(2px) saturate(180%) !important;
+
+    transition: transform 0.3s ease, box-shadow 0.3s ease, background-color 0.3s ease !important;
+}
+
+div.pf-c-card:hover {
+    background-color: var(--card-hover-bgcolor) !important;
+    box-shadow: var(--card-hover-shbxcolor) !important;
+    border: 1px solid rgba(255, 255, 255, 0.12) !important;
+
+    /* Um pouco mais vibrante no hover */
+}
+
+div.pf-c-card .pf-c-card__title a {
+    /*color: rgba(161, 174, 155, 0.92) !important;*/
+    /* Laranja Home2500 */
+    text-decoration: none !important;
+    /* Remove o sublinhado conforme planeado */
+    transition: color 0.2s ease-in-out, filter 0.2s ease !important;
+}
+
+/* Cor e efeito ao passar o rato (Hover) */
+div.pf-c-card .pf-c-card__title a:hover {
+    /*color: rgba(211, 215, 221, 0.92) !important;*/
+    /* Um laranja mais vibrante/claro */
+    filter: drop-shadow(0 0 8px --card-link-dropshcolor) !important;
+    /* Brilho neon suave */
+    text-decoration: none !important;
+}
+
+/*body:not(:has(.ak-interface-admin)) */
+div.pf-c-expandable-section {
+    background-color: var(--card-section-bgcolor) !important;
+}
+
+/*body:not(:has(.ak-interface-admin)) */
+div.pf-c-expandable-section a:hover {
+    /*color: rgba(211, 215, 221, 0.92) !important;/*
+    /* Um laranja mais vibrante/claro */
+    filter: drop-shadow(0 0 8px --card-section-dropshcolor) !important;
+    /* Brilho neon suave */
+    text-decoration: none !important;
+}
+
+
+
+
+/*
+<div class="pf-c-page__header-brand">
+    <a href="#/" class="pf-c-page__header-brand-link">
+        <img 
+            class="pf-c-brand" 
+            src="/static/dist/assets/icons/icon_left_brand.svg" 
+            alt="Home2500 Identity"
+        >
+    </a>
+</div>
+/*### login*/
+
+.pf-c-login__main {
+    /* 1. Baixamos a opacidade para 40% para ser transparente */
+    background-color: var(--login-bgcolor) !important;
+    /* 3. Borda clara e fina para o reflexo no "corte" do vidro */
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    /* 4. Sombra suave para dar profundidade e separar do fundo */
+    box-shadow: rgba(0, 0, 0, 0.4) 0px 8px 32px 0px !important;
+    backdrop-filter: blur(3px) saturate(150%) !important;
+    border-radius: 12px !important;
+    margin-top: 25px !important;
+}
+
+/* Forçar o fundo no ecrã de login/fluxos */
+.pf-c-login {
+    --pf-c-login--BackgroundImage: url("/static/dist/assets/images/home2500.jpg") !important;
+    background-image: var(--pf-c-login--BackgroundImage) !important;
+    background-size: cover !important;
+    background-position: center !important;
+}
+
+header.pf-c-login__main-header {
+    padding-top: 10px;
+}
+
+/* Remove qualquer filtro de inversão se o teu SVG já tiver as cores certas */
+/* 1. Reset do Container do Cabeçalho */
+
+.pf-c-login__main-header img:hover {
+    opacity: 1;
+    /* Brilha ao passar o rato */
+}
+
+/* 2. O Logo (img) como uma "assinatura" no canto */
+.pf-c-login__main-header img {
+
+    bottom: 5px !important;
+    left: -35px !important;
+    width: 100% !important;
+    filter: none !important;
+    z-index: 20;
+
+}
+
+/* 3. Ajuste do Título "Home2500 Identity" */
+:not(ak-interface-admin) .pf-c-title {
+    text-align: left !important;
+    margin-top: 0 !important;
+    font-weight: 300 !important;
+}
+
+
+
+.ak-login-container {
+    background-color: #0000000a !important;
+    /*#4a4a4a70 !important;*/
+    background-image: none !important;
+    box-shadow: none !important;
+}
+
+
+
+
+* ADMIN PAGE */ ak-interface-admin .pf-c-page__header-brand-link .pf-c-brand.ak-brand img,
+ak-interface-admin .pf-c-page__header-brand img.pf-c-brand:hover {
+    opacity: 1 !important;
+    /*transform: scale(1.1);*/
+    filter: drop-shadow(0 0 8px rgba(240, 68, 56, 0.4)) !important;
+}
+
+/* 4. Removemos o fundo preto padrão para o teu wallpaper brilhar no topo */
+/*.pf-c-page__header {
+    background-color: rgba(0, 0, 0, 0.4) !important;
+    backdrop-filter: blur(10px) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+}*/
+
+
+
+/* ADMIN PAGE  */
+
+/* 1. Alvo: Imagem dentro do brand link, independente da página */
+
+ak-interface-admin div.pf-c-brand.ak-brand {
+    position: relative;
+    position: relative !important;
+    min-width: 245px !important;
+    width: 50% !important;
+    height: 100% !important;
+    height: 60px !important;
+    background: transparent !important;
+
+    display: flex !important;
+    align-items: center !important;
+    overflow: visible !important;
+    /* Garante que o logo não é cortado 
+    agora patch brand logo
+    */
+    background-image: url("/static/dist/assets/icons/authentik-home2500.svg") !important;
+    background-repeat: no-repeat !important;
+    background-position: center !important;
+    background-size: contain !important;
+    min-height: 80px !important;
+    width: 100% !important;
+    margin-bottom: 1.5rem !important;
+}
+
+ak-interface-admin .pf-c-page__header-brand-link .pf-c-brand.ak-brand img {
+    position: absolute !important;
+
+    /* Voltamos ao fundo para manter o estilo 'Signature' */
+    bottom: 0 !important;
+    left: 0 !important;
+    top: auto !important;
+    /* Anula o teu top: 0 anterior */
+    right: auto !important;
+    /* Anula o teu right: 0 anterior */
+
+    /* Hierarquia de tamanhos */
+    width: 33% !important;
+    /* 1/3 do tamanho */
+    max-width: 45px !important;
+    height: auto !important;
+
+    /* Estética Glass & Glow */
+    filter: drop-shadow(0 0 5px rgba(0, 0, 0, 0.5)) !important;
+    opacity: 0.75;
+    transition: all 0.3s ease;
+    z-index: 20;
+    object-fit: contain !important;
+    max-height: 40px !important;
+}
+
+/* 3. Efeito Hover Unificado */
+ak-interface-admin .pf-c-page__header-brand-link .pf-c-brand.ak-brand img:hover {
+    opacity: 1 !important;
+    filter: drop-shadow(0 0 8px rgba(240, 68, 56, 0.6)) !important;
+    transform: translateY(-2px);
+    /* Pequeno salto para dar vida */
+}

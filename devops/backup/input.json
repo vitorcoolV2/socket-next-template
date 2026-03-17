@@ -1,0 +1,446 @@
+{
+  "catalog": [
+    {
+      "script": "../core.sh",
+      "function": "require_vars",
+      "line": 39
+    },
+    {
+      "script": "../core.sh",
+      "function": "show_vars",
+      "line": 62
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_binaries",
+      "line": 91
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_devops_assets",
+      "line": 109
+    },
+    {
+      "script": "../core.sh",
+      "function": "stack_trace",
+      "line": 179
+    },
+    {
+      "script": "../core.sh",
+      "function": "stack_trace_idx",
+      "line": 187
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_relative_path2",
+      "line": 214
+    },
+    {
+      "script": "../core.sh",
+      "function": "_get_function_origin",
+      "line": 220
+    },
+    {
+      "script": "../core.sh",
+      "function": "_map_type_name__value",
+      "line": 243
+    },
+    {
+      "script": "../core.sh",
+      "function": "_map_type_name__status",
+      "line": 294
+    },
+    {
+      "script": "../core.sh",
+      "function": "debug_required_type_name",
+      "line": 343
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_files",
+      "line": 403
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_locations",
+      "line": 404
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_devices",
+      "line": 405
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_functions",
+      "line": 407
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_single_script_function",
+      "line": 429
+    },
+    {
+      "script": "../core.sh",
+      "function": "convert_mb_to_kib",
+      "line": 457
+    },
+    {
+      "script": "../core.sh",
+      "function": "nvidia_egl_json_file",
+      "line": 469
+    },
+    {
+      "script": "../core.sh",
+      "function": "check_main_mount",
+      "line": 480
+    },
+    {
+      "script": "../core.sh",
+      "function": "color",
+      "line": 489
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_container_running",
+      "line": 522
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_single_container_running",
+      "line": 527
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_ns_resolve",
+      "line": 564
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_ns_single_lookup_resolve",
+      "line": 569
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_resolve_file",
+      "line": 612
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_desired_domain_names_generate",
+      "line": 674
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_desired_domain_names_json",
+      "line": 692
+    },
+    {
+      "script": "../core.sh",
+      "function": "docker_container_network_json",
+      "line": 711
+    },
+    {
+      "script": "../core.sh",
+      "function": "docker_container_name_ip",
+      "line": 722
+    },
+    {
+      "script": "../core.sh",
+      "function": "docker_container_internal_ports",
+      "line": 743
+    },
+    {
+      "script": "../core.sh",
+      "function": "docker_container_ports",
+      "line": 748
+    },
+    {
+      "script": "../core.sh",
+      "function": "docker_container_name_ip_port",
+      "line": 789
+    },
+    {
+      "script": "../core.sh",
+      "function": "docker_app_network_json",
+      "line": 827
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_service_redirect_auth",
+      "line": 849
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_single_service_redirect_auth",
+      "line": 853
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_http_status_ok",
+      "line": 918
+    },
+    {
+      "script": "../core.sh",
+      "function": "require_single_url_status_ok",
+      "line": 924
+    },
+    {
+      "script": "../core.sh",
+      "function": "cr_wait4_service_middleware_ready",
+      "line": 979
+    },
+    {
+      "script": "../core.sh",
+      "function": "wait4_http_url_ready",
+      "line": 1021
+    },
+    {
+      "script": "../core.sh",
+      "function": "cr_curl_https_status",
+      "line": 1066
+    },
+    {
+      "script": "../core.sh",
+      "function": "cr_check_service_https_status",
+      "line": 1094
+    },
+    {
+      "script": "../core.sh",
+      "function": "docker_container_kill_ip",
+      "line": 1115
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_secret_service_get",
+      "line": 1159
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_secret_service_put",
+      "line": 1194
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_secret_mapper_keepass",
+      "line": 1220
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_secret_mapper_mem",
+      "line": 1226
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_secret_mapper_vault",
+      "line": 1233
+    },
+    {
+      "script": "../core.sh",
+      "function": "sanitize_path_name",
+      "line": 1240
+    },
+    {
+      "script": "../core.sh",
+      "function": "sanitize_db_name",
+      "line": 1249
+    },
+    {
+      "script": "../core.sh",
+      "function": "sanitize_var_name",
+      "line": 1257
+    },
+    {
+      "script": "../core.sh",
+      "function": "_get_service_secret_path",
+      "line": 1267
+    },
+    {
+      "script": "../core.sh",
+      "function": "_fetch_mem_provider",
+      "line": 1294
+    },
+    {
+      "script": "../core.sh",
+      "function": "_fetch_vault_provider",
+      "line": 1302
+    },
+    {
+      "script": "../core.sh",
+      "function": "_fetch_keepass_provider",
+      "line": 1313
+    },
+    {
+      "script": "../core.sh",
+      "function": "_put_service_secret_path",
+      "line": 1359
+    },
+    {
+      "script": "../core.sh",
+      "function": "_store_mem_secret",
+      "line": 1391
+    },
+    {
+      "script": "../core.sh",
+      "function": "_store_vault_secret",
+      "line": 1398
+    },
+    {
+      "script": "../core.sh",
+      "function": "_store_keepass_secret",
+      "line": 1413
+    },
+    {
+      "script": "../core.sh",
+      "function": "_secret_export2_mem",
+      "line": 1447
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_secret_mem_delete",
+      "line": 1511
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_secret_export2_env_vars",
+      "line": 1527
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_transform_inject_env_file_vars",
+      "line": 1575
+    },
+    {
+      "script": "../core.sh",
+      "function": "ask_provision",
+      "line": 1622
+    },
+    {
+      "script": "../core.sh",
+      "function": "ask_nuke",
+      "line": 1658
+    },
+    {
+      "script": "../core.sh",
+      "function": "test_debug_required",
+      "line": 1707
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_fn_json",
+      "line": 1731
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_functions_sort_json___working",
+      "line": 1760
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_functions_sort_json___not_working",
+      "line": 1801
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_functions_sort_json___nonoon",
+      "line": 1848
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_functions_sort_json___not_work",
+      "line": 1892
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_functions_sort_json__just_not",
+      "line": 1933
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_functions_sort_json_not_yey",
+      "line": 1974
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_fn_sort_weights",
+      "line": 2015
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_fn_sort_json",
+      "line": 2037
+    },
+    {
+      "script": "../core.sh",
+      "function": "catalog_sort_json",
+      "line": 2108
+    },
+    {
+      "script": "../core.sh",
+      "function": "list_functions",
+      "line": 2140
+    },
+    {
+      "script": "../core.sh",
+      "function": "list_sorted_functions2",
+      "line": 2154
+    },
+    {
+      "script": "../core.sh",
+      "function": "core_load_requirements",
+      "line": 2175
+    }
+  ],
+  "rules": [
+    {
+      "prefix": "_",
+      "weight": 10,
+      "cat": "INTERNAL"
+    },
+    {
+      "prefix": "core_",
+      "weight": 20,
+      "cat": "CORE"
+    },
+    {
+      "prefix": "require_",
+      "weight": 30,
+      "cat": "ASSERT"
+    },
+    {
+      "prefix": "check_",
+      "weight": 40,
+      "cat": "RUNTIME"
+    },
+    {
+      "prefix": "cr_",
+      "weight": 41,
+      "cat": "RUNTIME"
+    },
+    {
+      "prefix": "docker_",
+      "weight": 50,
+      "cat": "INFRA"
+    },
+    {
+      "prefix": "nvidia_",
+      "weight": 51,
+      "cat": "INFRA"
+    },
+    {
+      "prefix": "ask_",
+      "weight": 60,
+      "cat": "INTERACT"
+    },
+    {
+      "prefix": "dev_",
+      "weight": 70,
+      "cat": "DEV"
+    },
+    {
+      "prefix": ".",
+      "weight": 90,
+      "cat": "MISC"
+    }
+  ]
+}

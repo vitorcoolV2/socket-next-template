@@ -1,0 +1,14 @@
+{
+    "branding_title": "Home2500 | Identity",
+    "branding_logo": "/static/dist/assets/icons/authentik-home2500.svg",
+    "branding_favicon": "/static/dist/assets/icons/icon.png",
+    "attributes": {
+        "settings": {
+            "theme": {
+                "base": "dark"
+            },
+            "layout": "sidebar_left",
+            "background": "/static/dist/assets/images/home2500-dark.jpg"
+        }
+    }
+}

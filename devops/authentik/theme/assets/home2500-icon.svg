@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<svg width="1000" height="144.29" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" xmlns:se="http://svg-edit.googlecode.com" data-name="Layer 1" style="vector-effect: non-scaling-stroke;">
+ <defs style="vector-effect: non-scaling-stroke;">
+  <style style="vector-effect: non-scaling-stroke;">.cls-1{fill:#fd4b2d;}</style>
+  <filter id="svg_25_blur">
+   <feGaussianBlur in="SourceGraphic" stdDeviation="0.7"/>
+  </filter>
+ </defs>
+ <g class="layer">
+  <title>Layer 1</title>
+  <text fill="#ff7f00" filter="url(#svg_25_blur)" font-family="serif" font-size="24" font-style="italic" font-weight="bold" id="svg_25" letter-spacing="3" stroke="#000000" stroke-width="0" text-anchor="middle" transform="matrix(1, 0, 0, 1, 0, 0) matrix(9.59377, 0, 0, 6.64105, -7519.03, -90.9588)" x="847.541717" xml:space="preserve" y="33.673189">2500</text>
+  <text fill="#ff0000" font-family="serif" font-size="24" font-style="normal" font-weight="bold" id="svg_30" opacity="0.75" stroke="#000000" stroke-linecap="square" stroke-width="0" text-anchor="middle" transform="matrix(3.41487, 0, 0, 2.90848, -296.879, -60.1537)" x="148.838503" xml:space="preserve" y="54.736244">home</text>
+ </g>
+</svg>
