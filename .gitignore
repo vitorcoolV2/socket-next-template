@@ -23,7 +23,7 @@
 
 # misc
 .DS_Store
-*.pem
+*.key
 
 # debug
 npm-debug.log*
@@ -66,6 +66,7 @@ devops/_*.sh
 
 
 # DEVOPS CORE containers - pihole,step-ca,openldap,authelia,traefik
+devops/vault/data*
 devops/pihole/etc*
 devops/step-ca/step*
 devops/openldap/ldap/*
@@ -89,3 +90,4 @@ devops/stack/iredmail
 devops/stack/nginx
 devops/stack/winboat/*
 *_Backup_*
+/secrets/*

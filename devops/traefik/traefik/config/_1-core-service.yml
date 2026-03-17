@@ -1,0 +1,62 @@
+# ./traefik/config/_2-core-dynamic.yml
+# /etc/traefik/config/_2-core-dynamic.yml
+http:
+
+  # ----------------------------------------------------------------
+  # SERVICES (Ajusta as portas se necessário)
+  # ----------------------------------------------------------------
+  services:
+    authentik-service:
+      loadBalancer:
+        servers:
+          - url: "http://authentik-server.app-network:9000"          
+
+    mailcrab-service:
+      loadBalancer:
+        servers:
+          - url: "http://mailcrab.app-network:1080"       
+
+    #netdata-service:
+    #  loadBalancer:
+    #    servers:
+    #      - url: "http://netdata.app-network:19999"
+
+    pihole-service:
+      loadBalancer:
+        servers:
+          - url: "http://192.168.1.67:8080"
+
+    vault-service:
+      loadBalancer:
+        servers:
+          - url: "https://vault.app-network:443"  
+
+    whoami-service:
+      loadBalancer:
+        servers:
+          - url: "http://whoami.app-network:80"
+
+
+
+
+  ## home2500 certification objective
+  serversTransports:
+    vault-internal:
+      rootCAs: ["/etc/traefik/certs/ca-chain.pem"]
+      serverName: "vault.app-network"
+      insecureSkipVerify: true
+    insecure-transport:
+      insecureSkipVerify: true
+
+  middlewares:
+    security-headers:
+      headers:
+        frameDeny: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsSeconds: 63072000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"

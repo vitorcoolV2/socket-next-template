@@ -1,0 +1,66 @@
+# ./traefik/config/dynamic.yml|mode|3-unprotected_routes.yml~
+# /etc/traefik/config/dynamic.yml|mode|3-unprotected_routes.yml~
+
+
+http:
+  # ----------------------------------------------------------------
+  # ROUTERS
+  # ----------------------------------------------------------------
+  routers:
+    auth-portal:
+      rule: "Host(`auth.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: authentik-service
+      tls: {}
+      middlewares: ["security-headers"]
+
+    whoami-public:
+      rule: "Host(`whoami.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: whoami-service
+      tls: {}
+      middlewares: ["security-headers"]
+
+    mailcrab:
+      rule: "Host(`mailcrab.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: mailcrab-service
+      tls: {}
+      middlewares: ["security-headers"]
+
+    vault:
+      rule: "Host(`vault.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: vault-service
+      tls: {}
+      middlewares: ["security-headers"]
+
+
+    pihole:
+      rule: "Host(`pihole.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: pihole-service
+      tls: {}
+      middlewares: ["security-headers"]
+
+    traefik-dashboard:
+      rule: "Host(`traefik.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: api@internal
+      tls: {}
+      middlewares: ["security-headers"]
+
+
+# ----------------------------------------------------------------
+# TLS
+# ----------------------------------------------------------------
+tls:
+  certificates:
+    - certFile: "/etc/traefik/certs/traefik-fullchain.pem"
+      keyFile: "/etc/traefik/certs/traefik.key"
+  
+  stores:
+    default:
+      defaultCertificate:
+        certFile: "/etc/traefik/certs/traefik-fullchain.pem"
+        keyFile: "/etc/traefik/certs/traefik.key"        

@@ -1,44 +1,72 @@
-# traefik.yml - Equivalent to nginx.conf
+ping: true
+
+global:
+  checknewversion: false
+  sendanonymoususage: false
+
+
+metrics:
+  prometheus: 
+    entryPoint: metrics
+    addEntryPointsLabels: true
+    addServicesLabels: true
+
 api:
   dashboard: true
-  debug: false
-  insecure: true
+  #insecure: true #true  # Set to false and add authentication in production
+
+experimental:
+  plugins:
+    rewrite-body:
+      moduleName: "github.com/packruler/rewrite-body"
+      version: "v1.2.0"
+
 
 entryPoints:
   web:
-    address: ':80'
+    address: ":80"
     http:
       redirections:
         entryPoint:
           to: websecure
           scheme: https
           permanent: true
+
   websecure:
-    address: ':443'
+    address: ":443"
+    transport:
+      respondingTimeouts:
+        readTimeout: "60s"
+        writeTimeout: "60s"
+        idleTimeout: "180s"
+
+  # Keep metrics on an internal/non-standard port
+  metrics:
+    address: ":8082"
+
 
 providers:
   docker:
-    endpoint: 'unix:///var/run/docker.sock'
+    endpoint: "unix:///var/run/docker.sock"
     exposedByDefault: false
-    network: 'app-network'
-
+    network: "app-network" 
   file:
-    directory: '/etc/traefik/config'
+    directory: "/etc/traefik/config"
     watch: true
 
-# In traefik/traefik.yml
-tls:
-  options:
-    default:
-      minVersion: VersionTLS12
-  stores:
-    default:
-      defaultCertificate:
-        certFile: '/etc/traefik/certs/home2500.local/traefik.cert.pem'
-        keyFile: '/etc/traefik/certs/home2500.local/traefik.key.pem'
-
+# Logging e AccessLog mantêm-se...
 log:
   level: DEBUG
-  format: common
-
 accessLog: {}
+
+# todo
+# Certificate resolvers (using Vault)
+# CORRECT Vault Certificate Resolver for Traefik v3.6.1
+#certificatesResolvers:
+#  vault:
+#    acme:
+#      caServer: "https://vault.app-network:443/v1/pki_int/acme/directory"
+#      storage: "/etc/traefik/acme.json"
+#      email: "admin@home2500.local"
+#      httpChallenge:
+#        entryPoint: web

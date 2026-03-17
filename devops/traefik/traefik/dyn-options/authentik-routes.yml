@@ -1,0 +1,128 @@
+# traefik/config/dynamic.yml|mode|_3-authentik-routes.yml~
+# /etc/traefik/config/dynamic.yml|mode|_3-authentik-routes.yml~
+
+http:
+  # ----------------------------------------------------------------
+  # MIDDLEWARE
+  # ----------------------------------------------------------------
+  middlewares:
+    # Redireciona a raiz do Pi-hole para o painel de administração
+    # This regex is safer than replacePath because it ONLY triggers on the root
+    pihole-redirect:
+      redirectRegex:
+        # Se for apenas a raiz exata, manda para /admin/
+        regex: "^https://pihole.home2500.local/$"
+        replacement: "https://pihole.home2500.local/admin/"    
+
+    # --- Authentik ForwardAuth ---
+    authentik-sso:
+      forwardAuth:
+        address: "http://authentik-server.app-network:9000/outpost.goauthentik.io/auth/traefik"        
+        trustForwardHeader: true
+        authResponseHeaders:
+          - X-authentik-username
+          - X-authentik-groups
+          - X-authentik-email
+          - X-authentik-name
+          - X-authentik-uid
+          - Authorization
+
+    redirect-to-https:
+      redirectscheme:
+        scheme: https
+        permanent: true
+
+
+  # ----------------------------------------------------------------
+  # ROUTERS
+  # ----------------------------------------------------------------
+  routers:
+    # Portal Authentik (Sem middleware de auth para evitar loop)
+    authentik-portal:
+      rule: "Host(`auth.home2500.local`)"
+      entryPoints: ["websecure"]
+      priority: 200
+      service: "authentik-service"
+      tls: {}
+      middlewares: ["security-headers"]
+      
+    
+    whoami-public:
+      rule: "Host(`whoami.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: whoami-service
+      middlewares: ["authentik-sso"]
+      tls: {}
+
+    mailcrab:
+      rule: "Host(`mailcrab.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: mailcrab-service      
+      tls: {}      
+      middlewares: ["authentik-sso", "security-headers"]
+
+    ## --------------- Vault
+
+    # Este deixa o Vault falar com o Authentik SEM o ForwardAuth interferir
+    # --- 1. O BURBURINHO (Bypass) ---
+    # Este deixa o Vault completar o login OIDC sem perguntar ao Authentik
+    #vault-bypass:
+    #  rule: "Host(`vault.home2500.local`) && PathPrefix(`/ui/vault/auth/oidc/oidc/callback`)"
+    #  entryPoints: ["websecure"]
+    #  priority: 200
+    #  service: vault
+    #  tls: {}
+      # SEM MIDDLEWARE AQUI
+
+    # 2. VAULT UI (Prioridade Normal): Protegido pelo Authentik SSO
+    vault:
+      rule: "Host(`vault.home2500.local`)"
+      entryPoints: ["websecure"]
+      #priority: 100
+      service: vault-service
+      tls: {}
+
+
+    # 1. AUTH BYPASS (High Priority)
+    # Prevents Authentik's internal callbacks from being intercepted by the redirector
+    pihole-auth-bypass:
+      rule: "Host(`pihole.home2500.local`) && PathPrefix(`/outpost.goauthentik.io/`)"
+      entryPoints: ["websecure"]
+      priority: 200
+      service: "authentik-service"
+      tls: {}
+
+    # 2. PI-HOLE MAIN
+    pihole:
+      rule: "Host(`pihole.home2500.local`)"
+      entryPoints: ["websecure"]
+      priority: 100
+      service: pihole-service
+      middlewares:
+        - "authentik-sso"         # 1st: Check authentication
+        - "pihole-redirect"  # 2nd: If authenticated and at /, go to /admin/
+      #  - "security-headers" # 3rd: Add headers
+      tls: {}
+
+    traefik-dashboard:
+      rule: "Host(`traefik.home2500.local`)"
+      entryPoints: ["websecure"]
+      service: api@internal
+      middlewares: ["authentik-sso", "security-headers"]
+      priority: 110
+      tls: {}
+
+
+# ----------------------------------------------------------------
+# TLS
+# ----------------------------------------------------------------
+tls:
+  certificates:
+    - certFile: "/etc/traefik/certs/traefik-fullchain.pem"
+      keyFile: "/etc/traefik/certs/traefik.key"
+  
+  stores:
+    default:
+      defaultCertificate:
+        certFile: "/etc/traefik/certs/traefik-fullchain.pem"
+        keyFile: "/etc/traefik/certs/traefik.key"        

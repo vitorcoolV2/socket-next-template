@@ -1,36 +1,60 @@
-
 services:
+
   pihole:
-    image: pihole/pihole:latest
+
+    image: pihole/pihole:2025.11.1
     container_name: pihole
-    ports:
-      - "127.0.0.1:53:53/tcp"
-      - "127.0.0.1:53:53/udp"
-      - "8080:443/tcp"
-    env_file:
-      - .env
+
     environment:
-    
       - PHP_ENV_CONFIG["PHP_ERROR_LOG"]="/var/log/lighttpd/error-pihole.log"
       - PHP_ENV_CONFIG[session.gc_maxlifetime]=86400
       - PHP_ENV_CONFIG[session.cookie_lifetime]=86400
-      - DNS1=8.8.8.8
-      - DNS2=1.1.1.1
+
+      # UNBOUND resolver
+      - DNS1=unbound#53
+      - TZ=UTC
+      
+      # Correct v6 Variable Names:
+      - FTLCONF_dns_listeningMode=all
+      - FTLCONF_webserver_port=8080      
+      - FTLCONF_dns_domain_name=app-network
+      - FTLCONF_dns_domain_local=true      
+      - FTLCONF_dns_domainNeeded=false      
+      - FTLCONF_webserver_api_max_sessions=100            
+      - VIRTUAL_HOST=pihole.home2500.local
     volumes:
       - './etc-pihole:/etc/pihole'
       - './etc-dnsmasq.d:/etc/dnsmasq.d'
     cap_add:
       - NET_ADMIN
+      - NET_RAW
       - CAP_SYS_TIME
       - CAP_SYS_NICE
+      - NET_BIND_SERVICE
+    network_mode: host
+    restart: always
+    depends_on:
+      - unbound
 
+  unbound:
+    image: mvance/unbound:latest
+    container_name: unbound
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:5335:53/udp"  # Bind Unbound to localhost on port 5335
+      - "127.0.0.1:5335:53/tcp"
+    volumes:
+      - ./unbound:/opt/unbound/etc/unbound  # Configuration directory
+    ulimits:
+      nofile:
+        soft: 4096  # Increase file descriptor limit
+        hard: 4096
     networks:
-      app-network:
-        ipv4_address: 172.28.0.2 # Static IP for Pi-hole    
-    restart: always    
+      - app-network
 
 networks:
   app-network:
+    name: app-network
     external: true
     ipam:
       config:

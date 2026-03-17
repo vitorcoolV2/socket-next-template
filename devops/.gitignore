@@ -1,4 +1,7 @@
 * copy.*
-
-# bun/npm cache
-opencode/workspace/.bun/
+.bun
+*.pid
+acme.json
+session-ses_*.md
+~*
+*~
