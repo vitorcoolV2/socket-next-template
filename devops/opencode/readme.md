@@ -44,8 +44,9 @@ The DMR endpoint runs at `http://localhost:12434/v1` (typically served by [ollam
 ## Authentication
 
 - **Web UI**: Protected by Traefik middleware (`authentik-sso@file`, `security-headers@file`)
-- **OpenCode Server**: Password-protected via `OPENCODE_SERVER_PASSWORD`
-- **Future**: Planned upgrade to full OIDC integration via Authentik
+- **OpenCode Server**: No password required - authentication handled by Traefik/Authentik OIDC
+
+After Authentik OIDC login succeeds, access to OpenCode is granted without additional password prompt.
 
 ## Setup
 
@@ -66,9 +67,9 @@ cp .env.template .env
 # Edit USER/UID/GID to match your system user
 ```
 
-### 2. Set Server Password
+### 2. (Optional) Set Server Password
 
-Add to `.env`:
+Only needed if NOT using Traefik/Authentik OIDC:
 
 ```bash
 OPENCODE_SERVER_PASSWORD=your-secure-password
@@ -214,12 +215,12 @@ docker exec opencode env | grep OPENCODE
 
 - SSH directory mounted read-only
 - Container runs as non-root user
-- Web UI protected by Traefik + OpenCode password auth
-- OIDC via Authentik planned for future
+- Web UI protected by Traefik + Authentik OIDC
+- OpenCode server has no password (rely on Traefik auth layer)
 
 ## Future Enhancements
 
-- [x] Traefik web UI exposure (basic auth via Traefik middleware)
-- [ ] Full OIDC integration via Authentik
+- [x] Traefik web UI exposure with Authentik OIDC
+- [x] No password required after OIDC login
 - [ ] Multi-user support
 - [ ] GPU passthrough for local models

@@ -15,12 +15,17 @@ services:
     working_dir: /home/${USER}
     user: ${USER}
     volumes:
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 512M
       ##  persist user run time
       - ./workspace:/home/${USER}/
+      - ../../:/home/${USER}/nextjs-app-template
       ##  use host instaled opencode
       - /home/${USER}/.local/share/opencode:/home/${USER}/.local/share/opencode
       - /home/${USER}/.local/state/opencode:/home/${USER}/.local/state/opencode
-      - /home/${USER}/.local/bin/opencode:/home/${USER}/.local/bin/opencode
+      #- /home/${USER}/.local/bin/opencode:/home/${USER}/.local/bin/opencode
       ## same config
       - /home/${USER}/.config/opencode:/home/${USER}/.config/opencode
       - /home/${USER}/.opencode:/home/${USER}/.opencode
@@ -36,8 +41,9 @@ services:
       - EDITOR=vim
       - USER=${USER}
       - HOME=/home/${USER}
-      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD}
+      # OPENCODE_SERVER_PASSWORD not set - auth handled by Traefik/Authentik OIDC
       - OPENCODE_SERVER_PORT=${CLIENT_APP_SERVICE_PORT}
+      - TMPDIR=/var/tmp
     networks:
       - app-network
     labels:
@@ -48,7 +54,7 @@ services:
       - 'traefik.http.routers.opencode.middlewares=authentik-sso@file,security-headers@file'
       - 'traefik.http.routers.opencode.service=opencode-service'
       - 'traefik.http.services.opencode-service.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT}'
-    command: /bin/bash -c "opencode web --port ${CLIENT_APP_SERVICE_PORT} --hostname 0.0.0.0"
+    command: bash -c "/home/${USER}/.opencode/bin/opencode web --port ${CLIENT_APP_SERVICE_PORT} --hostname 0.0.0.0"
     restart: unless-stopped
 
 # Use existing external network

@@ -74,8 +74,8 @@ RUN mkdir -p /home/${USERNAME}/.ssh && \
     mkdir -p /home/${USERNAME}/.local/share/opencode && \
     mkdir -p /home/${USERNAME}/.config/opencode
 
-# Copy the project dir
-##COPY --chown=${USER_UID}:${USER_GID} . /home/${USERNAME}/
+RUN curl -fsSL https://bun.sh/install | bash 
+
 
 # Install OpenCode AI
 RUN curl -fsSL https://opencode.ai/install | bash
