@@ -9,25 +9,11 @@ session-ses_*.md
 
 
 
-# DEVOPS CORE containers - pihole,step-ca,openldap,authelia,traefik
-vault/data*
-pihole/etc*
-step-ca/step*
-openldap/ldap/*
-# authelia home2500.local
-authelia/authelia/
-authelia/data/authelia/config/authelia_notifications
-authelia/data/postgres/
-authelia/secrets
-authelia/ldap*
+# DEVOPS CORE containers - pihole,vault,authentik,traefik
+vault/config/certs/*.key
+pihole/etc*/*
+!pihole/etc-pihole/pihole.toml
 
-
-##### the stack not exposed
-stack/kuma/uptime*
-stack/hedgedoc
-stack/iredmail
-stack/nginx
-stack/winboat/*
 
 # backup
 backup/config/*

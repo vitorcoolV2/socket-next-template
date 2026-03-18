@@ -26,7 +26,7 @@ https://backup.home2500.local
 
 ### Why Traefik Middleware?
 
-Backrest doesn't handle OIDC callbacks well, so Traefik provides a defense-in-depth layer:
+Backrest is not setup with native OIDC. So Traefik provides a defense-in-depth layer:
 
 - Protects against accidental network exposure
 - Provides SSO if backrest auth is later enabled
@@ -67,7 +67,7 @@ Currently no secrets required (auth disabled).
 
 ```bash
 cd devops/backup
-source ../authentik/app/tool.sh
+source ./init.sh
 deploy
 ```
 
