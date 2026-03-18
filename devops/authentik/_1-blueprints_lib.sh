@@ -285,7 +285,8 @@ require_single_blue_file() {
         
         # Output de Sucesso com colunas fixas e link clicável
         # %-30s garante que o nome da função ocupe sempre 30 espaços, alinhando as setas
-        printf "  \e[1;32m✅\e[0m Found:   \e[1;34m%-30s\e[0m \e[1;90m->\e[0m \e[4;36m%s\e[0m\n" "blueprint" "$(core_relative_path2 $blueprint_file)" >&2
+        LABEL=${LABEL:-"✅\e[0m Found:  "}
+        printf "  \e[1;32m${LABEL} \e[1;34m%-30s\e[0m \e[1;90m->\e[0m \e[4;36m%s\e[0m\n" "blueprint" "$(core_relative_path2 $blueprint_file)" >&2
         return 0
     else
         # Output de Erro alinhado
@@ -299,7 +300,7 @@ blue_file_valid() {
     # 1. Validação de requisitos (Silenciosa) TEST COMPLETED
     { require_vars file_path && require_files file_path; } >/dev/null 2>&1 || return 1
     yq eval '.' "$file_path" >/dev/null 2>&1 || {
-        #echo "invalid yaml $file_path" 
+        echo "invalid yaml $file_path" >&2
         return 1
     }
     local filename=$(basename "$file_path")
@@ -418,7 +419,7 @@ blue_template_vars() {
     # Usamos o _ na frente para indicar função interna/helper
     blue_template_inject_vars "$blueprint_tpl_path" "$tmp_slice" 
 
-    mv "$tmp_slice" "$output_file"
+    cat "$tmp_slice" > "$output_file"
     # FIX DE PERMISSÕES: Essencial para o Authentik ler o ficheiro
     chmod 644 "$output_file"
     echo "blueprint file: $(realpath --relative-to="$PWD" "$output_file"  2>/dev/null || echo "$script_file")"

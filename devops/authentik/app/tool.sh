@@ -4,8 +4,9 @@
 
 export CLIENT_APP_DIR="$(pwd)"
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
-    echo "❌ This is a library and should be sourced, not run directly."
-    #return 1
+    echo "❌ This is a library and should be sourced, not run directly."  2>&1
+    echo "     Try: source ./$(realpath --relative-to="$PWD" "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+    return 1 2> /dev/null || exit 1
 fi
 
 TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -58,9 +59,7 @@ export CLIENT_APP_BLUEPRINT_SLUG="CLIENT_APP_NAME"
 ### LOAD CORE
 set +e
 #### lets require a service tool to deploy compose and expose as blue(oidc) authentik vault
-### LOAD BLUEPRINT/AUTHENTIK/VAULT/KEEPASS/CORE (stack)
 source $(realpath "$TOOL_DIR/../../authentik/_1-blueprints_lib.sh") > /dev/null 2>&1 
-
 
 
 require_functions ak_fix_proxied_redir || {
@@ -92,9 +91,6 @@ require_vars DOMAIN \
 
 # requirements
 ### inthis func let y setup apply/cleanup acording to app/blueprints/** "template name"
-
-## if template tool not defined
-
 
 app_context() {
     require_vars INTERNAL_DOMAIN DOMAIN
@@ -977,21 +973,26 @@ app_blue_generate() {
     )
 }
 app_blue_apply() {
-    local target_yaml=${2:-$CLIENT_APP_BLUE_APPLY}
     require_files CLIENT_APP_BLUE_APPLY_TPL || {
         echo "missing blueprint template file: $CLIENT_APP_BLUE_APPLY_TPL"
         return 1
     }
 
-    # 4 now generate always. must a a way to check version evolution
-    blue_template_vars \
-        $CLIENT_APP_BLUE_APPLY_TPL \
-        $CLIENT_APP_BLUE_APPLY || return 1
-        
-    blue_apply "$CLIENT_APP_BLUE_APPLY" || return 1
+    (
+        source $(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")
+        # 4 now generate always. must a a way to check version evolution
+        blue_template_vars \
+            $CLIENT_APP_BLUE_APPLY_TPL \
+            $CLIENT_APP_BLUE_APPLY || return 1
+            
+        blue_apply "$CLIENT_APP_BLUE_APPLY" || return 1
+
+        rm -f $CLIENT_APP_BLUE_APPLY
+    )
+
+    
 }
 app_blue_cleanup() {
-    local target_yaml=${CLIENT_APP_BLUE_CLEANUP}
     require_files CLIENT_APP_BLUE_CLEANUP_TPL || {
         echo "missing blueprint template file: $CLIENT_APP_BLUE_CLEANUP_TPL"
         return 1
@@ -999,9 +1000,10 @@ app_blue_cleanup() {
 
     blue_template_vars \
         $CLIENT_APP_BLUE_CLEANUP_TPL \
-        $target_yaml || return 1
+        $CLIENT_APP_BLUE_CLEANUP || return 1
 
-    blue_apply "$target_yaml" "false" || return 1
+    blue_apply "$CLIENT_APP_BLUE_CLEANUP" || return 1
+    rm -f $CLIENT_APP_BLUE_CLEANUP
 }
 app_wait4_oidc() {
     local target_service="${1}" ##:-$CLIENT_APP_NAME}"
@@ -1127,6 +1129,7 @@ app_login() {
     fi
     return 1           
 }
+
 tool_stage_workflow() {
     local stages=("${@}")
     [[ ${#stages[@]} -eq 0 ]] && stages=("${TOOL_STAGES[@]}")
@@ -1139,7 +1142,7 @@ tool_stage_workflow() {
         require_files client_script || return 1
         echo "
         ---------------------------------------
-        ❌ stage \"$stage\" $REQ_STATUS_MISS"
+        ❌ stage \"$stage\" $REQ_STATUS_STOP"
         local tool_="${BASH_SOURCE[0]}"
         # show link to handler
         if ! LABEL="          handler:" require_single_script_function tool_ "$service__func" ; then            
@@ -1197,7 +1200,10 @@ tool_stage_workflow() {
     }
 
     _vault_login__requirements() {        
-        vault_validate_token || return 1        
+        (
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN"
+            vault_validate_token || return 1        
+        ) || return 1
     }
 
     _compose__requirements() {
@@ -1269,20 +1275,26 @@ tool_stage_workflow() {
 
     _blue_apply__requirements() {
         _authentik_login__requirements || return 1
-        require_files CLIENT_APP_BLUE_APPLY_TPL || return 1
-        require_single_blue_file CLIENT_APP_BLUE_APPLY || return 1
+        ### o template
+        LABEL="<<< TPL" require_single_blue_file CLIENT_APP_BLUE_APPLY_TPL || return 1
 
-        local cur
-        cur=$(blue__get_current_json "$CLIENT_APP_BLUE_APPLY")
+        ### os secredos se existir
+        source $(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")
 
-        # 2. Verificação: Se NÃO tem PK ou NÃO está enabled
-        # jq -e retorna 1 (erro) se a condição for falsa
-        if ! echo "$cur" | jq -e '.pk and .content != ""' >/dev/null 2>&1; then
-            echo "ℹ️  State: Not present or disabled. Proceeding with apply..." >&2            
-            return 1
+        local tmp=$(core_secret_mapper_mem "$CLIENT_APP_NAME" "$(basename $CLIENT_APP_BLUE_APPLY)")
+        PROVIDER_SELECT="mem" core_secret_service_put "$CLIENT_APP_NAME/$(basename $CLIENT_APP_BLUE_APPLY)" "# empty"
+        blue_template_vars \
+            $CLIENT_APP_BLUE_APPLY_TPL \
+            $tmp || return 1
+        LABEL=">>> TMP" require_single_blue_file tmp || return 1
+
+        if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "proxy" ]]; then                
+            require_service_redirect_auth "$CLIENT_APP_NAME" || return 1            
         fi
-        echo $cur | jq .
-        echo "⚠️  State: Blueprint already active (PK: $(echo "$cur" | jq -r .pk)). Skipping." >&2
+        if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "oidc" ]]; then                
+            app_oidc_validate "$CLIENT_APP_NAME" || return 1
+        fi      
+        
         return 0
     }
     _blue_cleanup__requirements() {
@@ -1413,6 +1425,29 @@ tool_stage_workflow() {
         fi
     done
 }
+app_oidc_validate() {
+    local app_name=${1:-$CLIENT_APP_NAME}
+    local retries=${2:-3}
+    local cacert=$TRUSTED_CA_FILE
+    require_files cacert
+    local url="$AUTHENTIK_URL/application/o/${app_name}/.well-known/openid-configuration"
+    
+    echo "🔍 Validando provisionamento OIDC para: ${app_name}..."
+    
+    # Tenta 3 vezes com timeout
+    for i in {1..$retries}; do
+        response=$(curl -s --cacert "$cacert" "$url")
+        if echo "$response" | grep -q "issuer"; then
+            echo "✅ OIDC validado com sucesso para ${app_name}"
+            return 0
+        fi
+        echo "⏳ Tentativa $i falhou, aguardando..."
+        sleep 5
+    done
+
+    echo "❌ Erro: OIDC não encontrado para ${app_name} após $retries tentativas."
+    return 1
+}
 app_up() {
     # 1. Pré-requisitos e Docker
     echo "📦 Iniciando containers via Compose..."
@@ -1444,6 +1479,8 @@ app_up() {
             app_blue_apply || return 1            
         fi
 
+        app_up_traefik_tls_proxy || return 1
+
         if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "proxy" ]]; then                
             if ! tool_stage_workflow "outpost_add"; then             
                 app_provider_add2_outpost || return 1            
@@ -1451,21 +1488,22 @@ app_up() {
             if ! require_service_redirect_auth "$CLIENT_APP_NAME"; then               
                 ak_fix_proxied_redir     
             fi        
-        fi
 
-        app_up_traefik_tls_proxy
-        
-        # must have resolvable names  
-        local status
-        status=$(app_wait4_oidc whoami 4 || return 1)               # wait 8 seconds 
-        #
-        #show_vars status
-        if [[ "$status" == "protected" ]]; then        
-            # Garante que o fix corre no contexto certo
-            #blue_outpost_sync   
-            app_wait4_oidc $CLIENT_APP_NAME 15 && \
-            require_service_redirect_auth "$CLIENT_APP_NAME"
-        fi  
+            # must have resolvable names  
+            local status
+            status=$(app_wait4_oidc whoami 4 || return 1)               # wait 8 seconds 
+            #
+            #show_vars status
+            if [[ "$status" == "protected" ]]; then        
+                # Garante que o fix corre no contexto certo
+                #blue_outpost_sync   
+                app_wait4_oidc $CLIENT_APP_NAME 15 && \
+                require_service_redirect_auth "$CLIENT_APP_NAME"
+            fi  
+        fi
+        if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "oidc" ]]; then                
+            app_oidc_validate "$CLIENT_APP_NAME"
+        fi        
         
     )
 }
@@ -1578,8 +1616,8 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     
     # Camada de Interatividade para o Vault
     if [[ "$TOOL_SKIP_INTERACTION" != "true" ]]; then
-        #tool_functions_catalog
-        echo "tool_functions_catalog"
+        #tool_fn_catalog
+        echo "tool_fn_catalog"
     else
         echo "⚠️  Non-interactive mode: skipping token validation." >&2
     fi   

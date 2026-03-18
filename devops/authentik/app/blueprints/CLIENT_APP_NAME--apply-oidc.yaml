@@ -16,7 +16,6 @@ entries:
       client_type: "confidential"
       client_id: "{{$CLIENT_APP_OIDC_ID}}"
       client_secret: "{{$CLIENT_APP_OIDC_SECRET}}"
-      
       authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
 
@@ -27,11 +26,10 @@ entries:
       
       signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
       
-      property_mappings: !FindMany [authentik_core.propertymapping, [name, [
-        "authentik default OAuth Mapping: OpenID 'email'",
-        "authentik default OAuth Mapping: OpenID 'openid'",
-        "authentik default OAuth Mapping: OpenID 'profile'"
-      ]]]
+      property_mappings:
+        - !Find [authentik_core.propertymapping, [name, "authentik default OAuth Mapping: OpenID 'email'"]]
+        - !Find [authentik_core.propertymapping, [name, "authentik default OAuth Mapping: OpenID 'openid'"]]
+        - !Find [authentik_core.propertymapping, [name, "authentik default OAuth Mapping: OpenID 'profile'"]]
   
   - model: authentik_core.application
     id: app-{{$CLIENT_APP_NAME}}
@@ -46,9 +44,9 @@ entries:
       meta_icon: "{{$AUTHENTIK_URL}}/static/dist/assets/icons/home2500-icon.svg"
 
   - model: authentik_policies.policybinding
-    identifiers: { target: !KeyOf app-{{$CLIENT_APP_NAME}}, group: !Find [authentik_core.group, [name, "Home-Admins"]] }
+    identifiers: { target: !KeyOf "app-{{$CLIENT_APP_NAME}}", group: !Find [authentik_core.group, [name, "Home-Admins"]] }
     attrs: { order: 0 }          
   - model: authentik_policies.policybinding
-    identifiers: { target: !KeyOf app-{{$CLIENT_APP_NAME}}, group: !Find [authentik_core.group, [name, "Home-Developers"]] }
+    identifiers: { target: !KeyOf "app-{{$CLIENT_APP_NAME}}", group: !Find [authentik_core.group, [name, "Home-Developers"]] }
     attrs: { order: 1 }      
 

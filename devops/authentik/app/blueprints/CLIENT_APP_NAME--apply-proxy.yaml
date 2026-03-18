@@ -32,9 +32,9 @@ entries:
       meta_icon: "{{$AUTHENTIK_URL}}/static/dist/assets/icons/home2500-icon.svg"
 
   - model: authentik_policies.policybinding
-    identifiers: { target: !KeyOf app-{{$CLIENT_APP_NAME}}, group: !Find [authentik_core.group, [name, "Home-Admins"]] }
+    identifiers: { target: !KeyOf "app-{{$CLIENT_APP_NAME}}", group: !Find [authentik_core.group, [name, "Home-Admins"]] }
     attrs: { order: 0 }          
   - model: authentik_policies.policybinding
-    identifiers: { target: !KeyOf app-{{$CLIENT_APP_NAME}}, group: !Find [authentik_core.group, [name, "Home-Developers"]] }
+    identifiers: { target: !KeyOf "app-{{$CLIENT_APP_NAME}}", group: !Find [authentik_core.group, [name, "Home-Developers"]] }
     attrs: { order: 1 }      
 

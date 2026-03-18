@@ -1393,7 +1393,11 @@ _get_service_secret_path() {
 
     # --- Finalização e Export ---
     if [[ -n "$current_val" ]]; then
-        echo "[export $secret_name len: ${#current_val}]" >&2
+        if [[ "$(sanitize_var_name $secret_name)" != "$secret_name" ]]; then
+            ### is not variable. do not export
+            return 0
+        fi 
+        echo "[export $secret_name len: ${#current_val}]" >&2        
         export "$secret_name"="$current_val"
         return 0
     else
@@ -1732,6 +1736,12 @@ _put_service_secret_path() {
     done
 
     # --- Passo C: Injeção no Ambiente Atual ---
+
+    if [[ "$(sanitize_var_name $secret_name)" != "$secret_name" ]]; then
+        ### is not variable. do not export
+        return 0
+    fi    
+
     echo "✅ [EXPORT] $secret_name (length: ${#secret_val})" >&2
     export "$secret_name"="$secret_val"
     return 0
@@ -1813,6 +1823,13 @@ sanitize_var_name() {
     # Opcional: Garante que não começa com um número (útil para variáveis de ambiente)
     [[ "$sanitized" =~ ^[0-9] ]] && sanitized="_$sanitized"
     echo "$sanitized"
+}
+sanitize_var_name() {
+    local var_name=$1
+    # 1. Transforma pontos e traços em underscores
+    # 2. Remove caracteres não alfanuméricos residuais
+    # 3. Converte para maiúsculas
+    echo "$var_name" | sed 's/[.-]/_/g' | sed 's/[^a-zA-Z0-9_]//g' | tr '[:lower:]' '[:upper:]'
 }
 ask_provision() {
     local _type="$1"
