@@ -19,10 +19,9 @@ pihole/etc*/*
 backup/config/*
 
 
-
 #traefik
 traefik/traefik/certs/*.key
-traefik/traefik/certs/*
+#traefik/traefik/certs/*
 # except
 !traefik/traefik/config/*
 !traefik/traefik/traefik.yml
