@@ -11,8 +11,9 @@ session-ses_*.md
 
 # DEVOPS CORE containers - pihole,vault,authentik,traefik
 vault/config/certs/*.key
-pihole/etc*/*
+pihole/etc-pihole/*
 !pihole/etc-pihole/pihole.toml
+!pihole/etc-pihole/hosts/
 
 
 # backup
