@@ -5,3 +5,5 @@ acme.json
 session-ses_*.md
 ~*
 *~
+.env
+backup/config/*
