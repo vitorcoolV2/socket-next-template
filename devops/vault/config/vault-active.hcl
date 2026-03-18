@@ -4,10 +4,12 @@ storage "file" {
 }
 
 listener "tcp" {
-  address     = "0.0.0.0:8200"  
-  tls_disable = 1
+  address       = "0.0.0.0:443"  
+  tls_disable   = 0
+  tls_cert_file = "/vault/config/certs/vault-fullchain.crt"
+  tls_key_file  = "/vault/config/certs/vault.key"
 }
 
-api_addr = "http://172.28.0.6:8200"
+api_addr = "https://172.28.0.6:443"
 ui = true
 disable_mlock = true

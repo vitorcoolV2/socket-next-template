@@ -78,17 +78,6 @@ http:
 
     ## --------------- Vault
 
-    # Este deixa o Vault falar com o Authentik SEM o ForwardAuth interferir
-    # --- 1. O BURBURINHO (Bypass) ---
-    # Este deixa o Vault completar o login OIDC sem perguntar ao Authentik
-    #vault-bypass:
-    #  rule: "Host(`vault.home2500.local`) && PathPrefix(`/ui/vault/auth/oidc/oidc/callback`)"
-    #  entryPoints: ["websecure"]
-    #  priority: 200
-    #  service: vault
-    #  tls: {}
-      # SEM MIDDLEWARE AQUI
-
     # 2. VAULT UI (Prioridade Normal): Protegido pelo Authentik SSO
     vault:
       rule: "Host(`vault.home2500.local`)"
@@ -114,9 +103,8 @@ http:
       priority: 100
       service: pihole-service
       middlewares:
-        - "authentik-sso"         # 1st: Check authentication
-        - "pihole-redirect"  # 2nd: If authenticated and at /, go to /admin/
-      #  - "security-headers" # 3rd: Add headers
+        - "authentik-sso"
+        - "pihole-redirect"        
       tls: {}
 
     traefik-dashboard:

@@ -16,11 +16,6 @@ http:
         servers:
           - url: "http://mailcrab.app-network:1080"       
 
-    #netdata-service:
-    #  loadBalancer:
-    #    servers:
-    #      - url: "http://netdata.app-network:19999"
-
     pihole-service:
       loadBalancer:
         servers:
@@ -35,8 +30,6 @@ http:
       loadBalancer:
         servers:
           - url: "http://whoami.app-network:80"
-
-
 
 
   ## home2500 certification objective

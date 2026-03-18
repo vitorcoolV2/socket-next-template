@@ -12,8 +12,6 @@ services:
     ports:
       - "80:80" # HTTP traffic
       - "443:443" # HTTPS traffic
-      #- "8081:8080" # Dashboard
-      #- "8082:8082" # metrics
     user: root
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

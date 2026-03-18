@@ -25,12 +25,27 @@ http:
           - X-authentik-email
           - X-authentik-name
           - X-authentik-uid
+          - X-authentik-jwt
+          - X-authentik-meta-jwks
+          - X-authentik-meta-outpost
+          - X-authentik-meta-provider
+          - X-authentik-meta-app
+          - X-authentik-meta-version
           - Authorization
 
     redirect-to-https:
       redirectscheme:
         scheme: https
         permanent: true
+
+    # --- MIDDLEWARE DE INJEÇÃO ---
+    inject-theme-js:
+      plugin:
+        rewrite-body:
+          lastModified: true
+          rewrites:
+            - regex: "</head>"      
+              replacement: "<script src='/static/dist/theme-toggle.js' defer></script></head>"
 
 
   # ----------------------------------------------------------------
@@ -44,7 +59,7 @@ http:
       priority: 200
       service: "authentik-service"
       tls: {}
-      middlewares: ["security-headers"]
+      middlewares: ["security-headers","inject-theme-js"]
       
     
     whoami-public:
@@ -62,17 +77,6 @@ http:
       middlewares: ["authentik-sso", "security-headers"]
 
     ## --------------- Vault
-
-    # Este deixa o Vault falar com o Authentik SEM o ForwardAuth interferir
-    # --- 1. O BURBURINHO (Bypass) ---
-    # Este deixa o Vault completar o login OIDC sem perguntar ao Authentik
-    #vault-bypass:
-    #  rule: "Host(`vault.home2500.local`) && PathPrefix(`/ui/vault/auth/oidc/oidc/callback`)"
-    #  entryPoints: ["websecure"]
-    #  priority: 200
-    #  service: vault
-    #  tls: {}
-      # SEM MIDDLEWARE AQUI
 
     # 2. VAULT UI (Prioridade Normal): Protegido pelo Authentik SSO
     vault:
@@ -99,9 +103,8 @@ http:
       priority: 100
       service: pihole-service
       middlewares:
-        - "authentik-sso"         # 1st: Check authentication
-        - "pihole-redirect"  # 2nd: If authenticated and at /, go to /admin/
-      #  - "security-headers" # 3rd: Add headers
+        - "authentik-sso"
+        - "pihole-redirect"        
       tls: {}
 
     traefik-dashboard:
@@ -113,6 +116,7 @@ http:
       tls: {}
 
 
+
 # ----------------------------------------------------------------
 # TLS
 # ----------------------------------------------------------------
@@ -120,9 +124,17 @@ tls:
   certificates:
     - certFile: "/etc/traefik/certs/traefik-fullchain.pem"
       keyFile: "/etc/traefik/certs/traefik.key"
-  
+      stores:
+        - default
+    
   stores:
     default:
       defaultCertificate:
         certFile: "/etc/traefik/certs/traefik-fullchain.pem"
-        keyFile: "/etc/traefik/certs/traefik.key"        
+        keyFile: "/etc/traefik/certs/traefik.key"
+
+  # Adiciona isto para evitar que pedidos de domínios estranhos
+  # tentem usar configurações TLS que não existem
+  options:
+    default:
+      sniStrict: false # Permite que ele entregue o cert padrão mesmo com SNI errado        
