@@ -1,10 +1,31 @@
 # Devops Stack
 
+Welcome to the Home2500 Devops Stack. This project manages the lifecycle of self-hosted services using Docker, Traefik, Authentik, and Vault.
+
+## 📖 Service Documentation Index
+
+| Service             | Documentation                                          | Core Responsibility                             |
+| :------------------ | :----------------------------------------------------- | :---------------------------------------------- |
+| **Orchestration**   | [readme.md](readme.md)                                 | Global stack boot sequence & naming conventions |
+| **Ecosystem**       | [home2500.md](home2500.md)                             | Core components & Blueprint relationships       |
+| **Authentik**       | [authentik/README.md](authentik/README.md)             | Identity Provider (OIDC/SAML) & App Access      |
+| **├ App Framework** | [authentik/app/README.md](authentik/app/README.md)     | Developer tool for service deployment & SSO     |
+| **└ Theme**         | [authentik/theme/README.md](authentik/theme/README.md) | Custom branding & UI asset builder              |
+| **Traefik**         | [traefik/README.md](traefik/README.md)                 | Reverse proxy, TLS (Vault), & Middlewares       |
+| **Vault**           | [vault/README.md](vault/README.md)                     | Secret storage & Vault unsealing orchestration  |
+| **└ KeePass**       | [vault/keepass.md](vault/keepass.md)                   | Wrapper library for secure secret management    |
+| **Pi-hole**         | [pihole/README.md](pihole/README.md)                   | Network-wide DNS & API sync                     |
+| **Backup**          | [backup/README.md](backup/README.md)                   | Automated backups via Backrest                  |
+| **Fotos**           | [fotos/README.md](fotos/README.md)                     | Immich photo management                         |
+| **OpenCode**        | [opencode/readme.md](opencode/readme.md)               | AI Code Assistant                               |
+
+---
+
 ## Naming Convention
 
 All services follow: `<service>.<DOMAIN>`
 
-```
+```bash
 DOMAIN=home2500.local
 PUBLIC_SERVICES_LIST="traefik vault vault-oidc auth whoami mailcrab pihole backup netdata filebrowser fotos"
 ```
@@ -15,34 +36,28 @@ Generated names: `traefik.home2500.local`, `vault.home2500.local`, `auth.home250
 
 ### 1. DNS → Pi-hole
 
-- `ph api dns sync` - registers all `<service>.<DOMAIN>` entries in Pi-hole
+Records are registered in Pi-hole to point to the Traefik IP.
 
 ### 2. TLS Cert → Traefik
 
-- Traefik requests TLS certificates from Vault for each `<service>.<DOMAIN>`
+Traefik requests TLS certificates from Vault for each service domain.
 
-### 3. OIDC → Authentik
+### 3. OIDC/SSO → Authentik
 
-- Authentik registers OIDC clients for protected services
+Authentik handles user authentication and authorization for all protected services.
 
 ## Tool Stages
 
 **Provision:**
-
-```
-script → provision_db → provision_secrets → vault_login → compose → running → name_register → authentik_login → blue_apply
-```
+`script` → `provision_db` → `provision_secrets` → `vault_login` → `compose` → `running` → `name_register` → `authentik_login` → `blue_apply`
 
 **Teardown:**
+`outpost_remove` → `blue_clean` → `authentik_logout` → `stop` → `vault_logout` → `names_unregister`
 
-```
-outpost_remove → blue_clean → authentik_logout → stop → vault_logout → names_unregister
-```
+## Entrypoints
 
-## Entrypoint
-
-- `core.sh` - main library (source it, don't run directly)
-- `boot-sequence.sh` - boots all services in order
+- `core.sh`: Main library (source it, don't run directly).
+- `boot-sequence.sh`: Automated script to boot all services in order.
 
 ## Starting Services
 
@@ -52,89 +67,17 @@ outpost_remove → blue_clean → authentik_logout → stop → vault_logout →
 ./boot-sequence.sh
 ```
 
-Boot sequence:
-
-1. Docker network reset
-2. **Pihole** → starts first (DNS needed)
-3. **Vault** → unseals and gets token
-4. **Pihole DNS sync** → registers all `<service>.$DOMAIN`
-5. **Traefik** → starts with TLS
-6. **Authentik** → starts, generates API token
-7. **Wait for auth** → ensures auth is ready
-8. **Set Authentik theme**
-9. **Stack services** → netdata, backup, fotos
-
 ### Single Service
 
 ```bash
-# Pihole
+# Core Services (Manual)
 cd pihole && docker compose up -d
-
-# Vault
 cd vault && docker compose up -d
 
-# Traefik
+# Using Libraries
 source traefik/_0.traefik_lib.sh && tk_up
-
-# Authentik
 source authentik/_0-authentik_lib.sh && ak_up
 
-# Client app (netdata, backup, fotos, etc.)
-cd <service> && source tool.sh && app_up_template__proxy
+# Client Apps (using the framework)
+cd <service> && source init.sh && deploy
 ```
-
-## KeePass
-
-Used for storing secrets (passwords, certificates, keys).
-
-### Config
-
-```bash
-KP_DB="/home/vitor/Documents/home2500.kdbx"      # Database path
-KP_KEY="/media/vitor/Ventoy/home2500.key"        # Key file (optional)
-KP_OPEN_POLICY="create"                          # create|block
-```
-
-### Usage
-
-```bash
-source vault/keepass.sh
-
-kp open                   # Open database (unlocks with kp or KP_KEY)
-kp ls                     # List entries
-kp show <entry>           # Show entry details
-kp clip <entry>           # Copy password to clipboard
-kp get-entry-pass <path>  # Get password (programmatic)
-kp get-entry-user <path>  # Get username
-kp save-entry <path> <user> <pass>  # Save entry
-kp save-ca-pair <path> <cert> <key> # Save cert + key
-```
-
-## Pi-hole
-
-DNS and ad-blocking service.
-
-### Usage
-
-```bash
-source pihole/_0.pihole_lib.sh
-
-ph_api open        # Open KeePass and restore password
-ph_api auth        # Authenticate to Pi-hole API
-ph_api close       # Logout
-
-ph_api dns get_records      # List DNS records
-ph_api dns add <ip> <host> # Add DNS entry
-ph_api dns remove <host>   # Remove DNS entry
-ph_api dns sync            # Sync all <service>.$DOMAIN entries
-ph_api dns expected        # Show expected DNS records
-
-ph_api password rotate     # Rotate web password
-```
-
-### DNS Sync
-
-`sync` compares expected vs actual and:
-
-- Removes: entries in Pi-hole but not in expected
-- Adds: entries in expected but not in Pi-hole
