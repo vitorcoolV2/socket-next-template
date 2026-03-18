@@ -482,7 +482,7 @@ vault_up_wait() {
     return 1
 }
 vault_create_home_server_role() {
-    echo "🔧 Criando Role: "$home_vault_role"..." &>2
+    echo "🔧 Criando Role: "$home_vault_role"..." >&2
     local vrole=$(vault write pki_int/roles/$home_vault_role \
         allowed_domains="$DOMAIN,$INTERNAL_DOMAIN" \
         allow_bare_domains=true \
@@ -506,9 +506,9 @@ vault_create_home_server_role() {
         province="Network")
 
     if [ $? -eq 0 ]; then
-        echo "✅ Role gerado com sucesso!" &>2
+        echo "✅ Role gerado com sucesso!" >&2
     else
-        echo "❌ Falha crítica: O não conseguiu criar a role."  &>2
+        echo "❌ Falha crítica: O não conseguiu criar a role."  >&2
         return 1
     fi             
 }
@@ -517,7 +517,7 @@ vault__self_certificate() {
     local home_vault_role="home-server-role"
     local CERTS_FOLDER="$VAULT_DIR/config/certs"
     require_locations CERTS_FOLDER
-    echo "🔧 Verificando/Criando Role: "$home_vault_role"..." &>2
+    echo "🔧 Verificando/Criando Role: "$home_vault_role"..." >&2
 
     (
         
@@ -528,7 +528,7 @@ vault__self_certificate() {
         require_vars VAULT_TOKEN || return 1
         # O Steward agora pode fazer este 'write' porque atualizámos a política
 
-        echo "🔐 Gerando certificados internos..."  &>2
+        echo "🔐 Gerando certificados internos..."  >&2
 
         local vault_output=$(docker exec -e VAULT_ADDR=$VAULT_ADDR -e VAULT_TOKEN=$VAULT_TOKEN vault \
             vault write -format=json pki_int/issue/$home_vault_role \
@@ -538,9 +538,9 @@ vault__self_certificate() {
             ttl="720h")   
 
         if [ $? -eq 0 ]; then
-            echo "✅ Certificado gerado pelo com sucesso!" &>2
+            echo "✅ Certificado gerado pelo com sucesso!" >&2
         else
-            echo "❌ Falha crítica: O não conseguiu criar a role ou emitir o cert."  &>2
+            echo "❌ Falha crítica: O não conseguiu criar a role ou emitir o cert."  >&2
             return 1
         fi     
 
@@ -552,7 +552,7 @@ vault__self_certificate() {
         echo "$vault_output" | jq -r '.data.certificate' > $CERTS_FOLDER/vault.crt
         echo "$vault_output" | jq -r '.data.private_key' > $CERTS_FOLDER/vault.key
 
-        echo "📋 Getting Root CA certificate..."  &>2
+        echo "📋 Getting Root CA certificate..."  >&2
         vault read -format=json pki/cert/ca | jq -r '.data.certificate' > $CERTS_FOLDER/root_ca.crt
         vault read -format=json pki_int/cert/ca | jq -r '.data.certificate' > $CERTS_FOLDER/ca.crt
 
@@ -568,7 +568,7 @@ vault__self_certificate() {
         )
         
         ls -la $CERTS_FOLDER/
-        echo "✅ Certificados gerados com sucesso em $CERTS_FOLDER"  &>2
+        echo "✅ Certificados gerados com sucesso em $CERTS_FOLDER"  >&2
     ) || return 1
 }
 vault__steward_policy() {
@@ -690,10 +690,10 @@ EOF
     vault policy read app-steward-policy
     # 2. Enable AppRole auth if not already enabled
     if ! vault auth list | grep -q "^approle/"; then
-        echo "📦 Enabling AppRole..." &>2
+        echo "📦 Enabling AppRole..." >&2
         vault auth enable approle
     else
-        echo "ℹ️ AppRole already enabled." &>2
+        echo "ℹ️ AppRole already enabled." >&2
     fi
 
     # 3. Configure the role 

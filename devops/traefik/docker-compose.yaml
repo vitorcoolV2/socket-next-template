@@ -20,7 +20,7 @@ services:
       - ./traefik/certs:/etc/traefik/certs:ro
       - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./traefik/config:/etc/traefik/config:ro
-      - ./traefik/acme.json:/etc/traefik/acme.json
+      #- ./traefik/acme.json:/etc/traefik/acme.json
     environment:
       - LEGO_CA_CERTIFICATES=/etc/traefik/certs/ca/ca-chain.pem
       # Se o Vault usa SSL auto-assinado para o endpoint ACME:

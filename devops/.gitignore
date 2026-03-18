@@ -6,4 +6,38 @@ session-ses_*.md
 ~*
 *~
 .env
+
+
+
+# DEVOPS CORE containers - pihole,step-ca,openldap,authelia,traefik
+vault/data*
+pihole/etc*
+step-ca/step*
+openldap/ldap/*
+# authelia home2500.local
+authelia/authelia/
+authelia/data/authelia/config/authelia_notifications
+authelia/data/postgres/
+authelia/secrets
+authelia/ldap*
+
+
+##### the stack not exposed
+stack/kuma/uptime*
+stack/hedgedoc
+stack/iredmail
+stack/nginx
+stack/winboat/*
+
+# backup
 backup/config/*
+
+
+
+#traefik
+traefik/traefik/certs/*.key
+traefik/traefik/certs/*
+# except
+!traefik/traefik/config/*
+!traefik/traefik/traefik.yml
+
