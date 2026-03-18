@@ -26,3 +26,5 @@ traefik/traefik/certs/*.key
 !traefik/traefik/config/*
 !traefik/traefik/traefik.yml
 
+# OPENCODE agent
+opencode/workspace/*
