@@ -1796,6 +1796,10 @@ core_transform_inject_env_file_vars() {
         fi
     done < "$env_file"
 }
+# to<type representation>: toPascalCase
+to_pascal_case() {
+    echo "$1" | tr '[:upper:]' '[:lower:]' | sed -r 's/(^|_)([a-z])/\U\2/g'
+}
 # 1. Higieniza nomes de caminhos (Permite barras '/' mas remove caracteres perigosos)
 sanitize_path_name() {
     local input="$1"

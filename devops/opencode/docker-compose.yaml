@@ -6,19 +6,18 @@ services:
       args:
         - USERNAME=${USER}
         - USER_UID=${UID}
-        - USER_GID=${GID}     
-    image: opencode-${UID}-${GID}:latest  
-     
+        - USER_GID=${GID}
+    image: opencode-${UID}-${GID}:latest
+
     container_name: opencode
-    #hostname: opencode-dev
-    stdin_open: true  # Keep STDIN open for interactive commands
-    tty: true         # Allocate a pseudo-TTY
+    stdin_open: true # Keep STDIN open for interactive commands
+    tty: true # Allocate a pseudo-TTY
     working_dir: /home/${USER}
-    user: ${USER}    
+    user: ${USER}
     volumes:
       ##  persist user run time
       - ./workspace:/home/${USER}/
-      ##  use host instaled opencode    
+      ##  use host instaled opencode
       - /home/${USER}/.local/share/opencode:/home/${USER}/.local/share/opencode
       - /home/${USER}/.local/state/opencode:/home/${USER}/.local/state/opencode
       - /home/${USER}/.local/bin/opencode:/home/${USER}/.local/bin/opencode
@@ -37,9 +36,19 @@ services:
       - EDITOR=vim
       - USER=${USER}
       - HOME=/home/${USER}
+      - OPENCODE_SERVER_PASSWORD=${OPENCODE_SERVER_PASSWORD}
+      - OPENCODE_SERVER_PORT=${CLIENT_APP_SERVICE_PORT}
     networks:
       - app-network
-    command: /bin/bash  # Keep container running with bash
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.opencode.rule=Host(`opencode.home2500.local`)'
+      - 'traefik.http.routers.opencode.entrypoints=websecure'
+      - 'traefik.http.routers.opencode.tls=true'
+      - 'traefik.http.routers.opencode.middlewares=authentik-sso@file,security-headers@file'
+      - 'traefik.http.routers.opencode.service=opencode-service'
+      - 'traefik.http.services.opencode-service.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT}'
+    command: /bin/bash -c "opencode web --port ${CLIENT_APP_SERVICE_PORT} --hostname 0.0.0.0"
     restart: unless-stopped
 
 # Use existing external network

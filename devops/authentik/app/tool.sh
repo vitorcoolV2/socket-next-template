@@ -77,10 +77,11 @@ require_locations CLIENT_APP_DIR
 
 ## prompt load only vars prefixe with APP_* .env ,parse key=val => "CLIENT_$key=$val"
 
-require_vars DOMAIN \
+show_vars DOMAIN \
     INTERNAL_DOMAIN \
     AUTHENTIK_DIR \
-    AUTHENTIK_URL | return 1 ### ctx essencial
+    AUTHENTIK_URL
+
 
 # Agora as templates (certifica-te que CLIENT_APP_NAME está definido, ex: CLIENT_APP_NAME="netdata")
 
@@ -173,35 +174,41 @@ EOF
 }
 
 
+
+_container_name() {
+    local container_name="$1"
+    require_vars container_name
+    local compose_json
+    compose_json=$(_get_compose_file_json)
+    echo "$compose_json" | jq -e -r --arg app "$container_name" '
+        .services
+        | to_entries[]
+        | select(
+            (.value.container_name == $app) or
+            (.value.service_name == $app) or
+            (.key == $app)
+        )
+        | .value.container_name
+    ' | head -n 1 || echo "null"
+}
+
 _resolve_compose__container_name() {
-    # 1. Early exit se já resolvida       
-    [[ -n "$CLIENT_APP_CONTAINER_NAME" ]] && return 0
+    # re/solve/set CLIENT_APP_CONTAINER_NAME
 
-    local c_name="${CLIENT_APP_CONTAINER_NAME:-$CLIENT_APP_NAME}"
+    unset CLIENT_APP_CONTAINER_NAME
+    core_transform_inject_env_file_vars \
+            "$CLIENT_APP_ENV_FILE" \
+            "APP_CONTAINER_NAME" \
+            "CLIENT_APP_CONTAINER_NAME"
 
-    # Obtemos o JSON do compose (cache em variável se necessário para performance)
-    _container_name() {
-        local container_name="$1"
-        require_vars container_name
-        local compose_json
-        compose_json=$(_get_compose_file_json)
-        echo "$compose_json" | jq -r --arg app "$container_name" '
-            .services
-            | to_entries[]
-            | select(
-                (.value.container_name == $app) or
-                (.value.service_name == $app) or
-                (.key == $app)
-            )
-            | .key
-        ' | head -n 1 || echo "null"
-    }
-    local service_key=$(_container_name "$container_name")
-    show_vars service_key || return 1
+    local c_name
+    c_name="${CLIENT_APP_CONTAINER_NAME:-$CLIENT_APP_NAME}"
+
+    local service_key=$(_container_name "$c_name")
     # 3. Validação do resultado
     if [[ -z "$service_key" || "$service_key" == "null" ]]; then
-        echo -e "⚠️  \e[33mWarning:\e[0m No service match for \e[1m$CLIENT_APP_NAME\e[0m in JSON." >&2
-        [[ -z "$CLIENT_APP_CONTAINER_NAME" ]] && return 1
+        echo -e "⚠️  \e[33mWarning:\e[0m No service match for \e[1m$c_name\e[0m in JSON." >&2
+        return 1
     fi
 
     # 4. Feedback e Export
@@ -717,6 +724,12 @@ _get_compose__env_var() {
 app_require_export_container_ip_port() {
     require_vars CLIENT_APP_CONTAINER_NAME
     
+    core_transform_inject_env_file_vars \
+            "$CLIENT_APP_ENV_FILE" \
+            "APP_CONTAINER_NAME" "CLIENT_APP_CONTAINER_NAME"
+    core_transform_inject_env_file_vars \
+            "$CLIENT_APP_ENV_FILE" \
+            "APP_SERVICE_PORT" "CLIENT_APP_SERVICE_PORT"
     # 1. Tentar obter o IP
     local _ip
     _ip=$(docker_container_name_ip "$CLIENT_APP_CONTAINER_NAME") 
@@ -732,13 +745,13 @@ app_require_export_container_ip_port() {
     fi   
 
     # 2. Tentar obter a Porta (apenas se ainda não estiver definida)
-    local _port
-    _port=$(docker_container_name_ports "$CLIENT_APP_CONTAINER_NAME") 
+    local _port=$(docker_container_name_ports "$CLIENT_APP_CONTAINER_NAME") 
+    _port=${CLIENT_APP_SERVICE_PORT:-$_port}
     
     if [[ -n "$_port" ]]; then 
         export CLIENT_APP_SERVICE_PORT="$_port" 
     else
-        debug_required_type_name "$CLIENT_APP_NAME-port" "CLIENT_APP_CONTAINER_NAME" "$REQ_STATUS_MISS"
+        debug_required_type_name "APP_SERVICE_PORT" ".env" "$REQ_STATUS_MISS"
         return 1
     fi                        
 
@@ -754,21 +767,14 @@ app_required_env_vars() {
     # 4. Extrair APP_BLUE_GROUP - template blue tpl defining UI app link label 
     if [[ -z "$CLIENT_APP_BLUE_GROUP" ]]; then 
         local _var_APP_GROUP=$(_get_compose__env_var "APP_BLUE_GROUP")
-        if [[ -z "$CLIENT_APP_BLUE_GROUP" ]]; then 
-            require_vars CLIENT_APP_BLUE_GROUP
-            return 1
-        fi
-        export CLIENT_APP_BLUE_GROUP="${_var_APP_GROUP}"     
+        export CLIENT_APP_BLUE_GROUP="${_var_APP_GROUP:-"Ferramentas"}"     
     fi
 
     # 5. Extrair APP_BLUE_LABEL - template blue tpl defining UI app link label 
     if [[ -z "$CLIENT_APP_BLUE_LABEL" ]]; then 
         local _var_APP_LABEL=$(_get_compose__env_var "APP_BLUE_LABEL")
-        if [[ -z "$CLIENT_APP_BLUE_LABEL" ]]; then 
-            require_vars CLIENT_APP_BLUE_LABEL
-            return 1
-        fi
-        export CLIENT_APP_BLUE_LABEL="${_var_APP_LABEL}"     
+        local default_label=$(to_pascal_case $CLIENT_APP_NAME)
+        export CLIENT_APP_BLUE_LABEL="${_var_APP_LABEL:-$default_label}"     
     fi
 
     export CLIENT_APP_NS="$CLIENT_APP_NAME.$DOMAIN"
@@ -881,7 +887,7 @@ app_up_names() {
     fi    
     
     local APP_NS_IP="$CLIENT_APP_SERVICE_IP"   
-    show_vars APP_NS_IP
+    # show_vars APP_NS_IP
 
     local service="pihole"
     if require_container_running service; then
