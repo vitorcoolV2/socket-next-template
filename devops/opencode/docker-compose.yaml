@@ -15,10 +15,6 @@ services:
     working_dir: /home/${USER}
     user: ${USER}
     volumes:
-      - type: tmpfs
-        target: /tmp
-        tmpfs:
-          size: 512M
       ##  persist user run time
       - ./workspace:/home/${USER}/
       - ../../:/home/${USER}/nextjs-app-template
