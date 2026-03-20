@@ -1466,7 +1466,7 @@ core_secret_export2_env_vars() {
             val_content="${!var_name}"
             
             case "$var_name" in
-                *_PASS|*_SECRET|*_KEY|DB_URL)
+                *DB_PASS)
                     val_content=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$val_content', safe=''))")
                     ;;
             esac

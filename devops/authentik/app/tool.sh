@@ -1579,9 +1579,7 @@ app_up() {
             app_up_names || return 1
         fi
 
-        if ! tool_stage_workflow "blue_apply"; then             
-            app_blue_apply || return 1            
-        fi
+        app_blue_apply || return 1          
 
         app_up_traefik_tls_proxy || return 1
 
