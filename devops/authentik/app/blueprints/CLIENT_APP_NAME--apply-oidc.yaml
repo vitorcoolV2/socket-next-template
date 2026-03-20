@@ -14,8 +14,8 @@ entries:
       name: '{{$CLIENT_APP_NAME}}-provider'
     attrs:
       client_type: 'confidential'
-      client_id: '{{$CLIENT_APP_OIDC_ID}}'
-      client_secret: '{{$CLIENT_APP_OIDC_SECRET}}'
+      client_id: '{{$OIDC_ID}}'
+      client_secret: '{{$OIDC_SECRET}}'
       authorization_flow:
         !Find [
           authentik_flows.flow,

@@ -1260,12 +1260,9 @@ _get_service_secret_path() {
             source "$(core_resolve_file "vault/vault_lib.sh")" > /dev/null 2>&1
         fi
         local _dir="$(dirname $vault_service_path)"
-        # Bypass de TLS se necessário (pelo erro que vimos antes)
         echo "vault_get_secret \"$_dir\" \"$secret_name\""
-        ###echo "vault_save_secret \"$_dir\" \"$secret_name\""
         current_val=$(vault_get_secret "$_dir" "$secret_name" 2>/dev/null)
 
-        #require_vars current_val _dir
         [[ -n "$current_val" ]] && return 0
         return 1
     }
@@ -1619,7 +1616,6 @@ _put_service_secret_path() {
 
         if ! is_sealed; then
             echo "🔒 [VAULT] Salvando $secret_name em $vault_service_path..." >&2
-            # Forçamos bypass do TLS enquanto o certificado estiver expirado
             local _dir=$(dirname $vault_service_path)
             if ! VAULT_SKIP_VERIFY=true vault_save_secret "$_dir" "$secret_name" "$secret_val" 2>/dev/null; then
                 echo "⚠️  [VAULT] Falha na escrita em $vault_service_path." >&2
