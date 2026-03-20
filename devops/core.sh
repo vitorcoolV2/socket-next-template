@@ -213,18 +213,6 @@ core_relative_path2() {
     realpath --relative-to="$PWD" "$the_file" 2>/dev/null || echo "$the_file"
 }
 
-
-get_array_file_lines() {
-    local file_path="$1"
-    local pattern="$2"
-    
-    if [[ ! -f "$file_path" ]]; then return 1; fi
-    if [[ -z "$pattern" ]]; then return 1; fi
-    local matching_lines
-    matching_lines=$(grep -n "$pattern" "$file_path" | cut -d: -f1)
-    echo $matching_lines
-}
-
 ## usage file line case: corelink_file "envfile" "./env" 4
 ## usage file search lines case: corelink_file "envfile" "./env" debug_link_file
 debug_link_file() {
@@ -234,6 +222,17 @@ debug_link_file() {
     
     # Validação de requisitos (assumindo que require_vars existe no teu env)
     require_vars link_name file_path || return 1
+
+    _search_file_lines() {
+        local file_path="$1"
+        local pattern="$2"
+        
+        if [[ ! -f "$file_path" ]]; then return 1; fi
+        if [[ -z "$pattern" ]]; then return 1; fi
+        local matching_lines
+        matching_lines=$(grep -n "$pattern" "$file_path" | cut -d: -f1)
+        echo $matching_lines
+    }
 
     local first_arg="$1"
     local rel_path=$(core_relative_path2 $file_path)
@@ -249,9 +248,9 @@ debug_link_file() {
         local search_pattern="$first_arg"
 
 
-        # Supõe que get_array_file_lines devolve uma lista de números de linha
+        # Supõe que _search_file_lines devolve uma lista de números de linha
         # Exemplo interno: local lines=($(grep -n "$search_pattern" "$file_path" | cut -d: -f1))
-        local lines=($(get_array_file_lines  "$file_path" "$search_pattern" ))
+        local lines=($(_search_file_lines  "$file_path" "$search_pattern" ))
         
         printf "  - \e[1;32m%-20s\e[0m search [pattern: %s])-> \e[1;34m%s\e[0m \n" \
             "${link_name}" "$search_pattern"  "$file_path"     
@@ -266,30 +265,6 @@ debug_link_file() {
     fi
 }
 
-_get_function_origin() {
-    local func_name=$1
-    # Ativa debug estendido localmente para obter linha e arquivo
-    shopt -s extdebug
-    local info
-    info=$(declare -F "$func_name")
-    shopt -u extdebug
-
-    if [[ -n "$info" ]]; then
-        # O output de declare -F com extdebug é: "nome_funcao linha arquivo"
-        local line_no
-        local file_path
-        read -r _ line_no file_path <<< "$info"
-        
-        local rel_path
-        rel_path=$(core_relative_path2 "$file_path")
-        
-        echo "function:\"$func_name\" [${rel_path}:${line_no}]"
-    else
-        echo "function:\"$func_name\" [NOT FOUND]" >&2
-        return 1
-    fi
-}
-
 debug_required_type_name() {
     local _type="$1"
     local _name="$2"
@@ -299,7 +274,31 @@ debug_required_type_name() {
     [[ $DEBUG != "true" ]] && {
         #[[ $DEBUG != "false" ]] &&  
         echo "$_type $_name $_status"
-        return 0
+        return 0        
+    }
+
+    _map_function__file_line() {
+        local func_name=$1
+        # Ativa debug estendido localmente para obter linha e arquivo
+        shopt -s extdebug
+        local info
+        info=$(declare -F "$func_name")
+        shopt -u extdebug
+
+        if [[ -n "$info" ]]; then
+            # O output de declare -F com extdebug é: "nome_funcao linha arquivo"
+            local line_no
+            local file_path
+            read -r _ line_no file_path <<< "$info"
+            
+            local rel_path
+            rel_path=$(core_relative_path2 "$file_path")
+            
+            echo "function:\"$func_name\" [${rel_path}:${line_no}]"
+        else
+            echo "function:\"$func_name\" [NOT FOUND]" >&2
+            return 1
+        fi
     }
     # 1. Mapeamento Visual (Status e Cores)
     _map_type_name__status() {        
@@ -352,7 +351,7 @@ debug_required_type_name() {
                     ;;
                 function)
                     local origin
-                    origin=$(_get_function_origin "$_name")
+                    origin=$(_map_function__file_line "$_name")
                     _more=" [origin: ${origin#*\" }] " # Extrai apenas o [arquivo:linha]
                     ;;
                 *)
@@ -1060,181 +1059,99 @@ require_http_status_ok() {
     
     return 0
 }
-cr_wait4_service_middleware_ready() {
-    local service="${1:-traefik}"
-    local max_attempts="${2:-20}" 
-    local attempt=1
-    local _wait=1 # Começamos com apenas 1 segundo
-    local start_time=$(date +%s)
-    local is_protected=1 # 1 = False/Error no Bash logic
-    
-    echo "⏳ Waiting for service \"$service\" middleware to stabilize..." >&2
-    while [ $is_protected -ne 0 ]; do
-        # Executa a função e captura APENAS o exit code ($?)
-        require_service_redirect_auth "$service" 
-        is_protected=$?
 
-        if [ $is_protected -eq 0 ]; then
-            break # Sucesso! Sai do loop imediatamente
-        fi
-
-        if [ $attempt -ge $max_attempts ]; then
-            echo -e "\n🛑 Timeout reached. $service never stabilized." >&2
-            return 1
-        fi
-
-        # Feedback visual na mesma linha para não poluir o log
-        printf "\r   [Attempt %02d/%02d] [$is_protected] Waiting %ds... " "$attempt" "$max_attempts" "$_wait" 
-        
-        sleep $_wait
-        
-        # Estratégia: Aumentar o wait progressivamente até um teto de 3s
-        # Isso faz com que os serviços rápidos sejam detectados em 1-2s
-        if [ $_wait -lt 3 ]; then ((_wait++)); fi
-        
-        ((attempt++))
-        
-    done
-
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-
-    echo -e "\n🚀 Service $service is READY and PROTECTED! (Total: ${duration}s)"
-    return 0
-}
 wait4_http_url_ready(){
     local url="${1}"
-    require_vars url
     local max_attempts="${2:-20}" 
     local attempt=1
-    local _wait=1 # Começamos com apenas 1 segundo
+    local _wait=1 
     local start_time=$(date +%s)
-    local is_ok=1 # 1 = False/Error no Bash logic
-    
-    echo "⏳ Waiting for http resource \"$url\" to stabilize..."
-    while [ $is_ok -ne 0 ]; do
-        # Executa a função e captura APENAS o exit code ($?)
-        cr_curl_https_status "$url" 
-        is_ok=$?
+    require_vars url max_attempts _wait || return 1
+    echo "⏳ Waiting for: $url" >&2
+    printf "   State: " >&2 # Inicia a linha de progresso
+
+    while [ $attempt -le $max_attempts ]; do
+        # Executa silenciando tudo
+        core_http_url_status "$url" >/dev/null 2>&1
+        local is_ok=$?
+
+        # Define o caractere baseado no código de saída
+        local char="."
+        case $is_ok in
+            0)   char="✅" ;; # Sucesso: Tudo pronto!
+            7)   char="🔌" ;; # Connection Refused (Porta fechada)
+            28)  char="🕒" ;; # Timeout (Rede lenta/DNS)
+            246) char="🔐" ;; # Permission/Locked (Recurso bloqueado ou sem acesso)
+            502) char="🧱" ;; # Bad Gateway (Traefik ON, App OFF)
+            503) char="🚧" ;; # Service Unavailable (Sobrecarregado)
+            404) char="🔍" ;; # Not Found (Rota não mapeada)
+            *)   char="❌" ;; # Outros erros ($is_ok)
+        esac
+
+        printf "%s" "$char" >&2 # Imprime o símbolo sem pular linha
 
         if [ $is_ok -eq 0 ]; then
-            break # Sucesso! Sai do loop imediatamente
+            local duration=$(( $(date +%s) - start_time ))
+            echo -e "\n🚀 [READY] Stabilized in ${duration}s!" >&2
+            return 0
         fi
 
-        if [ $attempt -ge $max_attempts ]; then
-            echo -e "\n🛑 Timeout reached. $url never stabilized."
+        if [ $attempt -eq $max_attempts ]; then
+            echo -e "\n🛑 [TIMEOUT] Failed after $max_attempts attempts." >&2
             return 1
         fi
 
-        # Feedback visual na mesma linha para não poluir o log
-        printf "\r   [Attempt %02d/%02d] [$is_ok] Waiting %ds... " "$attempt" "$max_attempts" "$_wait" 
-        
         sleep $_wait
-        
-        # Estratégia: Aumentar o wait progressivamente até um teto de 3s
-        # Isso faz com que os serviços rápidos sejam detectados em 1-2s
         if [ $_wait -lt 3 ]; then ((_wait++)); fi
-        
         ((attempt++))
-        
     done
-
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
-
-    echo -e "\n🚀 Service $service is READY and PROTECTED! (Total: ${duration}s)"
-    return 0
 }
-
-
-cr_curl_https_status(){    
+core_http_url_status(){    
     local url="${1}"
     require_vars url 
     
-    # -I: Headers | -s: Silent | -L: Follow Redirects | -k: Insecure (para internal CA)
-    # -m 5: Timeout de 5 segundos para não travar o script
+    # Definição dos padrões de status
+    local http_status_ok_pattern="^(20[0-9]|30[0-2]|307|308)$"
+    local http_status_proxy_err="^(502|503|504|404)$"
+
+    # Formato de saída JSON para o curl
+    local write_out_format='{"http_code":"%{http_code}","remote_ip":"%{remote_ip}","url_effective":"%{url_effective}","time_total":"%{time_total}"}'
+
     local response
-    response=$(curl -I -s -L -k -m 5 "$url" -w "%{http_code} | %{remote_ip} | %{url_effective}" -o /dev/null)
+    response=$(curl -I -s -L -k -m 5 "$url" -w "$write_out_format" -o /dev/null)
     local curl_exit_status=$?
 
+    # 1. Erro de Conectividade (DNS, Timeout, Recusa de Conexão)
     if [ $curl_exit_status -ne 0 ]; then
-        echo "❌ [ERROR] Curl failed for $url (Exit code: $curl_exit_status)" >&2
-        return $curl_exit_status  # Erro de rede/conectividade
+        echo "❌ [ERROR] Network/Curl failure (Exit: $curl_exit_status) for $url" >&2
+        return $curl_exit_status
     fi
 
-    local http_code=$(echo "$response" | cut -d' ' -f1)
-    local destination=$(echo "$response" | cut -d'|' -f3)
+    # Extração do status via JQ
+    local http_code=$(echo "$response" | jq -r '.http_code')
 
-    if [[ "$http_code" == "502" || "$http_code" == "404" ]]; then
-        echo "⚠️  [WARN] $url is offline/misconfigured (HTTP $http_code)" >&2
-        return $http_code  # Erro de aplicação (Backend Down)
+    # 2. Validação via Regex: Sucesso ou Redirect
+    if [[ "$http_code" =~ $http_status_ok_pattern ]]; then
+        echo "✅ [OK] $url responded with $http_code" >&2
+        echo $response | jq -c -e
+        return 0
     fi
-    echo "✅ [OK] $url responded with $http_code -> $destination" >&2
-    echo $response
+
+    # 3. Validação via Regex: Erros de Proxy/Aplicação
+    if [[ "$http_code" =~ $http_status_proxy_err ]]; then
+        echo "⚠️  [WARN] Service Unreachable (HTTP $http_code) at $url" >&2
+        echo $response | jq -c -e
+        return $http_code # Indica falha funcional
+    fi
+
+    # 4. Caso genérico (Outros 4xx ou 5xx não mapeados)
+    echo "❓ [UNKNOWN] Unexpected status $http_code for $url" >&2
+    echo $response | jq -c -e
     return $http_code
 }
 
 
-cr_check_service_https_status() {
-    local service="${1:-whoami}"
-    local url="https://${service}.${DOMAIN}"
-
-    local result=$(cr_curl_https_status "$url" 2> /dev/null)
-    local http_code=$(echo "$result" | cut -d' ' -f1)
-    
-    local destination=$(echo "$result" | cut -d'|' -f3)
-
-    if [[ "$http_code" == "502" || "$http_code" == "404" ]]; then
-        echo "⚠️  [WARN] Traefik reached, but $service is offline/misconfigured (HTTP $http_code)"
-        return 1  # Erro de aplicação (Backend Down)
-    fi
-
-    echo "$result"
-    return 0
-}
-
-
-
 # helpfull to kill pihole ip when is captur eby other app or container
-docker_container_kill_ip() {
-    local target_ip="$1"
-    local container_name="$2" # optional to cross check relation container=>ip
-    if [[ -z "$target_ip" ]]; then
-        echo "❌ [ERROR] Nenhum IP fornecido." >&2
-        return 1
-    fi
-
-    echo "🔍 Procurando container Docker com o IP: $target_ip..." >&2
-
-    # 1. Encontra o ID do container que possui esse IP em qualquer rede Docker
-    local container_id
-    container_id=$(docker ps -q | xargs -I {} docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' {} | grep -l "$target_ip" | xargs -n1 docker ps -q --filter "ancestor" 2>/dev/null || true)
-    
-    # Método alternativo mais robusto (percorre todos os containers, mesmo parados)
-    container_id=$(docker inspect $(docker ps -aq) --format='{{.Id}} {{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' | grep "$target_ip" | awk '{print $1}')
-
-    if [[ -n "$container_id" ]]; then
-        local _container_name=$(docker inspect -f '{{.Name}}' "$container_id" | sed 's/\///')
-        echo "🔪 Encontrado container: $_container_name ($container_id)" >&2     
-        # Remove o container à força para libertar a interface de rede imediatamente
-        docker rm -f "$container_id" >/dev/null
-        echo "✅ Container $_container_name removido. IP $target_ip deve estar livre agora." >&2        
-        # Pequeno delay para o Kernel limpar a stack de rede
-        sleep 1             
-    else
-        echo "✅ Nenhum container Docker encontrado a usar o IP $target_ip." >&2
-        
-        # Se não é um container, pode ser uma interface órfã (veth)
-        local iface=$(ip -o addr show | grep "$target_ip" | awk '{print $2}')
-        if [[ -n "$iface" ]]; then
-            echo "⚠️ Interface órfã detectada ($iface). Limpando..." >&2
-            sudo ip link delete "$iface" 2>/dev/null || sudo ip addr del "$target_ip/16" dev "$iface"
-        fi
-    fi    
-    if [[ -n $container_name ]] ; then
-        docker network disconnect -f $INTERNAL_DOMAIN $container_name 2>/dev/null
-    fi
-}
 docker_container_kill_ip() {
     local target_ip="$1"
     local expected_name="$2" # Opcional: só mata se o nome coincidir
@@ -1817,23 +1734,12 @@ sanitize_db_name() {
     echo "${input//[^a-zA-Z0-9_]/_}" | tr '[:upper:]' '[:lower:]'
 }
 
-# 3. Refinamento do teu sanitize_var_name (Manter minúsculas e evitar que comece com números se necessário)
-sanitize_var_name() {
-    local input="$1"
-    # Remove espaços extremos
-    input=$(echo "$input" | xargs)
-    # Substitui caracteres inválidos por '_'
-    local sanitized="${input//[^a-zA-Z0-9._-]/_}"
-    # Opcional: Garante que não começa com um número (útil para variáveis de ambiente)
-    [[ "$sanitized" =~ ^[0-9] ]] && sanitized="_$sanitized"
-    echo "$sanitized"
-}
+# 3. Refinamento do teu sanitize_var_name (evitar que comece com números se necessário)
 sanitize_var_name() {
     local var_name=$1
     # 1. Transforma pontos e traços em underscores
     # 2. Remove caracteres não alfanuméricos residuais
-    # 3. Converte para maiúsculas
-    echo "$var_name" | sed 's/[.-]/_/g' | sed 's/[^a-zA-Z0-9_]//g' | tr '[:lower:]' '[:upper:]'
+    echo "$var_name" | sed 's/[.-]/_/g' | sed 's/[^a-zA-Z0-9_]//g' 
 }
 ask_provision() {
     local _type="$1"
@@ -2198,19 +2104,19 @@ core_fn_sort_weights() {
     local rules_json
     rules_json=$(cat <<-'EOF'
 [
-    {"prefix": "core_desired_domain_names_json", "refine": "", "weight": 10, "cat": "CORE-NAMES"},
+    {"prefix": "core_desired_*|desired_*", "refine": "", "weight": 10, "cat": "CORE-NAMES"},
     {"prefix": "core_secret_*|_store_*|_fetch*|*_secret_path",  "weight": 23, "cat": "CORE-SECRET"},
     {"prefix": "core_fn_*",  "weight": 24, "cat": "CORE-CATALOG"},
-    {"prefix": "core_*", "refine": "", "weight": 29, "cat": "CORE-OTHER"},    
+    {"prefix": "core_*|wait4*", "refine": "", "weight": 29, "cat": "CORE-OTHER"},    
     {"prefix": "require_*", "weight": 30, "cat": "ASSERT"},
-    {"prefix": "debug_*|stack_*", "refine": "", "weight": 64, "cat": "DEBUG"},
+    {"prefix": "debug_*|stack_*|show_*|_search_file_lines", "refine": "", "weight": 64, "cat": "DEBUG"},
     {"prefix": "check_*",   "weight": 40, "cat": "RUNTIME"},
     {"prefix": "cr_*",      "weight": 41, "cat": "RUNTIME"},
     {"prefix": "docker_*",  "weight": 50, "cat": "INFRA"},
     {"prefix": "nvidia_*",  "weight": 51, "cat": "INFRA"},
     {"prefix": "ask_*",     "weight": 60, "cat": "INTERACT"},
-    {"prefix": "*function*|*_fn_*", "weight": 65, "cat": "DEV"},
-    {"prefix": "dev_*",     "weight": 70, "cat": "DEV"},
+    {"prefix": "*functions*|*_fn_*", "weight": 65, "cat": "DEV"},
+    {"prefix": "dev_*|detect_*|sanitize_*|to_*",     "weight": 70, "cat": "DEV"},
     {"prefix": "_*",        "weight": 80, "cat": "INTERNAL"},    
     {"prefix": ".",         "weight": 90, "cat": "MISC"}
 ]
@@ -2223,114 +2129,6 @@ EOF
     '
 }
 
-SORT_FALLBACK="MISC"
-## Display index core code function
-core_fn_catalog(){
-    local script_file="${1:-${BASH_SOURCE[0]}}"
-    local rules_generator="${2:-"core_fn_sort_weights"}"
-    
-    # 1. Capturar as regras garantindo que seja um array plano (Flatten)
-    #local rules
-    
-    #rules=$("$rules_generator" | jq -c '.')
-    
-
-    # 3. Criar o array Bash corretamente
-    #local -a orderCatalog
-    #readarray -t orderCatalog <<< "$orderCatalogString"
-
-
-    # Step 2: Generate catalog data
-    local catalog_data
-    catalog_data=$(core_fn_sort_json "$script_file" "$rules_generator" | jq -c .)
-
-    # Print summary header
-    echo "$catalog_data" | jq -r '"Total: \(.total) functions"'
-    echo ""
-
-
-    #echo $catalog_data | jq -r '.by_category |  to_entries'
-    # 1. Extraímos as chaves mantendo a ordem do JSON
-    mapfile -t orderCatalog < <(echo "$catalog_data" | jq -r '.by_category | to_entries[] | .key')
-
-    # 2. Verificamos o resultado
-    #echo "Categorias ordenadas: (${orderCatalog[*]})"
-    #echo "Total de categorias: ${#orderCatalog[@]}"
-    #return 1
-    # Step 3: Iterate over categories and display functions
-    local ctotal prefix search_str refine_str         
-    local acum_names=()
-    for cat in "${orderCatalog[@]}"; do      
-        
-        ctotal=$(echo "$catalog_data" | jq -r --arg cat "$cat" '.by_category[$cat]')
-        if [[ $ctotal -eq 0 ]]; then continue; fi
-
-        #jq -r --arg cat "$cat" '. | select(.cat == $cat) | .prefix'
-        search_str="$("$rules_generator" | jq -r --arg cat "$cat"  '
-            .[] | [ select(.cat == $cat) | .prefix ] 
-              | join("|")
-        ' | paste -sd "|" - | tr -s '|' | sed 's/^|//;s/|$//')"
-        # optional default. no refine
-        refine_str="$("$rules_generator" | jq -r --arg cat "$cat"  '
-            .[] | [ select(.cat == $cat) | .refine ] 
-              | join("|")
-        ' | paste -sd "|" - | tr -s '|' | sed 's/^|//;s/|$//')"
-                
-        # OK show_vars search_str refine_str #||  return 1
-        printf "[%10s] functions: %3d | Prefixes: [%s] Refine: [%s]\n" "$cat" "$ctotal" \"$(echo $search_str)\" \"$(echo $refine_str)\"
-        # OK show_vars script_file rules_generator  || return 1
-        ### LOGIC.
-        {
-            ### zero. filterL2 
-            #### representation of  (previous iter acumudated cat(acum_p_str_pattern,refine_str)) + current(refine_str)
-            local filterL2="|"
-            if [[ ${#refine_str} -gt 0 ]] || [[ ${refine_str} == '""' ]]; then            
-                filterL2+="${refine_str}|"            
-            fi
-            if [[ ${#acum_names[@]} -gt 0 ]]; then    
-                local temp_s=$(printf "|%s" "${acum_names[@]}")
-                temp_s="${temp_s:1}" # Remove o primeiro pipe extra
-                # 2. Se temos padrões, adicionamos à nossa "Blacklist"                      
-                filterL2+="${temp_s}|"             
-            fi
-            ## remove right pipes
-            filterL2=$(echo "$filterL2" | paste -sd "|" - | tr -s '|' | sed 's/^|//;s/|$//')
-            # ok show_vars filterL2
-            
-            # ok echo "core_fn_sort_json \"$script_file\" "$rules_generator" \"$search_str\" '$filterL2'"
-            # ok show_vars "filterL2" "search_str"
-            
-            local part_catalog
-            part_catalog=$(core_fn_sort_json "$script_file" "$rules_generator" "$search_str" "$filterL2" | jq -c .)
-            # okecho $part_catalog | jq .
-
-            local -a fn_names
-            mapfile -t fn_names < <(echo "$part_catalog" | jq -r '.functions[]?.function // empty')        
-            if [[ ${#fn_names[@]} -gt 0 ]]; then
-                acum_names+=("${fn_names[@]}")
-            fi
-
-            # 3. Print do contador atual
-            echo "acc names: ${#acum_names[@]}"
-            # OK (first element. need 2nd to acum/validate refine) 
-            # okecho $part_catalog | jq .
-
-
-        }      
-        ### APRESENTA
-        echo "------------------------------------------------------------"
-        echo "$part_catalog" | jq -r '
-            .functions[] |
-            "  - \u001b[1;32m\(.function)()\u001b[0m -> \u001b[1;34m\(.script):\(.line)\u001b[0m"
-        '     
-        #echo "$part_catalog" | jq -r --arg cat "$cat" '
-        #    .functions[] |
-        #    select(.cat == $cat) |
-        #    "  - \u001b[1;32m\(.function)()\u001b[0m -> \u001b[1;34m\(.script):\(.line)\u001b[0m"
-        #'     
-        echo ""
-    done
-}
 core_fn_catalog() {
     local script_file="${1:-${BASH_SOURCE[0]}}"
     local rules_generator="${2:-"core_fn_sort_weights"}"
@@ -2455,11 +2253,11 @@ core_load_requirements() {
     export VAULT_PKI_CN=${VAULT_PKI_CN-"home2500.local"}
     export VAULT_ROOT_CA_NAME=${VAULT_ROOT_CA_NAME,"root-home2500"}
     export NETWORK_INTERFACE="$NETWORK_INTERFACE"
-    
-    # Docker Friendly: O Docker lida muito bem com montagens vindas de Shared Memory.
+
+    export TRUSTED_CA_FILE="$DEVOPS_DIR/trusted-ca.pem"
+        
     export KEEPASS_ROOT_DIR="vault" 
     export VAULT_ROOT_DIR="secret"
-    export MEM_ROOT_DIR="/dev/shm/home2500"
     export MEM_ROOT_DIR="/run/user/$UID/home2500"
    
     require_locations MEM_ROOT_DIR || {
@@ -2468,7 +2266,7 @@ core_load_requirements() {
     }
 
     # used to extract filtered logs
-    core_desired_domain_names_generate 
+    #core_desired_domain_names_json 
     export SERVICES_PIPE=$(printf "|%s" "${PUBLIC_SERVICES[@]}" | sed 's/^|//')
 
     ### the PROVIDER_SELECT variable must not be exported. please. why ? cause it is used to switch "secret service" selection 007
@@ -2483,7 +2281,8 @@ core_load_requirements() {
         MEM_ROOT_DIR \
         KEEPASS_ROOT_DIR \
         VAULT_ROOT_DIR \
-        NETWORK_INTERFACE
+        NETWORK_INTERFACE \
+        TRUSTED_CA_FILE
 }
 unset SKIP_ROOT_SCRIPT_CODE
 if [[ ! -t 1 && ! -t 2 ]]; then    
