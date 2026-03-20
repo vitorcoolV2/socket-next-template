@@ -84,7 +84,7 @@ services:
       - WEB_OIDC_SCOPE=openid profile email
       - WEB_CONFIG_RELOAD=true
 
-      # CORS & SECURITY (oCIS 8.0 - CSP via yaml file)
+      # CORS & SECURITY (oCIS 8.0 - CSP via separate file)
       - 'PROXY_ALLOW_ORIGINS=https://files.home2500.local,https://auth.home2500.local'
       - PROXY_CSP_CONFIG_FILE_LOCATION=/etc/ocis/csp.yaml
 

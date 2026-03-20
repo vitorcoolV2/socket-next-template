@@ -85,7 +85,7 @@ audit:
     tls_insecure: true
 settings:
   service_account_ids:
-  - 21a3346f-2d1f-4156-82f5-eef1dffdaf61
+    - 21a3346f-2d1f-4156-82f5-eef1dffdaf61
 sharing:
   events:
     tls_insecure: true

@@ -71,8 +71,8 @@ provision_secrets() {
     }
 
     ### Sincronizar credenciais geradas pelo Authentik (módulo oidc)
-    _sync "CLIENT_APP_OIDC_ID" "$CLIENT_APP_NAME/OIDC_ID" || return 1
-    _sync "CLIENT_APP_OIDC_SECRET" "$CLIENT_APP_NAME/OIDC_SECRET" || return 1
+    _sync "OIDC_ID" "$CLIENT_APP_NAME/OIDC_ID" || return 1
+    _sync "OIDC_SECRET" "$CLIENT_APP_NAME/OIDC_SECRET" || return 1
     
     ### Provisionar segredos internos do oCIS (JWT e outros)
     for secret in OCIS_JWT_SECRET OCIS_TRANSFER_SECRET OCIS_MACHINE_AUTH_API_KEY OCIS_SYSTEM_USER_API_KEY OCIS_SERVICE_ACCOUNT_SECRET OCIS_LDAP_BIND_PASSWORD OCIS_IDM_SVC_PASSWORD OCIS_IDM_ADMIN_PASSWORD OCIS_IDM_REVA_PASSWORD OCIS_IDM_IDP_PASSWORD OCIS_IDM_IDM_PASSWORD; do
@@ -128,8 +128,8 @@ provision_secrets() {
     done
 
     local vars_to_export=(
-        CLIENT_APP_OIDC_ID 
-        CLIENT_APP_OIDC_SECRET
+        OIDC_ID 
+        OIDC_SECRET
         OCIS_JWT_SECRET
         OCIS_TRANSFER_SECRET
         OCIS_MACHINE_AUTH_API_KEY
@@ -153,6 +153,7 @@ provision_secrets() {
     )
 
     for var in "${vars_to_export[@]}"; do
+        # Mapping: if the variable is OIDC_ID, check if it's in mem as OIDC_ID
         PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var" >/dev/null || return 1
     done
 
