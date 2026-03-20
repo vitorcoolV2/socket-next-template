@@ -1,7 +1,7 @@
 # Pi-hole configuration file (v6.4.1)
 # Encoding: UTF-8
 # This file is managed by pihole-FTL
-# Last updated on 2026-03-20 11:09:40 UTC
+# Last updated on 2026-03-20 14:51:58 UTC
 
 [dns]
   # Upstream DNS Servers to be used by Pi-hole. If this is not set, Pi-hole will not
@@ -128,7 +128,6 @@
   hosts = [
     "192.168.1.67 auth.home2500.local",
     "192.168.1.67 mailcrab.home2500.local",
-    "192.168.1.67 opencode.home2500.local",
     "192.168.1.67 pihole.app-network",
     "fe80::57b1:b3ff:509e:85d0 pihole.app-network",
     "192.168.1.67 pihole.home2500.local",
@@ -146,11 +145,13 @@
     "172.28.0.7 authentik-worker.app-network",
     "172.28.0.4 mailcrab.app-network",
     "172.28.0.15 backup.app-network",
-    "172.28.0.8 immich-ml.app-network",
     "192.168.1.67 backup.home2500.local",
+    "172.28.0.8 opencode.app-network",
+    "172.28.0.9 immich-ml.app-network",
     "192.168.1.67 fotos.home2500.local",
-    "172.28.0.8 opencode.home2500.local",
-    "172.28.0.8 opencode.app-network"
+    "192.168.1.67 opencode.home2500.local",
+    "172.28.0.13 fotos.home2500.local",
+    "172.28.0.13 immich-server.app-network"
   ] ### CHANGED, default = []
 
   # If set, queries for plain names, without dots or domain parts, are never forwarded to
@@ -1132,7 +1133,7 @@
     #
     # Allowed values are:
     #     A valid Pi-hole password hash
-    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$SW/nW41377k4Ytf84wlkkQ==$LLdT3m+gOxXPxMgNjD2WhNoGfEedXiMi78ce55rphJs=" ### CHANGED, default = ""
+    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$7PzkvVVdn4X29nlxjKxC5w==$cMMZ2zTu26ui/nPYbDAs0XBnkpWY9Qde9zQnxDe2lfQ=" ### CHANGED, default = ""
 
     # Pi-hole 2FA TOTP secret. When set to something different than "", 2FA authentication
     # will be enforced for the API and the web interface. This setting is write-only, you

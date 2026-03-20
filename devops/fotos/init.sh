@@ -81,7 +81,11 @@ on_expose_fail() {
 }
 on_running_fail() {
     echo "running fail"    
-    return 1
+    local secret_file=$(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")            
+         
+    if env $(grep -v '^#' $secret_file | xargs)  docker compose -f "$CLIENT_APP_COMPOSE_FILE" config --quiet; then
+        return 1
+    fi        
     recover_maintenance() {
         echo -e "🔧 Tentando recuperar $CLIENT_APP_CONTAINER_NAME..."
         
