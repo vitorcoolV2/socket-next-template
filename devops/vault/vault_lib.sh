@@ -42,9 +42,8 @@ vault_config_requirements() {
     export VAULT_NS="$VAULT_DIR_NAME.$DOMAIN"
 
     # Lógica de TLS (Chain de confiança)
-    TRUSTED_CA_FILE="$(realpath "$DEVOPS_DIR/trusted-ca.pem")"
-    export TRUSTED_CA_FILE=${TRUSTED_CA_FILE}
-
+    require_vars TRUSTED_CA_FILE
+    
     # Se o endereço for HTTP, ignoramos qualquer lógica de CA
     if [[ "$VAULT_ADDR" == "http://"* ]]; then
         unset VAULT_CACERT
@@ -217,7 +216,8 @@ vault_unseal() {
         if ! require_vars UNSEAL_KEY; then return 1; fi
 
         echo "🔓 Unsealing: $VAULT_ADDR, path: root/UNSEAL_KEY, key: ${UNSEAL_KEY:0:2}" >&2
-        local resp=$(docker exec $VAULT_CONTAINER_NAME vault operator unseal "$UNSEAL_KEY")
+        local resp=$(docker exec -e VAULT_ADDR="$VAULT_ADDR" -i $VAULT_CONTAINER_NAME vault operator unseal "$UNSEAL_KEY")
+        #local resp=$(docker exec $VAULT_CONTAINER_NAME vault operator unseal "$UNSEAL_KEY")
 
         if echo "$resp" | grep -q "Sealed.*false"; then
             echo "✅ Vault unsealed successfully" >&2
