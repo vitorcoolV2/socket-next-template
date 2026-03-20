@@ -22,30 +22,29 @@ source $(realpath ../core.sh) > /dev/null 2>&1 # can we hide completly any conso
 require_vars SERVICES_PIPE
 require_locations TRAEFIK_DIR
 
-
-
 export DOMAIN="${DOMAIN:-"localhost"}"
 export INTERNAL_DOMAIN="${INTERNAL_DOMAIN:-"app-network"}"
 
 require_vars PUBLIC_SERVICES SORTED_DESIRED_NAMES
-require_functions require_service_redirect_auth cr_check_service_https_status
+require_functions require_service_redirect_auth 
 
 # --- DEBUG EXPECTED PUPLIC_SERVICES SECTION ---
-
 tk_show_desired_names() {
     echo -e "\n--- TRAEFIK DESIRED NAMES ---"
     
-    # Se for um array real (PUBLIC_SERVICES)
-    #echo "🔹 Array Services:"
-    for name in ${PUBLIC_SERVICES[@]}; do
-        echo "  - $name"
-    done
+    # Armazena o JSON em uma variável local
+    local json_data
+    json_data=$(core_desired_domain_names_json)
 
-    # Se for a string final formatada (sort_array_names)
-    echo -e "\n🔹 Sorted Desired Names (the core tls key change) :"
-    for name in ${SORTED_DESIRED_NAMES[@]}; do
-        echo "  - $name"
-    done
+    # Validação simples de dependência
+    if ! command -v jq &> /dev/null; then
+        echo "❌ Erro: 'jq' é necessário para processar o JSON."
+        return 1
+    fi
+    # 3. Extra (Útil para Debug): Mostrar o mapeamento de IP
+    echo -e "\n📍 Network Mapping:"
+    echo "$json_data" | jq -r '.[] | "\(.host) -> \(.address)"' | sed 's/^/  /'
+
     echo "-----------------------------"
 }
 tk_show_desired_names
@@ -53,7 +52,7 @@ tk_show_desired_names
 # 2. Define Paths and Configuration
 export TRAEFIK_DIR=${TRAEFIK_DIR}
 
-export TRAEFIK_CERT_DIR=$(realpath "$TRAEFIK_DIR/traefik/certs")
+export TRAEFIK_CERT_DIR="$TRAEFIK_DIR/traefik/certs"
 
 require_vars DEVOPS_DIR
 
@@ -70,7 +69,6 @@ require_vars \
     SORTED_DESIRED_NAMES
 
 
-
 TRAEFIK_CERT_CHAIN="$TRAEFIK_CERT_DIR/traefik-fullchain.pem"
 TRAEFIK_CERT_KEY="$TRAEFIK_CERT_DIR/traefik.key"
 TRAEFIK_CERT_CA_CHAIN="$TRAEFIK_CERT_DIR/ca-chain.pem"
@@ -79,6 +77,7 @@ require_files TRAEFIK_CERT_CHAIN \
     TRAEFIK_CERT_CA_CHAIN || {
         echo "Traefik need tls files, run tk_need_renewal"    
     }
+    
 tk_need_renewal() {
     require_vars SORTED_DESIRED_NAMES TRAEFIK_CERT_CHAIN TRAEFIK_CERT_KEY
     local RENEWAL_NEEDED=false
@@ -246,64 +245,46 @@ tk_test_tls() {
         return 0
     fi
 }
-# use this after docker compose -d
-tk_is_service_ready() {
-    local service="${1:-traefik}"
-    local url="https://${service}.${DOMAIN}"
-    
-    # Capturamos o HTTP Code e o Erro do Curl
-    local response=$(curl -s -k -o /dev/null -w "%{http_code}" -m 2 "$url" 2>&1)
-    local exit_status=$?
-    
-    if [ $exit_status -ne 0 ]; then
-        # Se o curl falhar (Ex: DNS não resolve), mostra um símbolo diferente
-        printf "🌐" # Globo = Erro de Rede/DNS
-        return 1
-    fi
 
-    case "$response" in
-        200|301|302|401|403)
-            echo -e "\n✅ [READY] $service is stable" >&2
-            return 0
-            ;;
-        502|503|504|404)
-            printf "☁️ " >&2 # Backend a carregar
-            return 1
-            ;;
-        *)
-            printf "❓($response) " >&2
-            return 1
-            ;;
-    esac    
-}
+tk_test_authentik_outpost() {
+    local service_list=$(echo "$SORTED_DESIRED_NAMES" | tr ',' ' ')
 
-tk_wait4_service_ready(){
-    local service="${1:-traefik}"
-    local max_attempts=${2:-300} # usa : 1 para pausas de 2 segundos
-    local attempt=1
-    local start_time=$(date +%s) # Captura o início em segundos Unix
-    
-    echo "⏳ Waiting for Traefik to route $service..." >&2
-
-    # Lógica: Enquanto a função retornar ERRO (1), continua o loop
-    while ! tk_is_service_ready "$service"; do
-        if [ $attempt -ge $max_attempts ]; then
-            local end_time=$(date +%s)
-            local duration=$((end_time - start_time))
-            echo -e "\n🛑 Timeout reached after ${duration}s. $service never stabilized." >&2
-            return 1
-        fi
-
-        sleep 2
-        ((attempt++))
+    for sd in $service_list; do
+        echo -n "🔍 Testing: $sd "        
+        core_http_url_status "https://$sd"
     done
+}
+tk_test_authentik_outpost() {
+    echo -e "\n--- 🛡️  AUTHENTIK OUTPOST HEALTH CHECK ---"
+    
+    # Converte a lista separada por vírgulas em um array real do Bash
+    local service_list=(${SORTED_DESIRED_NAMES//,/ })
 
-    local end_time=$(date +%s)
-    local duration=$((end_time - start_time))
+    for sd in "${service_list[@]}"; do
+        # Formata a URL (assume https se não especificado)
+        local url="https://$sd"
+        
+        # Executa o status e captura o código de saída
+        # Corrigido o redirecionamento para silenciar a função interna
+        core_http_url_status "$url" >/dev/null 2>&1
+        local status=$?
 
-    # Se saiu do loop, é porque o tk_is_service_ready retornou 0
-    echo -e "\n🚀 $service is online! (Tempo decorrido: ${duration}s)" >&2
-    return 0
+        # Escolha do ícone baseado no status (reutilizando sua lógica)
+        local icon="❌"
+        case $status in
+            0)   icon="✅" ;;
+            7)   icon="🔌" ;; # Connection Refused
+            28)  icon="🕒" ;; # Timeout
+            144) icon="🔗"; last_error="SSL/TLS Error or Interrupted" ;;
+            148) icon="🚧"; last_error="No Route to Host / Backend Down" ;;
+            502) icon="🧱" ;; # Bad Gateway
+            *)   icon="❌ $status"; last_error="Code $status" ;;
+        esac
+
+        # Saída limpa em uma linha por serviço
+        printf "  %-30s [%-3s] %s\n" "$sd" "$status" "$icon"
+    done
+    echo "------------------------------------------"
 }
 
 tk_check_renewal() {
@@ -356,33 +337,6 @@ tk_logs_cert_tls_error() {
     curl -vIk https://traefik.home2500.local --resolve traefik.home2500.local:443:127.0.0.1
 
     require_service_redirect_auth traefik
-}
-
-
-tk_test_authentik_outpost() {
-    require_vars "PUBLIC_SERVICES_LIST" "DOMAIN" "VAULT_CACERT"
-    require_functions "cr_check_service_https_status"
-    
-    echo "--- Testando conectividade HTTP/HTTPS por serviço ---"  >&2
-    local errorsFound=0
-    local 
-
-    for service in $PUBLIC_SERVICES_LIST; do
-        echo "$service " >&2
-        if ! cr_check_service_https_status "$service"; then
-            errorsFound=$((errorsFound + 1))
-        fi
-
-    done
-
-    if [ "$errorsFound" -eq 0 ]; then
-        echo "============================================================"  >&2
-        echo "🚀 os serviços estão acessíveis!"  >&2
-        return 0
-    else
-        echo "❌ Falhas detectadas em $errorsFound serviço(s)."  >&2
-        return 1
-    fi
 }
 
 ##### SWITCH MODE "unprotected" to "authentik"
@@ -449,7 +403,6 @@ test_2_authentic_routes() {
     tk_test_tls
     tk_test_authentik_outpost
 }
-
 
 test_AUTHENTIK_TRAEFIK() {
     
