@@ -1,0 +1,115 @@
+services:
+  ocis-server:
+    container_name: ocis-server
+    image: owncloud/ocis:latest
+    restart: always
+    networks:
+      - app-network
+    extra_hosts:
+      - 'auth.home2500.local:172.28.0.11'
+      - 'files.home2500.local:172.28.0.11'
+    volumes:
+      - ./data:/var/lib/ocis
+      - ./config:/etc/ocis
+      - /etc/localtime:/etc/localtime:ro
+    environment:
+      # O oCIS suporta modo "insecure" false apenas se servido atrás do proxy TLS
+      - OCIS_INSECURE=true
+      - OCIS_URL=https://files.home2500.local
+      - PROXY_HTTP_ADDR=0.0.0.0:9200
+      - PROXY_ENABLE_TLS=false
+      - PROXY_TLS=false
+      - OCIS_LOG_LEVEL=debug
+      - OCIS_CERTIFICATE_AUTHORITIES=/etc/ocis/trusted-ca.pem
+
+      # SEGREDOS CRÍTICOS PARA O OCIS
+      - OCIS_JWT_SECRET=${OCIS_JWT_SECRET}
+      - OCIS_TRANSFER_SECRET=${OCIS_TRANSFER_SECRET}
+      - OCIS_MACHINE_AUTH_API_KEY=${OCIS_MACHINE_AUTH_API_KEY}
+      - OCIS_SYSTEM_USER_ID=${OCIS_SYSTEM_USER_ID}
+      - OCIS_SYSTEM_USER_API_KEY=${OCIS_SYSTEM_USER_API_KEY}
+      - OCIS_SERVICE_ACCOUNT_ID=${OCIS_SERVICE_ACCOUNT_ID}
+      - OCIS_SERVICE_ACCOUNT_SECRET=${OCIS_SERVICE_ACCOUNT_SECRET}
+      - OCIS_LDAP_BIND_PASSWORD=${OCIS_LDAP_BIND_PASSWORD}
+
+      # GLOBAL OVERRIDES (oCIS 8.0)
+      - OCIS_IDP_PASSWORD=${OCIS_IDM_IDP_PASSWORD}
+      - OCIS_ADMIN_PASSWORD=${OCIS_IDM_ADMIN_PASSWORD}
+      - OCIS_IDM_PASSWORD=${OCIS_IDM_IDM_PASSWORD}
+      - OCIS_REVA_PASSWORD=${OCIS_IDM_REVA_PASSWORD}
+
+      # SERVICE SPECIFIC BIND (Fix for Graph/IDP/Auth-Service/Proxy)
+      - AUTH_SERVICE_SERVICE_ACCOUNT_ID=${OCIS_SERVICE_ACCOUNT_ID}
+      - PROXY_SERVICE_ACCOUNT_ID=${OCIS_SERVICE_ACCOUNT_ID}
+      - IDP_LDAP_BIND_PASSWORD=${OCIS_LDAP_BIND_PASSWORD}
+      - GRAPH_LDAP_BIND_PASSWORD=${OCIS_LDAP_BIND_PASSWORD}
+
+      # IDM SERVICE PASSWORDS (oCIS 8.0 strict mode)
+      - IDM_ADMIN_PASSWORD=${OCIS_IDM_ADMIN_PASSWORD}
+      - IDM_SVC_PASSWORD=${OCIS_IDM_SVC_PASSWORD}
+      - IDM_IDM_PASSWORD=${OCIS_IDM_IDM_PASSWORD}
+      - IDM_REVA_PASSWORD=${OCIS_IDM_REVA_PASSWORD}
+      - IDM_IDP_PASSWORD=${OCIS_IDM_IDP_PASSWORD}
+
+      # ALIASES FOR IDM SERVICE USERS (oCIS 8.0 strict mode)
+      - IDM_SERVICE_USER_PASSWORDS_ADMIN_PASSWORD=${OCIS_IDM_ADMIN_PASSWORD}
+      - IDM_SERVICE_USER_PASSWORDS_IDM_PASSWORD=${OCIS_IDM_IDM_PASSWORD}
+      - IDM_SERVICE_USER_PASSWORDS_IDP_PASSWORD=${OCIS_IDM_IDP_PASSWORD}
+      - IDM_SERVICE_USER_PASSWORDS_REVA_PASSWORD=${OCIS_IDM_REVA_PASSWORD}
+
+      - IDM_CREATE_DEMO_USERS=false
+
+      - GRAPH_APPLICATION_ID=${OCIS_GRAPH_APPLICATION_ID}
+
+      - STORAGE_USERS_MOUNT_ID=${STORAGE_USERS_MOUNT_ID}
+      - STORAGE_METADATA_MOUNT_ID=${STORAGE_METADATA_MOUNT_ID}
+      - STORAGE_SHARES_MOUNT_ID=${STORAGE_SHARES_MOUNT_ID}
+      - GATEWAY_STORAGE_USERS_MOUNT_ID=${GATEWAY_STORAGE_USERS_MOUNT_ID}
+      - GATEWAY_STORAGE_METADATA_MOUNT_ID=${GATEWAY_STORAGE_METADATA_MOUNT_ID}
+      - GATEWAY_STORAGE_SHARES_MOUNT_ID=${GATEWAY_STORAGE_SHARES_MOUNT_ID}
+
+      # CONFIGURAÇÃO OIDC NATIVA
+      - OCIS_OIDC_ISSUER=https://auth.home2500.local/application/o/files/
+      - OCIS_OIDC_INSECURE=true
+      - OCIS_OIDC_SKIP_VERIFY=true
+      - PROXY_OIDC_INSECURE=true
+      - PROXY_OIDC_CLIENT_ID=${CLIENT_APP_OIDC_ID}
+      - PROXY_OIDC_CLIENT_SECRET=${CLIENT_APP_OIDC_SECRET}
+      - PROXY_OIDC_REWRITE_WELL_KNOWN=true
+      - PROXY_OIDC_ACCESS_TOKEN_VERIFY_METHOD=jwt
+
+      # WEB FRONTEND OIDC (Força o browser a usar o Authentik)
+      - WEB_OIDC_CLIENT_ID=${CLIENT_APP_OIDC_ID}
+      - WEB_OIDC_ISSUER=https://auth.home2500.local/application/o/files/
+      - WEB_OIDC_SCOPE=openid profile email
+      - WEB_CONFIG_RELOAD=true
+
+      # CORS & SECURITY (oCIS 8.0 Directives)
+      - 'PROXY_ALLOW_ORIGINS=https://files.home2500.local,https://auth.home2500.local'
+      - "PROXY_CSP_DIRECTIVES_FONT_SRC='self' data:"
+      - "PROXY_CSP_DIRECTIVES_SCRIPT_SRC='self' 'unsafe-inline' 'unsafe-eval'"
+      - "PROXY_CSP_DIRECTIVES_CONNECT_SRC='self' blob: https://raw.githubusercontent.com/owncloud/awesome-ocis/ https://auth.home2500.local"
+
+      # WEB CSP (Double protection)
+      - "WEB_CSP_DIRECTIVES_FONT_SRC='self' data:"
+      - "WEB_CSP_DIRECTIVES_SCRIPT_SRC='self' 'unsafe-inline' 'unsafe-eval'"
+      - "WEB_CSP_DIRECTIVES_CONNECT_SRC='self' blob: https://raw.githubusercontent.com/owncloud/awesome-ocis/ https://auth.home2500.local"
+
+      - PROXY_AUTOPROVISION_ACCOUNTS=true
+      - PROXY_ROLE_ASSIGNMENT_DRIVER=oidc
+      - PROXY_ENABLE_BASIC_AUTH=false
+
+      # DESATIVAR SERVIÇOS DE IDENTIDADE INTERNOS (Usar Authentik em vez disso)
+      - OCIS_EXCLUDE_RUN_SERVICES=idp,idm
+
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.ocis.rule=Host(`files.home2500.local`)'
+      - 'traefik.http.routers.ocis.entrypoints=websecure'
+      - 'traefik.http.routers.ocis.tls=true'
+      # O oCIS tem OIDC nativo, portanto não usamos middleware de autenticação do Traefik
+      - 'traefik.http.services.ocis.loadbalancer.server.port=9200'
+
+networks:
+  app-network:
+    external: true
