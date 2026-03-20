@@ -18,10 +18,6 @@ else
     return 1
 fi
 
-# Override global para evitar erros de permissão em /run/user/1000 (deve ser feito APÓS carregar o core.sh)
-export MEM_ROOT_DIR="/dev/shm/home2500"
-mkdir -p "$MEM_ROOT_DIR"
-chmod 700 "$MEM_ROOT_DIR" 2>/dev/null || true
 
 context() {
     require_vars \
@@ -75,8 +71,8 @@ provision_secrets() {
     }
 
     ### Sincronizar credenciais geradas pelo Authentik (módulo oidc)
-    _sync "CLIENT_APP_OIDC_ID" "$CLIENT_APP_NAME/CLIENT_APP_OIDC_ID" || return 1
-    _sync "CLIENT_APP_OIDC_SECRET" "$CLIENT_APP_NAME/CLIENT_APP_OIDC_SECRET" || return 1
+    _sync "CLIENT_APP_OIDC_ID" "$CLIENT_APP_NAME/OIDC_ID" || return 1
+    _sync "CLIENT_APP_OIDC_SECRET" "$CLIENT_APP_NAME/OIDC_SECRET" || return 1
     
     ### Provisionar segredos internos do oCIS (JWT e outros)
     for secret in OCIS_JWT_SECRET OCIS_TRANSFER_SECRET OCIS_MACHINE_AUTH_API_KEY OCIS_SYSTEM_USER_API_KEY OCIS_SERVICE_ACCOUNT_SECRET OCIS_LDAP_BIND_PASSWORD OCIS_IDM_SVC_PASSWORD OCIS_IDM_ADMIN_PASSWORD OCIS_IDM_REVA_PASSWORD OCIS_IDM_IDP_PASSWORD OCIS_IDM_IDM_PASSWORD; do
@@ -172,7 +168,9 @@ on_expose_fail() { return 1; }
 on_running_fail() { echo "running fail"; return 1; }
 on_compose_fail() { return 1; }
 on_provision_secrets_fail() { provision_secrets; return 1; }
-on_vault_login_fail() { vault_request_stew_token || return 1; }
+on_vault_login_fail() { 
+    vault_request_stew_token || return 1
+}
 on_name_register_fail() { return 1; }
 on_authentik_login_fail() { require_vars AUTHENTIK_API_TOKEN && ak_api_token_validate || return 1; }
 on_blue_apply_fail() { return 1; }

@@ -73,27 +73,20 @@ services:
       - OCIS_OIDC_INSECURE=true
       - OCIS_OIDC_SKIP_VERIFY=true
       - PROXY_OIDC_INSECURE=true
-      - PROXY_OIDC_CLIENT_ID=${CLIENT_APP_OIDC_ID}
-      - PROXY_OIDC_CLIENT_SECRET=${CLIENT_APP_OIDC_SECRET}
+      - PROXY_OIDC_CLIENT_ID=${OIDC_ID}
+      - PROXY_OIDC_CLIENT_SECRET=${OIDC_SECRET}
       - PROXY_OIDC_REWRITE_WELL_KNOWN=true
       - PROXY_OIDC_ACCESS_TOKEN_VERIFY_METHOD=jwt
 
       # WEB FRONTEND OIDC (Força o browser a usar o Authentik)
-      - WEB_OIDC_CLIENT_ID=${CLIENT_APP_OIDC_ID}
+      - WEB_OIDC_CLIENT_ID=${OIDC_ID}
       - WEB_OIDC_ISSUER=https://auth.home2500.local/application/o/files/
       - WEB_OIDC_SCOPE=openid profile email
       - WEB_CONFIG_RELOAD=true
 
-      # CORS & SECURITY (oCIS 8.0 Directives)
+      # CORS & SECURITY (oCIS 8.0 - CSP via yaml file)
       - 'PROXY_ALLOW_ORIGINS=https://files.home2500.local,https://auth.home2500.local'
-      - "PROXY_CSP_DIRECTIVES_FONT_SRC='self' data:"
-      - "PROXY_CSP_DIRECTIVES_SCRIPT_SRC='self' 'unsafe-inline' 'unsafe-eval'"
-      - "PROXY_CSP_DIRECTIVES_CONNECT_SRC='self' blob: https://raw.githubusercontent.com/owncloud/awesome-ocis/ https://auth.home2500.local"
-
-      # WEB CSP (Double protection)
-      - "WEB_CSP_DIRECTIVES_FONT_SRC='self' data:"
-      - "WEB_CSP_DIRECTIVES_SCRIPT_SRC='self' 'unsafe-inline' 'unsafe-eval'"
-      - "WEB_CSP_DIRECTIVES_CONNECT_SRC='self' blob: https://raw.githubusercontent.com/owncloud/awesome-ocis/ https://auth.home2500.local"
+      - PROXY_CSP_CONFIG_FILE_LOCATION=/etc/ocis/csp.yaml
 
       - PROXY_AUTOPROVISION_ACCOUNTS=true
       - PROXY_ROLE_ASSIGNMENT_DRIVER=oidc
