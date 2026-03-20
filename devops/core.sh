@@ -591,8 +591,8 @@ require_ns_resolve() {
         local _ip="$2"
         local ns_output
         require_vars _host
-        # 1. Tenta resolver o host
-        ns_output=$(nslookup "$_host" 2>&1)
+        # 1. Tenta resolver o host (com timeout de 3s)
+        ns_output=$(timeout 3 nslookup "$_host" 2>&1)
         local exit_code=$?
 
         # 2. Verifica falha de resolução (NXDOMAIN, etc)
@@ -786,8 +786,8 @@ docker_container_name_ip() {
     DEBUG=false require_vars container_name network_name || return 1
     
     local _ip
-    # Filtramos especificamente pela rede que nos interessa para evitar IPs colados
-    _ip=$(docker inspect -f "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.IPAddress}}{{end}}" "${container_name}" 2>/dev/null)
+    # Filtramos especificamente pela rede que nos interessa para evitar IPs colados (com timeout)
+    _ip=$(timeout 3 docker inspect -f "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.IPAddress}}{{end}}" "${container_name}" 2>/dev/null)
     
     local ipv4_regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
     
@@ -805,9 +805,9 @@ docker_container_name_ports() {
     local port_idx="$2" 
     
     # 1. Extração via Go Template (mais eficiente que múltiplos pipes)
-    # Pegamos as chaves (portas) de NetworkSettings.Ports ou Config.ExposedPorts
+    # Pegamos as chaves (portas) de NetworkSettings.Ports ou Config.ExposedPorts (com timeout)
     local raw_ports
-    raw_ports=$(docker inspect -f '
+    raw_ports=$(timeout 3 docker inspect -f '
         {{- $p := .NetworkSettings.Ports -}}
         {{- if not $p }}{{ $p = .Config.ExposedPorts }}{{ end -}}
         {{- range $k, $v := $p }}{{ $k }} {{ end -}}' "$container_name" 2>/dev/null)
@@ -939,37 +939,45 @@ require_service_redirect_auth() {
         local expected_auth_url="https://auth.${DOMAIN}"
         local service_url="https://${_service}.${DOMAIN}"
         
-        # 1. Capturamos o HTTP Code E a URL Final
-        # Usamos -L para seguir redirects e ver onde paramos
-        local response
-        response=$(curl -I -s -L -k -m 5 "$service_url" -w "%{http_code} %{url_effective}" -o /dev/null)
+        # 1. Capturamos SEM seguir redirects (-L) para ver o primeiro hop
+        local first_response
+        first_response=$(curl -I -s -k -m 5 "$service_url" -w "%{http_code} %{redirect_url}" -o /dev/null)
         local exit_status=$?
 
         if [[ $exit_status -ne 0 ]]; then
             return 2 # Falha de rede/DNS/Timeout
         fi
 
-        local http_code=$(echo "$response" | cut -d' ' -f1)
-        local final_url=$(echo "$response" | cut -d' ' -f2)
+        local first_code=$(echo "$first_response" | cut -d' ' -f1)
+        local first_redirect=$(echo "$first_response" | cut -d' ' -f2)
 
-        # DEBUG para o teu sistema de logs
-        #show_vars _service http_code final_url expected_auth_url
+        # 2. Se redirectou, verificar se é para auth.$DOMAIN
+        # Redirect = 301, 302, 303, 307, 308
+        if [[ "$first_code" =~ ^(301|302|303|307|308)$ ]]; then
+            # Verificar se o redirect vai para auth.$DOMAIN
+            if [[ "$first_redirect" == "$expected_auth_url"* ]] || \
+               [[ "$first_redirect" == "${expected_auth_url%:*}"* ]]; then
+                return 0 # PROTECTED - Redirect para Authentik
+            fi
+        fi
 
-        # 2. Lógica de Validação
-        # CASO A: Redirecionou para o Authentik (Padrão Proxy/ForwardAuth)
+        # 3. Seguir redirects para verificar destino final (para apps com OIDC nativo)
+        local final_response
+        final_response=$(curl -I -s -L -k -m 5 "$service_url" -w "%{http_code} %{url_effective}" -o /dev/null)
+        local final_code=$(echo "$final_response" | cut -d' ' -f1)
+        local final_url=$(echo "$final_response" | cut -d' ' -f2)
+
+        # CASO B: 401 exige autenticação
+        if [[ "$final_code" == "401" ]]; then
+            return 0 # PROTECTED (Exige auth)
+        fi
+
+        # CASO C: Se final_url é auth.$DOMAIN (RedirectAuth funcionou)
         if [[ "$final_url" == "$expected_auth_url"* ]]; then
             return 0 # PROTECTED
         fi
 
-        # CASO B: OIDC Nativo (Immich)
-        # Se retornar 401 ou se a URL final ainda for a da app mas o código for 401/302 
-        # para um path de login, consideramos protegido.
-        # No caso do Immich sem SSO, ele retornaria 200 na página de setup/login.
-        if [[ "$http_code" == "401" ]]; then
-            return 0 # PROTECTED (Exige auth)
-        fi
-
-        return 1 # EXPOSED (Entrou direto com 200 sem passar pelo Authentik)
+        return 1 # EXPOSED (Entrou direto sem passar pelo Authentik)
     }
 
     for service_name in "$@"; do        
@@ -1437,7 +1445,7 @@ core_secret_export2_env_vars() {
     echo "VARS: ${VARS_TO_PROCESS[@]}"
     show_vars service_nsp || return 1
 
-    # Mapeia o caminho no /dev/shm
+    # Mapeia o caminho no /run/user/$UID/home2500/*
     local _APP_SECRET_ENV
     _APP_SECRET_ENV="$(core_secret_mapper_mem "$service_nsp" ".secret")"    
     ## _MEM_X_DIR || the secrey path not yet the secret content

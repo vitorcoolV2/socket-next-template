@@ -76,13 +76,13 @@ restart_vault() {
 restart_vault && echo "VAULT ONLINE" || return 1
 
 ###### TRAEFIK, AUTHENTIK, 
-source $(core_resolve_file "traefik/_0.traefik_lib.sh")
+source $(core_resolve_file "traefik/_0.traefik_lib.sh") > /dev/null
 tk_up 
 ph api auth
 ph api dns sync
 
 ###### AUTHENTIK RESTART
-source $(core_resolve_file "authentik/_0-authentik_lib.sh") 
+source $(core_resolve_file "authentik/_0-authentik_lib.sh") > /dev/null
 ak_up
 ph api auth
 ph api dns sync
@@ -115,7 +115,7 @@ set_authentik_theme
 
 # review stack when authentik https app can be deployed by understandable composition manifest
 
-COMPOSE_STACK_FILES=( "backup" "fotos" "files")
+COMPOSE_STACK_FILES=( "opencode" "backup" "fotos" "files")
 
 upCompose() {
   local name=$1
@@ -129,7 +129,7 @@ upCompose() {
 
     cd $project
     . ./init.sh > /dev/null 
-    . ./init.sh 
+    . ./init.sh > /dev/null
     app_up
     sleep 5   
   )
@@ -140,8 +140,10 @@ for file in "${COMPOSE_STACK_FILES[@]}"; do
   upCompose "$file"
 done
 
-
-
+# sync
+ph api auth
+ph api dns sync
+ak_fix_proxied_redir
 
 echo "All services relaunched."
 

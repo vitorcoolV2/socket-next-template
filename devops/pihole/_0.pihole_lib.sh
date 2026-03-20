@@ -99,9 +99,9 @@ ph_api(){
         
         require_vars "PIHOLE_URL" || return 1
         
-        local max_attempts=${2:-5}
+        local max_attempts=${2:-2}
         local attempt=1
-        local wait_time=1  # segundos entre tentativas
+        local wait_time=0.5  # segundos entre tentativas
 
         debug=false 
         require_container_running PIHOLE_CONTAINER_NAME || return 1
@@ -871,7 +871,7 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
 
     echo "" 2>&1
     ph health
-    ph api open
+    #ph api open
 
 fi
 

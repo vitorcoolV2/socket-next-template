@@ -17,37 +17,40 @@
 #                       WITHIN /etc/dnsmasq.d/yourname.conf                      #
 #    (make sure misc.etc_dnsmasq_d is set to true in /etc/pihole/pihole.toml)    #
 #                                                                                #
-#                      Last updated: 2026-03-20 14:41:52 UTC                     #
+#                      Last updated: 2026-03-20 19:28:34 UTC                     #
 #                              by FTL version v6.4.1                             #
 #                                                                                #
 ##################################################################################
 
 192.168.1.67 auth.home2500.local
+192.168.1.67 files.home2500.local
 192.168.1.67 mailcrab.home2500.local
 192.168.1.67 pihole.app-network
 fe80::57b1:b3ff:509e:85d0 pihole.app-network
 192.168.1.67 pihole.home2500.local
 192.168.1.67 traefik.home2500.local
+172.28.0.2 unbound.app-network
 192.168.1.67 vault.home2500.local
 192.168.1.67 whoami.home2500.local
-192.168.1.67 files.home2500.local
-172.28.0.2 unbound.app-network
+192.168.1.67 fotos.home2500.local
+192.168.1.67 backup.home2500.local
+192.168.1.67 opencode.home2500.local
 172.28.0.11 traefik.app-network
 172.28.0.6 vault.app-network
 172.28.0.12 whoami.app-network
 172.28.0.5 authentik-db.app-network
-172.28.0.3 authentik-redis.app-network
+172.28.0.4 authentik-redis.app-network
 172.28.0.10 authentik-server.app-network
 172.28.0.7 authentik-worker.app-network
-172.28.0.4 mailcrab.app-network
-172.28.0.15 backup.app-network
-192.168.1.67 backup.home2500.local
+172.28.0.3 mailcrab.app-network
+172.28.0.8 opencode.home2500.local
 172.28.0.8 opencode.app-network
-172.28.0.9 immich-ml.app-network
-192.168.1.67 fotos.home2500.local
-192.168.1.67 opencode.home2500.local
+172.28.0.15 backup.home2500.local
+172.28.0.15 backup.app-network
 172.28.0.13 fotos.home2500.local
 172.28.0.13 immich-server.app-network
+172.28.0.14 files.home2500.local
+172.28.0.14 ocis-server.app-network
 
 
-# There are 26 entries in this file
+# There are 29 entries in this file

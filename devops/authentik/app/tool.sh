@@ -901,16 +901,17 @@ app_up_names() {
     local service="pihole"
     if require_container_running service; then
        # Garante a biblioteca do Pi-hole
-        declare -f ph_api dns add >/dev/null || source $(core_resolve_file "pihole/_0.pihole_lib.sh") > /dev/null 2>&1
-
+        
         # Verifica se realmente precisamos de mexer no DNS
         # 5. Lógica de Sincronização de DNS
         # Só executa se um dos nomes não resolver para o IP correto
         if ! TARGET_IP="$CLIENT_APP_SERVICE_IP" require_ns_resolve CLIENT_APP_INTERNAL_NS || \
             ! TARGET_IP="$APP_NS_IP" require_ns_resolve CLIENT_APP_NS $APP_NS_IP; then
-            echo "🌐 Configurando DNS no Pi-hole para $CLIENT_APP_NAME..." >&2    
+            echo "🌐 Configurando DNS no Pi-hole para $CLIENT_APP_NAME..." >&2   
+            declare -f ph_api  >/dev/null || source $(core_resolve_file "pihole/_0.pihole_lib.sh") > /dev/null 2>&1
+ 
             # Rotaciona senha e autentica (com seus retries internos)
-            ph api open || return 1
+            #ph api open || return 1
             if ph api auth; then
                 # Registra o Domínio Público no IP do Traefik (Proxy)
                 ph_api dns add "$APP_NS_IP" "$CLIENT_APP_NS"
@@ -1031,7 +1032,6 @@ app_wait4_oidc() {
     echo "🔍 Validando Proteção SSO para $target_service (max $max_attempts tentativas)..." >&2
     
     while [ $attempt -le $max_attempts ]; do
-        # require_service_redirect_auth deve retornar 0 (sucesso) ou 1 (falha)
         if require_service_redirect_auth "$target_service" > /dev/null 2>&1; then
             echo "  ✅ Proteção detetada na tentativa $attempt." >&2
             
@@ -1288,11 +1288,11 @@ tool_stage_workflow() {
     }    
 
     _deploy_secrets__requirements() {   
-        # this handler invoke init.sh deploy_secrets to let use define extra mem provider secrets
+        # this handler invoke optional: init.sh deploy_secrets to let use define extra mem provider secrets
         local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME" 
         if ! require_single_script_function "client_script" "deploy_secrets" 2>/dev/null; then    
             echo -e " \e[31m❌ Missing critical 'deploy_secrets' function in $CLIENT_APP_SCRIPT_NAME\e[0m" >&2
-            return 1
+            return 0
         fi
         deploy_secrets
     }
@@ -1565,9 +1565,7 @@ app_up() {
         local secret_file=$(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")            
         
         if DEBUG=false require_files secret_file; then
-            echo "$CLIENT_APP_NAME .secret: $secret_file" >&2
-            env $(grep -v '^#' $secret_file | xargs) docker compose -f "$CLIENT_APP_COMPOSE_FILE"  config 
-
+            echo "$CLIENT_APP_NAME .secret: $secret_file" >&2            
             env $(grep -v '^#' $secret_file | xargs) docker compose -f "$CLIENT_APP_COMPOSE_FILE" up -d  || return 1
         else            
             docker compose -f "$CLIENT_APP_COMPOSE_FILE" up -d || return 1
