@@ -72,6 +72,7 @@ on_provision_secrets_fail() {
 }
 on_vault_login_fail() {
     vault_request_stew_token || return 1
+    ak_api_token_restore || return 1
 }
 on_name_register_fail() {
     echo "name resolve or registring fail"
