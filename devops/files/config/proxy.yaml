@@ -2,16 +2,44 @@ http:
   addr: 0.0.0.0:9200
 csp:
   directives:
-    connect-src: "'self' blob: https://raw.githubusercontent.com/owncloud/awesome-ocis/ https://auth.home2500.local"
-    script-src: "'self' 'unsafe-inline' 'unsafe-eval'"
-    font-src: "'self' data:"
-    img-src: "'self' data: blob: https://auth.home2500.local"
-    frame-ancestors: "'self' https://auth.home2500.local"
-    frame-src: "'self' blob: https://embed.diagrams.net/"
-    child-src: "'self'"
-    default_src: "'none'"
-    manifest_src: "'self'"
-    media_src: "'self'"
-    object_src: "'self' blob:"
-    style_src: "'self' 'unsafe-inline'"
-    worker_src: "'self' blob:"
+    connect-src:
+      - "'self'"
+      - 'blob:'
+      - 'https://raw.githubusercontent.com/owncloud/awesome-ocis/'
+      - 'https://auth.home2500.local'
+    script-src:
+      - "'self'"
+      - "'unsafe-inline'"
+      - "'unsafe-eval'"
+    font-src:
+      - "'self'"
+      - 'data:'
+    img-src:
+      - "'self'"
+      - 'data:'
+      - 'blob:'
+      - 'https://auth.home2500.local'
+    frame-ancestors:
+      - "'self'"
+      - 'https://auth.home2500.local'
+    frame-src:
+      - "'self'"
+      - 'blob:'
+      - 'https://embed.diagrams.net/'
+    child-src:
+      - "'self'"
+    default_src:
+      - "'none'"
+    manifest_src:
+      - "'self'"
+    media_src:
+      - "'self'"
+    object_src:
+      - "'self'"
+      - 'blob:'
+    style_src:
+      - "'self'"
+      - "'unsafe-inline'"
+    worker_src:
+      - "'self'"
+      - 'blob:'
