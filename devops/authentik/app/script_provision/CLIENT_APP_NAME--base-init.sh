@@ -95,12 +95,12 @@ provision_secrets() {
     require_vars CLIENT_APP_NAME || return 1
     
     (
-        app_create_map_secret_vars "REDIS_PASSWORD=authentik/AUTHENTIK_REDIS__PASSWORD" && \
+        tool_provision__secret_vars "REDIS_PASSWORD=authentik/AUTHENTIK_REDIS__PASSWORD" && \
         core_secret_service_put "$CLIENT_APP_NAME/REDIS_PASSWORD" "$REDIS_PASSWORD" || \
             return 1
     )
 }
-
+PROVIDER_SELECT="vault" core_secret_service_get  "fotos/db_fotos__role_admin"
 deploy_secrets() {
     require_vars CLIENT_APP_NAME || return 1
     core_secret_export2_env_vars "$CLIENT_APP_NAME" \

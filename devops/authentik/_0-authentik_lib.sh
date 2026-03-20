@@ -72,19 +72,16 @@ WHERE oauth2provider_ptr_id = $pk;"
 }
 export -f ak_fix_proxied_redir
 ak_internal_service_ready() {
+    wait4_http_url_ready $AUTHENTIK_INTERNAL_URL > /dev/null || return 1
     local status
-    status=$(curl -s -k "$AUTHENKIT_LOCAL_URL/api/v3/root/config/" | jq -r '.capabilities[0]' 2>/dev/null)
-    
+    status=$(curl -s -k "$AUTHENTIK_INTERNAL_URL/api/v3/root/config/" | jq -r '.capabilities[0]' 2>/dev/null)
     if [[ "$status" == "can_save_media" ]]; then
         return 0 # Ready!
     else
         return 1 # Not ready yet
     fi
 }
-ak_oidc_service_ready() {
-    local status
-    cr_wait4_service_middleware_ready auth || return 1    
-}
+
 ak_wait4_instance() {
     echo "⏳ Waiting for db initialization and Admin user provision in PostgreSQL..." >&2
     
@@ -103,84 +100,13 @@ ak_wait4_instance() {
 }
 
 ak_api_token_validate() {
-    require_vars AUTHENTIK_INTERNAL_URL || return 1
-    
-    ! require_container_running AUTHENTIK_CONTAINER_NAME && {
-        echo "❌ Erro: Instancia authentik server não está a correr."
-        return 1
-    }
-    
-    (
-        PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2> /dev/null
-        # echo "$AUTHENTIK_API_TOKEN"
-        [[ -z "$AUTHENTIK_API_TOKEN" ]] && { echo "❌ [AUTHENTIK] Erro: Token não fornecido." >&2; return 1; }
-
-        local url="$AUTHENTIK_INTERNAL_URL/api/v3/core/users/me/"
-        echo "🔍 Validando conta Authentik via $url..." >&2
-
-        _token__authentik_me_json() {
-            local response
-            response=$(curl -k -s -H "Authorization: Bearer $AUTHENTIK_API_TOKEN" \
-                -H "Accept: application/json" \
-                --connect-timeout 5 \
-                "$url")
-
-            # Se o curl falhar ou a resposta for vazia
-            [[ -z "$response" ]] && { echo "🚫 [AUTHENTIK] Sem resposta valida" >&2; return 1; }
-
-            # Verificar se o JSON contém erro (ex: Invalid Token) antes de passar para o parser
-            if ! echo "$response" | jq -e '.user' >/dev/null 2>&1; then
-                local err_msg=$(echo "$response" | jq -r '.detail // "Resposta inesperada da API"')
-                echo "⚠️ [ERROR] API Authentik: $err_msg" >&2
-                return 1
-            fi
-            
-            echo "$response"
-        }
-
-        _token__eval_me() {
-            local me
-            me=$(_token__authentik_me_json) || return 1
-      
-            # 2. Extração segura usando eval
-            eval "$(echo "$me" | jq -r '
-                .user | 
-                "user_name=" + (.username|@sh) + 
-                "\nis_active=" + (.is_active|tostring) + 
-                "\nemail=" + (.email|@sh) + 
-                "\nis_superuser=" + (.is_superuser|tostring)
-            ')"
-            # Extrair grupos separadamente para evitar problemas de arrays            
-            local groups=$(echo "$me" | jq -r '.user.groups[].name' | paste -sd "," -)
-
-
-            if [[ -n "$user_name" && "$user_name" != "null" ]]; then
-                if [[ "$is_active" == "false" ]]; then
-                    echo "🚫 [ABORT] Conta '$user_name' desativada no Authentik." >&2
-                    return 1
-                fi
-
-                local type_user="User"
-                [[ "$is_superuser" == "true" ]] && type_user="Superuser"
-
-                echo "✅ [SUCCESS] Autenticado ($type_user): $user_name ($email) | Groups: [${groups:-nenhum}]" >&2
-                return 0
-            fi
-
-            echo "⚠️ [ERROR] Falha na validação. Detalhes:" >&2
-            return 1
-        }
-        _token__eval_me
-    ) || return 1
-}
-ak_api_token_validate() {
     require_vars AUTHENTIK_INTERNAL_URL AUTHENTIK_CONTAINER_NAME || return 1
     
     if ! require_container_running "AUTHENTIK_CONTAINER_NAME"; then
         echo "❌ Erro: Instancia authentik server não está a correr." >&2
         return 1
     fi
-    
+        
     # Subshell para isolar o escopo
     (
         PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2>/dev/null
@@ -446,94 +372,6 @@ ak_api_call() {
     fi
 }
 
-ak_reset() {
-    (
-        
-        ak_down
-        #### pihole
-        source $(core_resolve_file "pihole/_0.pihole_lib.sh")     
-        ph_api dns sync_dns       
-
-        #### authentik
-        ak_up    
-
-        #### uuuup TRaefik if not already and updated
-        source $(core_resolve_file "traefik/_0.traefik_lib.sh")
-        tk_check_renewal        
-        local traefik_ip="$(docker_container_name_ip "traefik")"
-        if [[ -z "$traefik_ip" ]]; then
-            echo "❌ [ERRO] Falha ao obter IPs. O container está UP?" >&2
-            tk_up            
-        fi
-        
-        #### ALL UP&aboard
-        ph_api dns sync_dns     
-
-        tk_wait4_service_ready "whoami"|| tk_up
-        
-  
-        
-        cr_wait4_service_middleware_ready "pihole" 20 && {
-            ph_api password disable ## no more sync updates
-        } || {            
-            return 1
-        }        
-        ak_fix_proxied_redir  
-        # 1. Converte o array numa string separada por |
-        # O sed remove o último pipe que fica a sobrar
-        require_vars SERVICES_PIPE
-        tk_test_authentik_outpost | grep -E "200|$SERVICES_PIPE" | awk -F'|' '{print $1 " | " $3}' | cut -d'?' -f1            
-        
-    )   
-    vault_validate_token || vault_request_stew_token
-
-    source $(core_resolve_file "authentik/theme/_builder.sh")
-    _build_brand_theme "emotion"  
-}
-# Sequência sugerida para o terminal
-ak_reboot() {
-        cd $AUTHENTIK_DIR
-        ak_down
-
-        # VERIFY formation HOSTS to TLS certificate
-        
-        source $(core_resolve_file "pihole/_0.pihole_lib.sh")
-        cd ../pihole
-        docker compose down
-        require_vars PIHOLE_DNS_IP    
-        set +e
-        docker_container_kill_ip "$PIHOLE_DNS_IP"
-        ph_up 
-          
-        source $(core_resolve_file "traefik/_0.traefik_lib.sh")
-        tk_up
-        tk_need_renewal && tk_renew_certs   
-
-        ak_up
-   
-        ph_api password rotate 
-        ph_api auth   
-        ph_api dns sync     
-
-        tk_wait4_service_ready "whoami"
-
-                    
-        cr_wait4_service_middleware_ready "auth" 2 || {          
-            echo "fail to start cr_wait4_service_middleware_ready auth"   >&2
-            return 1                         
-        }      
-
-        SERVICES_PIPE=$(printf "|%s" "${PUBLIC_SERVICES[@]}" | sed 's/^|//')          
-        tk_test_authentik_outpost | grep -E "200|default-authentication-flow|outpost.goauthentik.io|$SERVICES_PIPE" 
-        
-        source $(core_resolve_file "authentik/theme/_builder.sh")
-        _build_brand_theme "emotion"     
-
-        # launch browser:
-        #   - musica  : https://www.youtube.com/watch?v=fKFbnhcNnjE&list=RDfKFbnhcNnjE&start_radio=1
-        #   - your home2500 service
-    
-}
 ak_system_health() {
     echo "🩺 --- AUTHENTIK SYSTEM SANITY CHECK --- 🩺"
     local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
@@ -719,13 +557,11 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     if [[ "$AK_SKIP_INTERACTION" != "true" ]]; then
         #ak_login
         # Sugestão de comandos após o source bem sucedido
-        
-        
-        ak_fn_catalog
+                    
 
         echo -e "\n📦 Authentik module loaded. Available commands:"
         echo -e "   \e[1;34mak_<tab>\e[0m to list functions"
-        #list_functions "${BASH_SOURCE[0]}" "ak*";     
+        echo "ak_fn_catalog"
     else
         echo "⚠️  Non-interactive mode: skipping token validation." >&2
     fi

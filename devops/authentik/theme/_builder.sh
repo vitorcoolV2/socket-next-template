@@ -81,7 +81,7 @@ _authentik_asset_exist_published() {
         local asset_url=$(map_asset_to_url "$dest")
         
         # Fazemos o check e guardamos o status
-        local status=$(cr_curl_https_status "$asset_url" 2>/dev/null | head -n 1)
+        local status=$(core_http_url_status "$asset_url" 2>/dev/null | head -n 1)
         
         if [[ "$status" == *"200"* ]]; then
             echo "✅ PUBLISHED: $asset_url ($status)" >&2
@@ -130,7 +130,7 @@ _copy_authentik_branding_assets() {
         local asset_url=$(map_asset_to_url "$dest")
         echo -n "🌍 $asset_url: "
         # head -n 1 para mostrar apenas o status HTTP (200 OK)
-        cr_curl_https_status "$asset_url" 2>/dev/null | head -n 1
+        core_http_url_status "$asset_url" 2>/dev/null | head -n 1
     done
 }
 map_asset_to_url() {
