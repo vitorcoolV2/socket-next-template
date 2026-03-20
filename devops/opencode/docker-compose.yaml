@@ -30,7 +30,7 @@ services:
       ### bash
       - /home/${USER}/.bashrc:/home/${USER}/.bashrc
       # Docker socket mount for DinD (Docker in Docker) scenarios
-      # - /var/run/docker.sock:/var/run/docker.sock
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DEBIAN_FRONTEND=noninteractive
       - TERM=xterm-256color

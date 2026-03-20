@@ -36,21 +36,6 @@ proxy:
   oidc:
     insecure: true
   insecure_backends: true
-  csp:
-    directives:
-      child_src: "'self'"
-      connect_src: "'self' blob: https://raw.githubusercontent.com/owncloud/awesome-ocis/ https://auth.home2500.local"
-      default_src: "'self'"
-      font_src: "'self' data:"
-      frame_ancestors: "'self' https://auth.home2500.local"
-      frame_src: "'self' https://auth.home2500.local"
-      img_src: "'self' data: blob: https://auth.home2500.local"
-      manifest_src: "'self'"
-      media_src: "'self'"
-      object_src: "'none'"
-      script_src: "'self' 'unsafe-inline' 'unsafe-eval'"
-      style_src: "'self' 'unsafe-inline'"
-      worker_src: "'self' blob:"
   service_account:
     service_account_id: 21a3346f-2d1f-4156-82f5-eef1dffdaf61
     service_account_secret: n4Re9RC%=dWDZvUV*4EvxpVs8zvm@BOq
