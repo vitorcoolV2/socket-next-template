@@ -439,7 +439,7 @@ _db_role_set_credentials() {
     local role="${1}" # admin | rw | ro
     local pass="${2}"
     # 1. Validações Iniciais
-    show_vars \
+    require_vars \
         CLIENT_APP_NAME \
         role pass || return 1
     
@@ -462,7 +462,7 @@ _db_role_set_credentials() {
     local role_pass="${CLIENT_APP_DB_ROLE_PASS}"
     local role_pass_value="${!role_pass}"
     echo "🔑 Provisionando Role '$role_name' no Postgres..." >&2
-    show_vars CLIENT_APP_DB_ROLE_NAME POSTGRES_USER POSTGRES_PASSWORD CLIENT_APP_DB_ROLE_PASS role_name role_pass role_pass_value || return 1
+    require_vars CLIENT_APP_DB_ROLE_NAME POSTGRES_USER POSTGRES_PASSWORD CLIENT_APP_DB_ROLE_PASS role_name role_pass role_pass_value || return 1
 
     # 5. Execução SQL Idempotente
     pg_exec "DO \$$ 

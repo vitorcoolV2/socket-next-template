@@ -1454,10 +1454,15 @@ core_secret_export2_env_vars() {
 
     local val_content
     for var_name in "${VARS_TO_PROCESS[@]}"; do
-        # ok - show_vars service_ns var_name
-        # 1. Exporta a secret para mem
         if PROVIDER_SELECT="mem" _get_service_secret_path "$service_nsp/$var_name" 2> /dev/null; then
             val_content="${!var_name}"
+            
+            case "$var_name" in
+                *_PASS|*_SECRET|*_KEY|DB_URL)
+                    val_content=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$val_content', safe=''))")
+                    ;;
+            esac
+            
             echo "${var_name}=${val_content}" >> "$_APP_SECRET_ENV"
             echo "   ✅ Added $service_nsp/$var_name" >&2 > /dev/null
         else
