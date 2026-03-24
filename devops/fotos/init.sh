@@ -118,6 +118,7 @@ on_compose_fail() {
     echo "compose config fail"
 
     echo "review compose file: $(core_relative_path2 $CLIENT_APP_COMPOSE_FILE)"    
+    tree /run/user/1000/home2500/$CLIENT_APP_NAME
     return 1
 }
 on_provision_secrets_fail() {  
@@ -134,7 +135,8 @@ on_name_register_fail() {
 }
 on_authentik_login_fail() {
     echo "authentik api token"
-    require_vars AUTHENTIK_API_TOKEN && ak_api_token_validate || return 1
+    kp test && kp open
+    ak_api_token_validate || ak_api_token_generate return 1
 }
 on_blue_apply_fail() {
     echo "blue apply fail"
@@ -177,6 +179,10 @@ deploy_secrets() {
     return 0
 }
 on_deploy_secrets_fail() {
+    return 1
+}
+
+on_provision_oidc_fail() {
     return 1
 }
 

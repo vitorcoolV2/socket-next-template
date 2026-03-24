@@ -8,7 +8,8 @@ services:
     environment:
       # BASE DE DADOS
       # Aqui usamos o nome do serviço Postgres e a senha injetada pelo teu script de secrets
-      - DB_URL=postgresql://${DB_USER}:${DB_PASS}@authentik-db.$INTERNAL_DOMAIN:5432/${CLIENT_APP_DB_NAME}
+      - DB_URL=${DB_URL}
+      #postgresql://${DB_USER}:${DB_PASS}@authentik-db.$INTERNAL_DOMAIN:5432/${CLIENT_APP_DB_NAME}
       # REDIS
       - REDIS_HOSTNAME=authentik-redis.${INTERNAL_DOMAIN}
       - REDIS_PASSWORD=${REDIS_PASSWORD} # Immich usa a mesma variável
@@ -18,7 +19,7 @@ services:
       # Garante que o serviço de ML no docker-compose se chama 'immich-ml'
       - IMMICH_MACHINE_LEARNING_URL=http://immich-ml.$INTERNAL_DOMAIN:3003
       - IMMICH_OAUTH_ENABLED=true
-      - IMMICH_OAUTH_ISSUER_URL=https://auth.home2500.local/application/o/fotos/
+      - IMMICH_OAUTH_ISSUER_URL=https://auth.$DOMAIN/application/o/$CLIENT_APP_NAME/
       - IMMICH_OAUTH_CLIENT_ID=${OIDC_ID}
       - IMMICH_OAUTH_CLIENT_SECRET=${OIDC_SECRET}
       - IMMICH_OAUTH_AUTO_LAUNCH=true
@@ -32,10 +33,6 @@ services:
       - 'traefik.http.routers.immich.rule=Host(`fotos.home2500.local`)'
       - 'traefik.http.routers.immich.entrypoints=websecure'
       - 'traefik.http.routers.immich.tls=true'
-      # O Immich gerencia o login via OIDC nativo, então não precisa de ForwardAuth aqui!
-      #- "traefik.http.routers.immich.middlewares=authentik@docker"
-      #- "traefik.http.routers.immich.middlewares=authentik-sso@file,security-headers@file"
-      #- "traefik.http.services.immich.loadbalancer.passhostheader=true"
       - 'traefik.http.services.immich.loadbalancer.server.port=2283'
     restart: always
     networks:

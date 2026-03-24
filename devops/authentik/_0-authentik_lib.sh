@@ -5,20 +5,13 @@ set +e
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "❌ This is a library and should be sourced, not run directly."  2>&1
-    return 1  ## disable return 1 only on development mode. why ??? 
+    echo "     Try: source ./$(realpath --relative-to="$PWD" "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+    return 1 2> /dev/null || exit 1
 fi
 
-AUTHENTIK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-AUTHENTIK_DIR_NAME="$(basename $AUTHENTIK_DIR)"
-# --- AUTHENTIK ctx ----
-export AUTHENTIK_DIR
-export AUTHENTIK_DIR_NAME
-
-source "$AUTHENTIK_DIR/../vault/vault_lib.sh" || return 1 ## > /dev/null 2>&1 # can we hide completly any console log of this script ?
 
 # --- HELPERS ---
 # Internal helper to modify outpost provider list
-
 ak_fix_proxied_redir() {
     echo "🔍 Analyzing schema and applying fixes (v9)..." >&2
     require_vars "DOMAIN"
@@ -72,7 +65,6 @@ WHERE oauth2provider_ptr_id = $pk;"
 }
 export -f ak_fix_proxied_redir
 ak_internal_service_ready() {
-    wait4_http_url_ready $AUTHENTIK_INTERNAL_URL > /dev/null || return 1
     local status
     status=$(curl -s -k "$AUTHENTIK_INTERNAL_URL/api/v3/root/config/" | jq -r '.capabilities[0]' 2>/dev/null)
     if [[ "$status" == "can_save_media" ]]; then
@@ -80,6 +72,34 @@ ak_internal_service_ready() {
     else
         return 1 # Not ready yet
     fi
+}
+
+ak_sync_provider_secrets() {
+    local app_name="${1}" # e.g., "fotos"
+    local url="$AUTHENTIK_INTERNAL_URL"
+    (
+        PROVIDER_SELECT="keepass" \
+            core_secret_service_get "$app_name/OIDC_ID"
+        PROVIDER_SELECT="keepass" \
+            core_secret_service_get "$app_name/OIDC_SECRET"
+
+        require_vars app_name OIDC_ID OIDC_SECRET || return 1
+
+        # 1. Find the PK (Primary Key) of the provider in Authentik
+        local provider_pk=$(curl -s -L -H "Authorization: Bearer $AUTHENTIK_TOKEN" \
+            "$url/api/v3/providers/oauth2/?search=$app_name" | jq -r '.results[0].pk')
+
+        [[ "$provider_pk" == "null" ]] && { echo "❌ Provider not found" >&2; return 1; }
+
+        # 2. PATCH the provider with the Vault values
+        curl -s -X PATCH "$url/api/v3/providers/oauth2/$provider_pk/" \
+            -H "Authorization: Bearer $AUTHENTIK_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"client_id\": \"$OIDC_ID\",
+                \"client_secret\": \"$OIDC_SECRET\"
+            }"
+    )
 }
 
 ak_wait4_instance() {
@@ -185,7 +205,6 @@ export -f ak_api_token_validate
 
 
 # hard rule. need vault on https service mode
-
 
 ak_secrets_show() {
     (
@@ -338,9 +357,8 @@ ak_up() {
     (
         cd $AUTHENTIK_DIR
         if ak_secrets_compose_get; then
-            docker compose up -d    
-            ak_wait4_instance && echo "Authentik online" && \
-                ak_fix_proxied_redir 2> /dev/null   
+            docker compose up -d  || return 1   
+            
         fi
     )
 }
@@ -513,58 +531,54 @@ ak_fn_catalog() {
     core_fn_catalog "${BASH_SOURCE[0]}" "ak_fn_sort_weights" 
 }
 
-ak_load_requirements() {    
-
+source $(realpath "$AUTHENTIK_DIR/../vault/vault_lib.sh" )
+ak_load_requirements() {        
     base__requirements(){
-        require_functions core_secret_service_get core_secret_service_put
-
+        AUTHENTIK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"        
+        AUTHENTIK_DIR_NAME="$(basename $AUTHENTIK_DIR)"
+        # --- AUTHENTIK ctx ----
+        export AUTHENTIK_DIR
+        export AUTHENTIK_DIR_NAME
+        
         export AUTHENTIK_URL="https://auth.$DOMAIN"
         export AUTHENTIK_CONTAINER_NAME="authentik-server"
         export AUTHENTIK_DB_CONTAINER="authentik-db"
         export AUTHENTIK_INTERNAL_URL="http://$AUTHENTIK_CONTAINER_NAME.$INTERNAL_DOMAIN:9000"
 
-        require_vars DOMAIN \
+        show_vars DOMAIN \
             INTERNAL_DOMAIN \
             AUTHENTIK_DIR \
+            AUTHENTIK_DIR_NAME \
             AUTHENTIK_ADMIN_USER \
             AUTHENTIK_URL \
             AUTHENTIK_INTERNAL_URL \
             AUTHENTIK_CONTAINER_NAME \
-            AUTHENTIK_DB_CONTAINER
-
-        require_functions require_vars require_files
-
-        require_vars DEVOPS_DIR        
+            AUTHENTIK_DB_CONTAINER \
+            DEVOPS_DIR && \
+        require_functions \
+            core_secret_service_get \
+            core_secret_service_put \
+            require_vars require_files || return 1
     }
-    base__requirements    
+    base__requirements || return 1
 }
 
 
 unset AK_SKIP_INTERACTION
-AK_SKIP_INTERACTION=false
-if [[ ! -t 1 && ! -t 2 ]]; then    
-    # Estamos em "Silent Mode" (source > /dev/null 2>&1)
-    # Podemos pular comandos visuais pesados como o stack_trace()
-    AK_SKIP_INTERACTION=true
-fi
-echo "AK_SKIP_INTERACTION=$AK_SKIP_INTERACTION"
+# Detect if we're in non-interactive mode (e.g., output redirected)
+[[ ! -t 1 && ! -t 2 ]] && AK_SKIP_INTERACTION=true
+# Check if the script is being sourced
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-    # Opcional: só mostra a stack se estiver em modo debug
-    [[ "$DEBUG" == "true" ]] && stack_trace
 
-    ak_load_requirements
-    # Camada de Interatividade para o Vault
+    # Load requirements, exit on failure
+    ak_load_requirements || return 1
+
+    # Interactive mode: show helpful messages
     if [[ "$AK_SKIP_INTERACTION" != "true" ]]; then
-        #ak_login
-        # Sugestão de comandos após o source bem sucedido
-                    
-
         echo -e "\n📦 Authentik module loaded. Available commands:"
         echo -e "   \e[1;34mak_<tab>\e[0m to list functions"
         echo "ak_fn_catalog"
     else
         echo "⚠️  Non-interactive mode: skipping token validation." >&2
     fi
-
 fi
-

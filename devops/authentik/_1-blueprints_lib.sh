@@ -12,21 +12,6 @@ AUTHENTIK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 source $(realpath "$AUTHENTIK_DIR/_0-authentik_lib.sh") > /dev/null 2>&1 
 
-
-enable_oidc_well_known_openid_flow() {
-    #ak_api_token_generate
-    #_setup_vault_oidc_provider
-    
-    check_well_known_openid_config 
-
-    blue_outpost_sync
-    ak_fix_proxied_redir
-
-    # and voila
-    check_well_known_openid_config
-
-}
-export -f enable_oidc_well_known_openid_flow
 check_well_known_openid_config() {
     # 1. Verificação de Requisitos
     # Usando verificação direta para evitar problemas com o status de retorno do require_vars
@@ -459,11 +444,7 @@ blue__get_current_json() {
     local response
     response=$(blue__get_all_json | \
         jq -c --arg name "$name" '
-            if .results then
-                .results | map(select(.name == $name))
-            else
-                []
-            end
+            .results | map(select(.name == $name))
         ')
     # 5. Retorno do JSON puro para o chamador
     if echo "$response" | jq -e . >/dev/null 2>&1; then

@@ -84,13 +84,9 @@ services:
       - WEB_OIDC_SCOPE=openid profile email
       - WEB_CONFIG_RELOAD=true
 
-      # CORS & SECURITY (oCIS 8.0)
+      # CORS & SECURITY (oCIS 8.0 - CSP via separate file)
       - 'PROXY_ALLOW_ORIGINS=https://files.home2500.local,https://auth.home2500.local'
-      - "PROXY_CSP_DIRECTIVES_CONNECT_SRC='self' blob: https://raw.githubusercontent.com/owncloud/awesome-ocis/ https://auth.home2500.local"
-      - "PROXY_CSP_DIRECTIVES_SCRIPT_SRC='self' 'unsafe-inline' 'unsafe-eval'"
-      - "PROXY_CSP_DIRECTIVES_FONT_SRC='self' data:"
-      - "PROXY_CSP_DIRECTIVES_IMG_SRC='self' data: blob: https://auth.home2500.local"
-      - "PROXY_CSP_DIRECTIVES_FRAME_ANCESTORS='self' https://auth.home2500.local"
+      - PROXY_CSP_CONFIG_FILE_LOCATION=/etc/ocis/csp.yaml
 
       - PROXY_AUTOPROVISION_ACCOUNTS=true
       - PROXY_ROLE_ASSIGNMENT_DRIVER=oidc

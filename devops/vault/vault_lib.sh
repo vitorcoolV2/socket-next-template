@@ -823,7 +823,8 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     echo "" 2>&1
     require_vars VAULT_CACERT 
 
-    kp test
+    kp test && kp open
+
     ### check state
     if require_container_running VAULT_CONTAINER_NAME; then
         if is_sealed; then    
@@ -838,6 +839,7 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
 
         vault_validate_token || {
             echo "vault_request_stew_token" >&2
+            return 1
         }  
     else    
         echo "vault_up"   

@@ -233,7 +233,3 @@ echo "  --sync-vault-flow   : To syncronize vault"
 echo ""
 echo ""
 echo "Available function:"
-echo "sync_vault_flow"
-echo "blue_apply \"blueprint-home2500.yaml\""
-echo "display_blueprints"
-

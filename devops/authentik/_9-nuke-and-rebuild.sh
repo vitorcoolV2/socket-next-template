@@ -7,14 +7,14 @@ cd "$SCRIPT_DIR"
 
 
 . $(realpath ../vault/_0-authentik_lib.sh)
-
+. $(realpath ./_2-enable-oidc-provider.sh)
 
 ask_nuke_and_rebuild_authentik() {
     echo "☢️  Iniciando FULL NUKE AND REBUILD..."
     echo "Destruindo dados do Authentik e recriando via Steward/Vault..."
     
     # 1. Confirmação de Segurança
-    read -p "Tem a certeza que deseja APAGAR TUDO? (y/n) " -n 1 -r
+    read -p "Tem a certeza que deseja enable_oidc_well_known_openid_flowAPAGAR TUDO? (y/n) " -n 1 -r
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         echo "❌ Operação abortada pelo utilizador."

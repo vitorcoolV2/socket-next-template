@@ -15,6 +15,9 @@ pihole/etc-pihole/*
 !pihole/etc-pihole/pihole.toml
 !pihole/etc-pihole/hosts/
 
+### AUTHENTIK
+authentik/blueprints/*
+!authentik/blueprints/blueprint-home2500.yaml
 
 # backup
 backup/config/*
@@ -29,3 +32,6 @@ traefik/traefik/certs/*.key
 
 # OPENCODE agent
 opencode/workspace/*
+
+# FILES ocis
+files/data/**/*

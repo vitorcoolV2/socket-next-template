@@ -44,7 +44,6 @@ tool_prepare__script_name() {
 tool_prepare__script_name
 # Exportando o resultado
 
-
 echo "
 🚀 Home2500 $CLIENT_APP_NAME client script ($CLIENT_APP_SCRIPT_NAME)
    🛡️  Supported by -> ../authentik/app/$TOOL_NAME
@@ -141,7 +140,7 @@ tool_prepare__env_vars() {
             "$CLIENT_APP_ENV_FILE" \
             "APP_" \
             "CLIENT_APP_" \
-            "$match_prefix_exceptions"
+            "$match_prefix_exceptions" 2> /dev/null
 
         export CLIENT_APP_DB_ROLE=${CLIENT_APP_DB_ROLE:-admin}
         _resolve_compose__container_name
@@ -202,7 +201,7 @@ _resolve_compose__container_name() {
     core_transform_inject_env_file_vars \
             "$CLIENT_APP_ENV_FILE" \
             "APP_CONTAINER_NAME" \
-            "CLIENT_APP_CONTAINER_NAME"
+            "CLIENT_APP_CONTAINER_NAME" 2> /dev/null
 
     local c_name
     c_name="${CLIENT_APP_CONTAINER_NAME:-$CLIENT_APP_NAME}"
@@ -313,7 +312,7 @@ tool_provision__secret_vars() {
 
         local mem_key="$target_var"
         [[ "$target_var" == CLIENT_APP_* ]] && mem_key="${target_var#CLIENT_APP_}"
-        if ! PROVIDER_SELECT="$to_provider" core_secret_service_put "$CLIENT_APP_NAME/$mem_key" "$secret_value"; then
+        if ! PROVIDER_SELECT="$to_provider" core_secret_service_put "$CLIENT_APP_NAME/$mem_key" "$secret_value"  2> /dev/null; then
             echo "   ❌ Failed to persist $target_var to $to_provider" >&2
             return 1
         fi
@@ -428,7 +427,7 @@ _db_role_get_credentials() {
     _db_role_names "$role" || return 1  ###  validate value to be one of admin | rw | ro
 
     require_vars CLIENT_APP_NAME || return 1
-    PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" || return 1
+    PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1
     PROVIDER_SELECT="vault keepass" core_secret_service_get \
                 "$CLIENT_APP_NAME/$CLIENT_APP_DB_ROLE_PASS" || return 1
     PROVIDER_SELECT="vault keepass" core_secret_service_get \
@@ -450,7 +449,7 @@ _db_role_set_credentials() {
     # 3. Carregar nomes e credenciais (sem subshell para exports persistirem)
     _db_role_names "$role" || return 1
     _db_provider_credentials || return 1
-    PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" || return 1
+    PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1
 
     # 4. Persistir no Secret Provider (Vault/KeePass)
     PROVIDER_SELECT="vault keepass" core_secret_service_put \
@@ -738,10 +737,10 @@ app_require_export_container_ip_port() {
     
     core_transform_inject_env_file_vars \
             "$CLIENT_APP_ENV_FILE" \
-            "APP_CONTAINER_NAME" "CLIENT_APP_CONTAINER_NAME"
+            "APP_CONTAINER_NAME" "CLIENT_APP_CONTAINER_NAME" 2> /dev/null
     core_transform_inject_env_file_vars \
             "$CLIENT_APP_ENV_FILE" \
-            "APP_SERVICE_PORT" "CLIENT_APP_SERVICE_PORT"
+            "APP_SERVICE_PORT" "CLIENT_APP_SERVICE_PORT" 2> /dev/null
     # 1. Tentar obter o IP
     local _ip
     _ip=$(docker_container_name_ip "$CLIENT_APP_CONTAINER_NAME") 
@@ -1005,7 +1004,8 @@ app_blue_apply() {
         
     blue_apply "$CLIENT_APP_BLUE_APPLY" || return 1
 
-    rm -f $CLIENT_APP_BLUE_APPLY
+    # .gitgnored the factory of secrets
+    # DO NOT rm -f $CLIENT_APP_BLUE_APPLY
 }
 app_blue_cleanup() {
     require_files CLIENT_APP_BLUE_CLEANUP_TPL || {
@@ -1069,7 +1069,8 @@ app_wait4_docker_ip() {
         if app_require_export_container_ip_port > /dev/null; then            
             if [[ -n "$CLIENT_APP_SERVICE_IP" && "$CLIENT_APP_SERVICE_IP" != "invalid IP" ]]; then
                 local url="http://$CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT"
-                if require_http_status_ok url; then
+                if wait4_http_url_ready $url; then
+                #if require_http_status_ok url; then
                     echo "✅ Container IP detetado: $CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT" >&2
                 fi
                 break
@@ -1122,7 +1123,7 @@ app_script_requirements() {
         done
 
         # Verificação crítica específica
-        if ! require_single_script_function "client_script" "deploy" 2>/dev/null; then    
+        if ! require_single_script_function "client_script" "deploy"; then    
             echo -e "\e[31m❌ Missing critical 'deploy' function in $client_script\e[0m" >&2
             return 1
         fi
@@ -1143,6 +1144,28 @@ app_login() {
     fi
     return 1           
 }
+
+
+require_single_yaml_file() {
+    local ref=${1}
+    local yaml_file=${!ref}
+    local func="$2"
+    
+    # Validação silenciosa, mas erro ruidoso se falhar
+    [[ -z "$yaml_file" ]] && { echo "❌ Erro: Referência yaml_file vazia." >&2; return 1; }
+  
+    if yq eval '.' "$yaml_file" >/dev/null 2>&1; then
+        # Output de Sucesso com colunas fixas e link clicável
+        LABEL=${LABEL:-"✅\e[0m Valid YAML: "}
+        printf "  \e[1;32m${LABEL} \e[1;34m%-30s\e[0m \e[1;90m->\e[0m \e[4;36m%s\e[0m\n" "yaml_file" "$(realpath --relative-to="$PWD" "$yaml_file")" >&2
+        return 0
+    else
+        # Output de Erro alinhado
+        printf "  \e[1;31m󰅙󰅙\e[0m Invalid YAML: \e[1;33m%-30s\e[0m \e[1;30m-> [%s]\e[0m\n" "yaml_file" "$(realpath --relative-to="$PWD" "$yaml_file")" >&2
+        return 1
+    fi
+}
+
 #-------------------------------------------------------------------------------
 # @function tool_compose_list_missing_vars
 # @description 1. Limpa ruído de terminal -> 2. Extrai nomes de variáveis.
@@ -1197,7 +1220,7 @@ tool_stage_workflow() {
     _vault_login__requirements() {        
         (
             ## @todo - login should be from Developer role base on vault || steward role
-            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" /dev/null \
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null /dev/null \
                 || vault_request_stew_token || return 1
 
             vault_validate_token || return 1        
@@ -1207,7 +1230,6 @@ tool_stage_workflow() {
         ## use can vault_request_*_token on vault_login_fail() fn handler
     }
 
-
     #-------------------------------------------------------------------------------
     # @function _provision_db__requirements
     # @description Garante que a Database exista e que as credenciais de ADMIN
@@ -1216,35 +1238,41 @@ tool_stage_workflow() {
     _provision_db__requirements() {
         # 1. Verifica se a App solicita uma base de dados específica
         #show_vars CLIENT_APP_DB_NAME
-        if require_vars CLIENT_APP_DB_NAME; then ## means CLIENT_APP_DB_NAME is the trigger to enabled DB
-            (          
-                PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" || return 1
-                # 2. Check de existência (previne re-provisionamento desnecessário)
-                if ! app_db_exist; then                    
-                    echo "📦 Client requested '$CLIENT_APP_DB_NAME' DB. Provisioning..." >&2 
-                    app_db_provision_logic || return 1                    
-                fi
+        unset OIDC_ID
+        unset OIDC_SECRET
 
-                _db_role_names $CLIENT_APP_DB_ROLE
-                # 3. Mapeamento de Credenciais para Memória
-                # Usamos FROM="vault" TO="mem" para que a senha de admin do DB 
-                # fique disponível como variável de ambiente ($DB_ROLE_ADMIN_PASS) 
-                # apenas durante este contexto de execução.
-                echo "🔐 Loading $CLIENT_APP_DB_ROLE Credentials for $CLIENT_APP_DB_NAME DB..." >&2 
-                
-                local uRole=$CLIENT_APP_DB_ROLE
-                FROM="vault" TO="mem" tool_provision__secret_vars \
-                    "DB_PASS=$CLIENT_APP_NAME/DB_ROLE_${uRole^^}_PASS" \
-                || return 1
+        ! require_vars CLIENT_APP_DB_NAME && return 1 ## means CLIENT_APP_DB_NAME is the trigger to enabled DB
+            
+        (          
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1
+            # 2. Check de existência (previne re-provisionamento desnecessário)
+            if ! app_db_exist; then                    
+                echo "📦 Client requested '$CLIENT_APP_DB_NAME' DB. Provisioning..." >&2 
+                app_db_provision_logic || return 1                    
+            fi
 
-                FROM="vault" TO="mem" tool_provision__secret_vars \
-                    "DB_USER=$CLIENT_APP_NAME/db_${CLIENT_APP_DB_NAME}__role_${uRole}" \
-                || return 1
-                
-                # 4. Aqui você já tem a variável $DB_ROLE_ADMIN_PASS disponível
-                # para qualquer comando de SQL ou CLI que venha a seguir.
-            ) || return 1
-        fi
+            _db_role_names $CLIENT_APP_DB_ROLE
+            # 3. Mapeamento de Credenciais para Memória
+            # Usamos FROM="vault" TO="mem" para que a senha de admin do DB 
+            # fique disponível como variável de ambiente ($DB_ROLE_ADMIN_PASS) 
+            # apenas durante este contexto de execução.
+            echo "🔐 Loading $CLIENT_APP_DB_ROLE Credentials for $CLIENT_APP_DB_NAME DB..." >&2 
+            
+            local uRole=$CLIENT_APP_DB_ROLE
+            FROM="vault" TO="mem" tool_provision__secret_vars \
+                "DB_PASS=$CLIENT_APP_NAME/DB_ROLE_${uRole^^}_PASS" \
+            || return 1
+
+            FROM="vault" TO="mem" tool_provision__secret_vars \
+                "DB_USER=$CLIENT_APP_NAME/db_${CLIENT_APP_DB_NAME}__role_${uRole}" \
+            || return 1
+
+            ## add DB_URL to overcome pass url encode
+            local ENCODED_PASS=$(core_url_encode "$DB_PASS")
+            local DB_URL="postgresql://$DB_USER:${ENCODED_PASS}@$AUTHENTIK_DB_CONTAINER.$INTERNAL_DOMAIN:5432/${CLIENT_APP_DB_NAME}"
+            PROVIDER_SELECT="mem" core_secret_service_put "$CLIENT_APP_NAME/DB_URL" "$DB_URL"                            
+        ) || return 1
+    
 
         return 0 
     }
@@ -1257,30 +1285,42 @@ tool_stage_workflow() {
     _provision_oidc__requirements() {
         [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" != "oidc" ]] && return 0
 
-        echo "🛡️  OIDC Module detected. Checking secrets for $CLIENT_APP_NAME..." >&2
+        unset OIDC_ID
+        unset OIDC_SECRET
+        (
+            if ! PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" "$OIDC_ID" 2> /dev/null || \
+                ! PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_SECRET" "$OIDC_ID" 2> /dev/null; then
+                
+                #show_vars OIDC_ID OIDC_SECRET
+                echo "🛡️  OIDC Module detected. Checking secrets for $CLIENT_APP_NAME..." >&2
+                PROVIDER_SELECT="keepass" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" 2> /dev/null || {
+                    local new_id="${CLIENT_APP_SLUG}" ## -$(openssl rand -hex 4)"
+                    echo "   🆕 Creating OIDC ID..." >&2
+                    PROVIDER_SELECT="keepass" core_secret_service_put "$CLIENT_APP_NAME/OIDC_ID" "$new_id" 2> /dev/null || return 1            
+                }
+                PROVIDER_SELECT="vault" core_secret_service_put "$CLIENT_APP_NAME/OIDC_ID" "$OIDC_ID" 2> /dev/null || return 1
 
-        PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" >/dev/null 2>&1 || {
-            local new_id="${CLIENT_APP_NAME}-$(openssl rand -hex 4)"
-            echo "   🆕 Creating OIDC ID..." >&2
-            PROVIDER_SELECT="vault" core_secret_service_put "$CLIENT_APP_NAME/OIDC_ID" "$new_id" || return 1
-        }
+                PROVIDER_SELECT="keepass" core_secret_service_get "$CLIENT_APP_NAME/OIDC_SECRET" 2> /dev/null  || {
+                    local new_secret=$(openssl rand -base64 32)            
+                    echo "   🆕 Creating OIDC Secret..." >&2
+                    PROVIDER_SELECT="keepass" core_secret_service_put "$CLIENT_APP_NAME/OIDC_SECRET" "$new_secret" 2> /dev/null || return 1            
+                }
+                PROVIDER_SELECT="vault" core_secret_service_put "$CLIENT_APP_NAME/OIDC_SECRET" "$OIDC_SECRET" 2> /dev/null || return 1
 
-        PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_SECRET" >/dev/null 2>&1 || {
-            local new_secret=$(openssl rand -base64 32)
-            echo "   🆕 Creating OIDC Secret..." >&2
-            PROVIDER_SELECT="vault" core_secret_service_put "$CLIENT_APP_NAME/OIDC_SECRET" "$new_secret" || return 1
-        }
+            fi
 
-        FROM="vault" TO="mem" tool_provision__secret_vars \
-            "CLIENT_APP_OIDC_ID=$CLIENT_APP_NAME/OIDC_ID" \
-            "CLIENT_APP_OIDC_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" || return 1
-
+            #show_vars OIDC_ID OIDC_SECRET
+            FROM="vault" TO="mem" tool_provision__secret_vars \
+                "OIDC_ID=$CLIENT_APP_NAME/OIDC_ID" \
+                "OIDC_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" || return 1
+        )
+        ## does not show var created on subshell show_vars OIDC_ID OIDC_SECRET
         return 0
     }
     _provision_secrets__requirements() {  
         ## RUN client secrets    
         local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"   
-        if ! require_single_script_function "client_script" "provision_secrets" 2>/dev/null; then    
+        if ! require_single_script_function "client_script" "provision_secrets"; then    
             echo -e "\e[31m [missing:optional] 'provision_secrets' function in $CLIENT_APP_SCRIPT_NAME\e[0m" >&2
         else    
             provision_secrets || return 1            
@@ -1290,7 +1330,7 @@ tool_stage_workflow() {
     _deploy_secrets__requirements() {   
         # this handler invoke optional: init.sh deploy_secrets to let use define extra mem provider secrets
         local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME" 
-        if ! require_single_script_function "client_script" "deploy_secrets" 2>/dev/null; then    
+        if ! require_single_script_function "client_script" "deploy_secrets"; then    
             echo -e " \e[31m❌ Missing critical 'deploy_secrets' function in $CLIENT_APP_SCRIPT_NAME\e[0m" >&2
             return 0
         fi
@@ -1305,45 +1345,108 @@ tool_stage_workflow() {
         echo "📦 Iniciando containers via Compose..."
         require_files CLIENT_APP_COMPOSE_FILE || return 1
         
-        PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" || return 1
+        (
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1            
 
-        _auto_provision() {
-            require_vars CLIENT_APP_NAME || return 1
-            
-            echo "🔍 Checking for missing environment variables in $CLIENT_APP_NAME..." >&2
-            
-            local missing_vars=("$(tool_compose_list_missing_vars)")
-
-            if [[ -z "$missing_vars" ]]; then
-                echo "✅ All variables are already set. Nothing to provision." >&2
-                return 0
-            fi
-
-            echo "📦 Found ${#missing_vars[@]} missing vars. Starting provision..." >&2
-
-            for var_name in $missing_vars; do
-                echo "   🚀 Provisioning: $var_name -> $CLIENT_APP_NAME/$var_name" >&2
+            ### auto provision must be done exclusively we "mem" secrets
+            # thats why exist provision_db provison_oidc provision_secrets and deploy_secrets
+            ## db and oidc are home2500 out of the box service with blalbla secretcs
+            ## provision_secrets is being used to map external authentik redis password to client app vault
+            ## deploy secrets: optional usage to map secret values as required to be injected on compose|blueprint templates
+            _auto_provision() {
+                require_vars CLIENT_APP_NAME || return 1
                 
-                PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var_name" || {
-                    echo "   ❌ Failed to provision $var_name. Aborting." >&2
-                    return 1
-                }
-            done
+                echo "🔍 Checking for missing environment variables in $CLIENT_APP_NAME..." >&2
 
-            local export_vars=()
-            for var_name in $missing_vars; do
-                #show_vars var_name
-                export_vars+=("${var_name#CLIENT_APP_}")
-            done
-            echo  "core_secret_export2_env_vars $CLIENT_APP_NAME ${export_vars[@]}"
-            core_secret_export2_env_vars "$CLIENT_APP_NAME" \
-                "${export_vars[@]}" \
-            || return 1
+                local missing_vars=("$(tool_compose_list_missing_vars)")
 
-            echo "✨ Auto-provisioning completed successfully!" >&2
-        }                   
-        (_auto_provision || return 1) || return 1
+                if [[ -z "$missing_vars" ]]; then
+                    echo "✅ All variables are already set. Nothing to provision." >&2
+                    return 0
+                fi
 
+                echo "📦 Found ${#missing_vars[@]} missing vars. Starting provision..." >&2
+
+                for var_name in $missing_vars; do
+                    echo "   🚀 Provisioning: $var_name -> $CLIENT_APP_NAME/$var_name" >&2
+                    
+                    PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var_name" 2> /dev/null || {
+                        echo "   ❌ Failed to provision $var_name. Aborting." >&2
+                        return 1
+                    }
+                    local content=${!var_name}
+                    echo "   ✅ $var_name injected into environment (len: ${#content})" >&2
+                done
+
+                echo "core_secret_export2_env_vars "$CLIENT_APP_NAME/.secret" ${missing_vars[@]}" >&2
+                core_secret_export2_env_vars \
+                    "$CLIENT_APP_NAME/.secret" \
+                    "${missing_vars[@]}" \
+                || return 1
+            
+            }         
+            _auto_provision() {
+                require_vars CLIENT_APP_NAME || return 1
+                
+                echo -e "\n🔍 [OIDC/DB CHECK] Scanning for missing variables in: **$CLIENT_APP_NAME**" >&2
+
+                # 1. Get the list of variables required by the docker-compose/blueprint
+                local missing_vars
+                missing_vars=$(tool_compose_list_missing_vars)
+
+                if [[ -z "$missing_vars" ]]; then
+                    echo "✅ Environment is saturated. No missing variables detected." >&2
+                    return 0
+                fi
+
+                # Convert space-separated string to array for reliable counting
+                local vars_array=($missing_vars)
+                echo "📦 Detected ${#vars_array[@]} missing requirements. Synchronizing from MEM..." >&2
+                
+                for var_name in "${vars_array[@]}"; do
+                    
+                    echo -n "   🚀 Pulling: $var_name -> " >&2
+                    
+                    # 2. Force pull from MEM. 
+                    # We 'eval' the output because core_secret_service_get returns an 'export' string.
+                    PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var_name" 2>/dev/null
+                    local value="${!var_name}"
+                    
+                    if [[ ! -z "$value" ]]; then   
+                        echo -e "\e[32mOK\e[0m (len: ${#value})" >&2
+                    else
+                        echo -e "\e[31mFAILED\e[0m" >&2
+                        echo "   ❌ Error: '$var_name' not found in MEM provider. Run provision_db/oidc first." >&2
+                        return 1
+                    fi
+                done
+
+                # 4. Final persistence to the local .secret file for Compose visibility
+                echo "💾 Persisting environment to: $CLIENT_APP_NAME/.secret" >&2
+                core_secret_export2_env_vars \
+                    "$CLIENT_APP_NAME/.secret" \
+                    "${vars_array[@]}" \
+                || return 1
+
+                echo "✨ Auto-provisioning synchronization complete!" >&2
+            }          
+            _auto_provision || return 1
+
+            _gen_tmp() {
+                LABEL="<<< TPL" require_single_yaml_file CLIENT_APP_COMPOSE_FILE || return 1
+
+                local tmp=$(core_secret_mapper_mem "$CLIENT_APP_NAME" "$(basename $CLIENT_APP_COMPOSE_FILE)")
+                PROVIDER_SELECT="mem" core_secret_service_put \
+                    "$CLIENT_APP_NAME/$(basename $CLIENT_APP_COMPOSE_FILE)" \
+                    "# empty" 2> /dev/null
+
+                docker compose config > $tmp
+                chmod 644 "$tmp"
+                LABEL=">>> TMP" require_single_yaml_file tmp || return 1
+            }
+            _gen_tmp || return 1
+
+        ) || return 1
         return 0
     }
 
@@ -1354,7 +1457,8 @@ tool_stage_workflow() {
         if ! require_container_running "CLIENT_APP_CONTAINER_NAME"  >/dev/null 2>&1; then
             echo "❌ Container $CLIENT_APP_CONTAINER_NAME is not running." >&2
             return 1
-        fi
+        fi        
+
         app_require_export_container_ip_port  || return 1     
     }
 
@@ -1382,24 +1486,55 @@ tool_stage_workflow() {
             return 1
         fi
         ak_api_token_validate || return 1
-        require_http_status_ok client_internal_url
+        
+        wait4_http_url_ready $AUTHENTIK_INTERNAL_URL || return 1
+        #require_http_status_ok 
         return 0
     }
 
     _blue_apply__requirements() {
-        _authentik_login__requirements || return 1
+        _authentik_login__requirements 2> /dev/null|| return 1
         ### o template
+
         LABEL="<<< TPL" require_single_blue_file CLIENT_APP_BLUE_APPLY_TPL || return 1
 
         ### os secredos se existir
         source $(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")
 
+        # last and rebuilt    
+        files_are_equal() {
+            local file1="$1"
+            local file2="$2"
+
+            # Check if both files exist first
+            [[ ! -f "$file1" || ! -f "$file2" ]] && return 2
+
+            # cmp -s returns 0 if files are identical
+            if cmp -s "$file1" "$file2"; then
+                echo "✅ Files are identical" >&2
+                return 0
+            else
+                echo "❌ Files differ" >&2
+                return 1
+            fi
+        }
+
         local tmp=$(core_secret_mapper_mem "$CLIENT_APP_NAME" "$(basename $CLIENT_APP_BLUE_APPLY)")
-        PROVIDER_SELECT="mem" core_secret_service_put "$CLIENT_APP_NAME/$(basename $CLIENT_APP_BLUE_APPLY)" "# empty"
+        PROVIDER_SELECT="mem" core_secret_service_put \
+            "$CLIENT_APP_NAME/$(basename $CLIENT_APP_BLUE_APPLY)" \
+            "# empty"  2> /dev/null
         blue_template_vars \
             $CLIENT_APP_BLUE_APPLY_TPL \
-            $tmp || return 1
+            $tmp 2> /dev/null || return 1
         LABEL=">>> TMP" require_single_blue_file tmp || return 1
+
+        (
+            
+            blue__get_all_json
+            blue__get_home2500_json
+            blue__get_current_json
+        )
+
 
         if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "proxy" ]]; then                
             require_service_redirect_auth "$CLIENT_APP_NAME" || return 1            
@@ -1407,7 +1542,22 @@ tool_stage_workflow() {
         if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "oidc" ]]; then                
             app_oidc_validate "$CLIENT_APP_NAME" || return 1
         fi      
+
+
+        (
+            if files_are_equal $tmp $CLIENT_APP_BLUE_APPLY; then
+                return 0
+            else
+                if ! require_files CLIENT_APP_BLUE_APPLY 2> /dev/null; then                
+                    cat $tmp > $CLIENT_APP_BLUE_APPLY
+                    files_are_equal $tmp $CLIENT_APP_BLUE_APPLY || return 1
+                fi
+            fi           
+        ) || return 1
         
+        blue__get_all_json
+        blue__get_home2500_json
+        blue__get_current_json
         return 0
     }
     _blue_cleanup__requirements() {
@@ -1421,7 +1571,7 @@ tool_stage_workflow() {
         # 2. Verificação: Se NÃO tem PK ou NÃO está enabled
         # jq -e retorna 1 (erro) se a condição for falsa
         if echo "$cur" | jq -e '.pk' >/dev/null 2>&1; then
-            echo "ℹ️  State: Is present. Proceeding with clean..." >&2
+            echo "ℹ️  State: Is present. Proceedingak_api_token_validate with clean..." >&2
             return 1
         fi
 
@@ -1496,7 +1646,8 @@ tool_stage_workflow() {
         if ! require_ns_resolve "CLIENT_APP_NS"; then return 1; fi
         
         local url="https://$CLIENT_APP_NS"
-        require_http_status_ok url
+        wait4_http_url_ready $url || return 1
+        #require_http_status_ok url
     }
     
 
@@ -1531,7 +1682,8 @@ tool_stage_workflow() {
                 echo $status
                 return 1
             fi
-            echo "  ✅ Stage: \"$stage\" complete" >&2
+            echo "✅ Stage: \"$stage\" complete
+            " >&2
         else
             __missing_handler_fn__fallback
             return 1  
@@ -1565,12 +1717,13 @@ app_up() {
         local secret_file=$(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")            
         
         if DEBUG=false require_files secret_file; then
+            #cat $secret_file
             echo "$CLIENT_APP_NAME .secret: $secret_file" >&2            
-            env $(grep -v '^#' $secret_file | xargs) docker compose -f "$CLIENT_APP_COMPOSE_FILE" up -d  || return 1
+            env $(grep -v '^#' $secret_file | xargs) docker compose -f "$CLIENT_APP_COMPOSE_FILE" up -d --force-recreate || return 1
         else            
-            docker compose -f "$CLIENT_APP_COMPOSE_FILE" up -d || return 1
+            docker compose -f "$CLIENT_APP_COMPOSE_FILE" up -d --force-recreate || return 1
         fi
-    
+        #### env $(grep -v '^#' $secret_file | xargs)  docker compose up -d --force-recreate immich-server
         ### this is a docker expected http proxiable ip:port
         app_wait4_docker_ip || return 1
         tool_stage_workflow "running" || return 1
@@ -1618,6 +1771,8 @@ app_down() {
         else            
             docker compose -f "$CLIENT_APP_COMPOSE_FILE" down
         fi
+
+       
     )
 }
 

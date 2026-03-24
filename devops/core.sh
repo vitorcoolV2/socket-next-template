@@ -1093,7 +1093,7 @@ wait4_http_url_ready(){
             502) char="🧱" ;; # Bad Gateway (Traefik ON, App OFF)
             503) char="🚧" ;; # Service Unavailable (Sobrecarregado)
             404) char="🔍" ;; # Not Found (Rota não mapeada)
-            *)   char="❌" ;; # Outros erros ($is_ok)
+            *)   char="❌($is_ok)" ;; # Outros erros ($is_ok)
         esac
 
         printf "%s" "$char" >&2 # Imprime o símbolo sem pular linha
@@ -1430,9 +1430,29 @@ core_secret_mem_delete() {
 
     echo "✅ Removido com sucesso."
 }
-
+core_url_encode() {
+    local string="${1}"
+    python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "$string"
+}
 core_secret_export2_env_vars() {   
-    local service_nsp="${1}"
+        local input_path="$1"  
+    local temp="${input_path%/}"
+    local trimed_path="${temp#/}"
+
+    local segments=$(echo "$trimed_path" | tr -s '/' '\n' | wc -l)
+    if [[ "$segments" -lt 2 ]]; then
+        echo "❌ [ERROR] Formato inválido: '$input_path'" >&2
+        echo "   Uso correto: 'servico/.secret' (ex: fotos/.secret)" >&2
+        echo "   Uso correto: 'servico/partition/CHAVE' (ex: authentik/appRole/<uuid>)" >&2
+        echo "                                          (ex: authentik/appRole/<secret>)" >&2
+        return 1
+    fi
+
+    local service_nsp="${trimed_path%/*}"
+    local secret_file_name="${trimed_path##*/}"
+
+    require_vars input_path service_nsp secret_file_name || return 1
+
     shift 
     # Agora $@ contém APENAS os nomes das secrets (ex: REDIS_PASSWORD IMMICH_SECRET)
     local VARS_TO_PROCESS=("$@") 
@@ -1442,35 +1462,27 @@ core_secret_export2_env_vars() {
 
     local service_nsp=$(sanitize_path_name "$service_nsp")
     
-    echo "VARS: ${VARS_TO_PROCESS[@]}"
-    show_vars service_nsp || return 1
+    #echo "VARS: ${VARS_TO_PROCESS[@]}"
+    require_vars service_nsp secret_file_name || return 1
 
     # Mapeia o caminho no /run/user/$UID/home2500/*
     local _APP_SECRET_ENV
-    _APP_SECRET_ENV="$(core_secret_mapper_mem "$service_nsp" ".secret")"    
+    _APP_SECRET_ENV="$(core_secret_mapper_mem "$service_nsp" "$secret_file_name")"    
     ## _MEM_X_DIR || the secrey path not yet the secret content
     local _MEM_X_DIR="$(dirname "$_APP_SECRET_ENV")"
         
     mkdir -p "$_MEM_X_DIR" || return 1
 
-    echo "🏗️  Preparing secrets for $service_nsp issue..." >&2
-    echo "📥 Injecting secrets from \"mem\"..." >&2
+    echo "🏗️  Preparing $_APP_SECRET_ENV, from \"mem\"..." >&2
     
     # Criamos o ficheiro (limpa se já existir)
-    echo "# $service_nsp/.secret file - $(date)" > "$_APP_SECRET_ENV"    
+    echo "# $_APP_SECRET_ENV file - $(date)" > "$_APP_SECRET_ENV"    
     echo "# $DOMAIN" >> "$_APP_SECRET_ENV"
 
     local val_content
     for var_name in "${VARS_TO_PROCESS[@]}"; do
         if PROVIDER_SELECT="mem" _get_service_secret_path "$service_nsp/$var_name" 2> /dev/null; then
             val_content="${!var_name}"
-            
-            case "$var_name" in
-                DB_PASS|DB_URL)
-                    val_content=$(python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$val_content")
-                    ;;
-            esac
-            
             echo "${var_name}=${val_content}" >> "$_APP_SECRET_ENV"
             echo "   ✅ Added $service_nsp/$var_name" >&2 > /dev/null
         else
@@ -1480,7 +1492,7 @@ core_secret_export2_env_vars() {
     done
 
     chmod 600 "$_APP_SECRET_ENV"
-    echo "📍 Generated .secret path: $_APP_SECRET_ENV" >&2
+    echo "📍 Generated path: $_APP_SECRET_ENV" >&2
 }
 core_secret_load_vars() {   
     local ARGS=("$@")
