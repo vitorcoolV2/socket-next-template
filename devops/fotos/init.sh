@@ -174,6 +174,8 @@ deploy_secrets() {
 
      TO="mem" FROM="vault" tool_provision__secret_vars \
         "REDIS_PASSWORD=$CLIENT_APP_NAME/REDIS_PASSWORD" \
+        "OIDC_ID=$CLIENT_APP_NAME/OIDC_ID" \
+        "OIDC_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" \
     || return 1
 
     return 0

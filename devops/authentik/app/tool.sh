@@ -1289,12 +1289,12 @@ tool_stage_workflow() {
         unset OIDC_SECRET
         (
             if ! PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" "$OIDC_ID" 2> /dev/null || \
-                ! PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_SECRET" "$OIDC_ID" 2> /dev/null; then
+                ! PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_SECRET" "$OIDC_SECRET" 2> /dev/null; then
                 
                 #show_vars OIDC_ID OIDC_SECRET
                 echo "🛡️  OIDC Module detected. Checking secrets for $CLIENT_APP_NAME..." >&2
                 PROVIDER_SELECT="keepass" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" 2> /dev/null || {
-                    local new_id="${CLIENT_APP_SLUG}" ## -$(openssl rand -hex 4)"
+                    local new_id="${CLIENT_APP_NAME}" ## -$(openssl rand -hex 4)"
                     echo "   🆕 Creating OIDC ID..." >&2
                     PROVIDER_SELECT="keepass" core_secret_service_put "$CLIENT_APP_NAME/OIDC_ID" "$new_id" 2> /dev/null || return 1            
                 }
@@ -1310,7 +1310,7 @@ tool_stage_workflow() {
             fi
 
             #show_vars OIDC_ID OIDC_SECRET
-            FROM="vault" TO="mem" tool_provision__secret_vars \
+            FROM="keepass" TO="mem vault" tool_provision__secret_vars \
                 "OIDC_ID=$CLIENT_APP_NAME/OIDC_ID" \
                 "OIDC_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" || return 1
         )
