@@ -4,8 +4,11 @@ services:
     image: ghcr.io/immich-app/immich-server:release
     volumes:
       - /mnt/ssd980/immich_data:/usr/src/app/upload
-      - /etc/localtime:/etc/localtime:ro
+      - /etc/localtime:/etc/localtime:ro      
+      - ../trusted-ca.pem:/usr/local/share/ca-certificates/trusted-ca.crt:ro
     environment:
+      - NODE_EXTRA_CA_CERTS=/usr/local/share/ca-certificates/trusted-ca.crt
+      - NODE_TLS_REJECT_UNAUTHORIZED=1
       # BASE DE DADOS
       # Aqui usamos o nome do serviço Postgres e a senha injetada pelo teu script de secrets
       - DB_URL=${DB_URL}
@@ -19,18 +22,16 @@ services:
       # Garante que o serviço de ML no docker-compose se chama 'immich-ml'
       - IMMICH_MACHINE_LEARNING_URL=http://immich-ml.$INTERNAL_DOMAIN:3003
       - IMMICH_OAUTH_ENABLED=true
-      - IMMICH_OAUTH_ISSUER_URL=https://auth.$DOMAIN/application/o/$CLIENT_APP_NAME/
-      - IMMICH_OAUTH_CLIENT_ID=${OIDC_ID}
-      - IMMICH_OAUTH_CLIENT_SECRET=${OIDC_SECRET}
+      - IMMICH_OAUTH_ISSUER_URL=https://auth.${DOMAIN}/application/o/$CLIENT_APP_NAME/
+      - IMMICH_OAUTH_REDIRECT_URI=https://fotos.${DOMAIN}/auth/login      
       - IMMICH_OAUTH_AUTO_LAUNCH=true
       - IMMICH_OAUTH_AUTO_REGISTER=true
-      - IMMICH_OAUTH_SCOPE=openid email profile
-      - NODE_TLS_REJECT_UNAUTHORIZED=0
+      - IMMICH_OAUTH_SCOPE=openid email profile    
     ports:
       - 2283:2283
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.immich.rule=Host(`fotos.home2500.local`)'
+      - 'traefik.http.routers.immich.rule=Host(`fotos.${DOMAIN}`)'
       - 'traefik.http.routers.immich.entrypoints=websecure'
       - 'traefik.http.routers.immich.tls=true'
       - 'traefik.http.services.immich.loadbalancer.server.port=2283'

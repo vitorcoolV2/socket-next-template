@@ -161,7 +161,8 @@ provision_secrets() {
         
         PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/REDIS_PASSWORD" || \
             TO="vault" FROM="vault" tool_provision__secret_vars \
-                "REDIS_PASSWORD=authentik/AUTHENTIK_REDIS__PASSWORD" || return 1        
+                "REDIS_PASSWORD=authentik/AUTHENTIK_REDIS__PASSWORD" \
+            || return 1        
         return 0
                   
     ) || return 1
@@ -172,11 +173,14 @@ provision_secrets() {
 deploy_secrets() {
     require_vars CLIENT_APP_NAME || return 1
 
-     TO="mem" FROM="vault" tool_provision__secret_vars \
-        "REDIS_PASSWORD=$CLIENT_APP_NAME/REDIS_PASSWORD" \
-        "OIDC_ID=$CLIENT_APP_NAME/OIDC_ID" \
-        "OIDC_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" \
-    || return 1
+    (            
+        FROM="vault" TO="mem" tool_provision__secret_vars \
+            "REDIS_PASSWORD=$CLIENT_APP_NAME/REDIS_PASSWORD" \
+            "IMMICH_OAUTH_CLIENT_ID=$CLIENT_APP_NAME/OIDC_ID" \
+            "IMMICH_OAUTH_CLIENT_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" \
+        || return 1
+
+    ) || return 1
 
     return 0
 }

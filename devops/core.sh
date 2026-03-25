@@ -1435,7 +1435,12 @@ core_url_encode() {
     python3 -c "import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=''))" "$string"
 }
 core_secret_export2_env_vars() {   
-        local input_path="$1"  
+    local input_path="$1"  
+
+    shift 
+    # Agora $@ contém APENAS os nomes das secrets (ex: REDIS_PASSWORD IMMICH_SECRET)
+    local VARS_TO_PROCESS=("$@") 
+
     local temp="${input_path%/}"
     local trimed_path="${temp#/}"
 
@@ -1452,10 +1457,6 @@ core_secret_export2_env_vars() {
     local secret_file_name="${trimed_path##*/}"
 
     require_vars input_path service_nsp secret_file_name || return 1
-
-    shift 
-    # Agora $@ contém APENAS os nomes das secrets (ex: REDIS_PASSWORD IMMICH_SECRET)
-    local VARS_TO_PROCESS=("$@") 
 
     # Validamos primeiro
     require_vars MEM_ROOT_DIR DEVOPS_DIR || { echo "???" >&2; return 1; }
@@ -1481,13 +1482,16 @@ core_secret_export2_env_vars() {
 
     local val_content
     for var_name in "${VARS_TO_PROCESS[@]}"; do
+
         if PROVIDER_SELECT="mem" _get_service_secret_path "$service_nsp/$var_name" 2> /dev/null; then
             val_content="${!var_name}"
             echo "${var_name}=${val_content}" >> "$_APP_SECRET_ENV"
             echo "   ✅ Added $service_nsp/$var_name" >&2 > /dev/null
-        else
+        else            
+            echo "${var_name}=${val_content}" >> "$_APP_SECRET_ENV"
             echo "   ❌ Failed to fetch secret: $service_nsp/$var_name" >&2
-            return 1
+            continue
+            #return 1
         fi        
     done
 
@@ -1518,7 +1522,7 @@ core_secret_load_vars() {
         service_nsp=$(sanitize_path_name "$service_nsp")
         local xprovider="$proto_rest"
 
-        echo "📥 Fetching [$xprovider] -> $service_nsp/$var_name..." >&2
+        echo "  📥 Fetching [$xprovider] -> $target_provider://$service_nsp/$var_name..." >&2
 
 
         # 1. Tentar primeiro o 'mem' (cache/performance)

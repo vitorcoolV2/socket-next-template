@@ -427,6 +427,7 @@ _db_role_get_credentials() {
     _db_role_names "$role" || return 1  ###  validate value to be one of admin | rw | ro
 
     require_vars CLIENT_APP_NAME || return 1
+    
     PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1
     PROVIDER_SELECT="vault keepass" core_secret_service_get \
                 "$CLIENT_APP_NAME/$CLIENT_APP_DB_ROLE_PASS" || return 1
@@ -480,41 +481,43 @@ _db_role_test_credentials() {
     local role="$1"
 
     # 1. Carregar definições da role (assume que esta função exporta CLIENT_APP_DB_ROLE_NAME e a senha)
-    _db_role_get_credentials "$role" || return 1
-    
-    echo "🧪 Testando permissões para a role: $CLIENT_APP_DB_ROLE_NAME ($role)..." >&2
+    (
+        _db_role_get_credentials "$role" || return 1
+        
+        echo "🧪 Testando permissões para a role: $CLIENT_APP_DB_ROLE_NAME ($role)..." >&2
 
-    # 2. Definir o statement baseado na role
-    local test_sql
-    case "$role" in
-        admin)
-            # Admin deve conseguir ver tabelas de sistema e configurações de runtime
-            test_sql="SELECT count(*) FROM pg_settings WHERE name LIKE 'max_%';"
-            ;;
-        rw|ro)
-            # RW e RO devem conseguir ler o esquema público e listar tabelas
-            # Este comando prova que o USER tem permissão de CONNECT + USAGE no SCHEMA
-            test_sql="SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"
-            ;;
-        *)
-            echo "❌ Role desconhecida: $role"
+        # 2. Definir o statement baseado na role
+        local test_sql
+        case "$role" in
+            admin)
+                # Admin deve conseguir ver tabelas de sistema e configurações de runtime
+                test_sql="SELECT count(*) FROM pg_settings WHERE name LIKE 'max_%';"
+                ;;
+            rw|ro)
+                # RW e RO devem conseguir ler o esquema público e listar tabelas
+                # Este comando prova que o USER tem permissão de CONNECT + USAGE no SCHEMA
+                test_sql="SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"
+                ;;
+            *)
+                echo "❌ Role desconhecida: $role"
+                return 1
+                ;;
+        esac
+
+        # 3. Execução via pg_exec
+        _db_role_get_credentials "$role" || return 1
+        local pass_value="${!CLIENT_APP_DB_ROLE_PASS}"
+
+        require_vars pass_value || return 1
+        # Se o comando retornar status 0, a role está funcional.
+        if pg_exec "$test_sql" "$CLIENT_APP_DB_ROLE_NAME" "$pass_value" "$CLIENT_APP_DB_NAME"; then
+            echo "✅ Role '$CLIENT_APP_DB_ROLE_NAME' validada com sucesso." >&2
+            return 0
+        else
+            echo "❌ FALHA: Role '$role' não tem acesso à base de dados '$CLIENT_APP_DB_NAME'." >&2
             return 1
-            ;;
-    esac
-
-    # 3. Execução via pg_exec
-    _db_role_get_credentials "$role" || return 1
-    local pass_value="${!CLIENT_APP_DB_ROLE_PASS}"
-
-    require_vars pass_value || return 1
-    # Se o comando retornar status 0, a role está funcional.
-    if pg_exec "$test_sql" "$CLIENT_APP_DB_ROLE_NAME" "$pass_value" "$CLIENT_APP_DB_NAME"; then
-        echo "✅ Role '$CLIENT_APP_DB_ROLE_NAME' validada com sucesso." >&2
-        return 0
-    else
-        echo "❌ FALHA: Role '$role' não tem acesso à base de dados '$CLIENT_APP_DB_NAME'." >&2
-        return 1
-    fi
+        fi
+    ) || return 1
 }
 ## very dangerous
 app_db_nuke() {
@@ -993,19 +996,58 @@ app_blue_apply() {
         return 1
     }
 
-    local secret_file=$(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")
-    if DEBUG=false require_files secret_file; then
-        source $secret_file
-    fi
+    local arguments=($(blue_template_extract_arguments $CLIENT_APP_BLUE_APPLY_TPL))
 
-    blue_template_vars \
-        $CLIENT_APP_BLUE_APPLY_TPL \
-        $CLIENT_APP_BLUE_APPLY || return 1
+    (
+        for arg_name in "${arguments[@]}"; do      
+            local fix_name="trim $ from $arg_name"  
+            echo  "Gather secret $arg_name" >&2
+            PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$sname"            
+        done
+
+        #local secret_file=$(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")
+        #if DEBUG=false require_files secret_file; then
+        #    source $secret_file
+        #fi
+
+        blue_template_vars \
+            $CLIENT_APP_BLUE_APPLY_TPL \
+            $CLIENT_APP_BLUE_APPLY || return 1
         
-    blue_apply "$CLIENT_APP_BLUE_APPLY" || return 1
+        blue_apply "$CLIENT_APP_BLUE_APPLY" || return 1
+    )
+
 
     # .gitgnored the factory of secrets
     # DO NOT rm -f $CLIENT_APP_BLUE_APPLY
+}
+app_blue_apply() {
+    require_files CLIENT_APP_BLUE_APPLY_TPL || return 1
+
+    # 1. Extract arguments (e.g., $OIDC_ID, $OIDC_SECRET)
+    local arguments=($(blue_template_extract_arguments "$CLIENT_APP_BLUE_APPLY_TPL"))
+
+    (
+        for arg_name in "${arguments[@]}"; do      
+            # 2. Trim the '$' prefix to get the clean key name
+            local clean_key="${arg_name#\$}"            
+            echo "   🔐 Gathering secret: $clean_key" >&2            
+            # 3. Fetch and EVAL to inject into this subshell's environment           
+            PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$clean_key" 2>/dev/null
+            local value="${!clean_key}"
+            if [[ -z "$value" ]]; then                
+                echo "   ⚠️ Warning: Could not find $clean_key in MEM for $CLIENT_APP_NAME" >&2
+            fi
+        done
+
+        # 4. Now that variables are in the environment, generate the blueprint
+        blue_template_vars \
+            "$CLIENT_APP_BLUE_APPLY_TPL" \
+            "$CLIENT_APP_BLUE_APPLY" || return 1
+        
+        # 5. Apply to Authentik
+        blue_apply "$CLIENT_APP_BLUE_APPLY" || return 1
+    )
 }
 app_blue_cleanup() {
     require_files CLIENT_APP_BLUE_CLEANUP_TPL || {
@@ -1018,7 +1060,9 @@ app_blue_cleanup() {
         $CLIENT_APP_BLUE_CLEANUP || return 1
 
     blue_apply "$CLIENT_APP_BLUE_CLEANUP" || return 1
-    rm -f $CLIENT_APP_BLUE_CLEANUP
+    
+    blue_delete "$CLIENT_APP_BLUE_APPLY"
+
 }
 app_wait4_oidc() {
     local target_service="${1}" ##:-$CLIENT_APP_NAME}"
@@ -1710,6 +1754,7 @@ app_up() {
         "provision_db" \
         "provision_oidc" \
         "provision_secrets" \
+        "deploy_secrets" \
         "compose" || return 1
 
     require_vars CLIENT_APP_COMPOSE_FILE CLIENT_APP_NAME  || return 1     
@@ -1767,12 +1812,11 @@ app_down() {
         #docker compose down --remove-orphans
         local secret_file=$(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")            
         if DEBUG=false require_files secret_file; then
-            env $(grep -v '^#' $secret_file | xargs) docker compose -f "$CLIENT_APP_COMPOSE_FILE" down
+            env $(grep -v '^#' $secret_file | xargs) docker compose -f "$CLIENT_APP_COMPOSE_FILE" down --remove-orphans
         else            
-            docker compose -f "$CLIENT_APP_COMPOSE_FILE" down
-        fi
-
-       
+            docker compose -f "$CLIENT_APP_COMPOSE_FILE" down --remove-orphans
+        fi    
+        docker compose rm -f $CLIENT_APP_COMPOSE_FILE $CLIENT_APP_CONTAINER_NAME
     )
 }
 
@@ -1828,9 +1872,9 @@ app_provider_remove2_outpost() {
 
 app_destroy() {
     app_down    
-    
+    app_provider_remove2_outpost   
     app_blue_cleanup
-    app_provider_remove2_outpost           
+            
 }
 
 

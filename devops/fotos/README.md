@@ -4,7 +4,7 @@ Self-hosted Google Photos alternative.
 
 ## URL
 
-<https://fotos.home2500.local>
+<https://fotos.${DOMAIN}>
 
 ## Stack
 
@@ -22,7 +22,7 @@ Self-hosted Google Photos alternative.
 
 ## OIDC Configuration
 
-- **Issuer**: <https://auth.home2500.local/application/o/fotos/>
+- **Issuer**: <https://auth.${DOMAIN}/application/o/fotos/>
 - **Client ID**: immich-fdgds53c
 - **Scopes**: openid, email, profile
 - **Auto-register**: true
@@ -39,8 +39,8 @@ Variáveis:
 
 - `DB_ROLE_ADMIN_PASS` - Password do utilizador DB
 - `REDIS_PASSWORD` - Password do Redis
-- `CLIENT_APP_OIDC_ID` - Client ID OIDC
-- `CLIENT_APP_OIDC_SECRET` - Client Secret OIDC
+- `OIDC_ID` - Client ID OIDC (handled by provision_oidc)
+- `OIDC_SECRET` - Client Secret OIDC (handled by provision_oidc)
 
 ## Deploy
 
@@ -73,13 +73,13 @@ docker compose -f fotos/docker-compose.yaml down
    ```bash
    source ../../core.sh
    source ../authentik/app/tool.sh
-   core_secret_export2_env_vars fotos DB_ROLE_ADMIN_PASS REDIS_PASSWORD CLIENT_APP_OIDC_ID CLIENT_APP_OIDC_SECRET
+   core_secret_export2_env_vars fotos DB_ROLE_ADMIN_PASS REDIS_PASSWORD
    docker compose -f docker-compose.yaml up -d
    ```
 
 ### OIDC login não funciona
 
-1. Verificar que o provider existe no Authentik: <https://auth.home2500.local/if/admin/#/core/providers/>
+1. Verificar que o provider existe no Authentik: <https://auth.${DOMAIN}/if/admin/#/core/providers/>
 2. Verificar redirect_uris no provider
 3. Verificar logs: `docker logs immich-server`
 

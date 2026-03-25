@@ -103,7 +103,7 @@ provision_secrets() {
 PROVIDER_SELECT="vault" core_secret_service_get  "fotos/db_fotos__role_admin"
 deploy_secrets() {
     require_vars CLIENT_APP_NAME || return 1
-    core_secret_export2_env_vars "$CLIENT_APP_NAME" \
+    core_secret_export2_env_vars "$CLIENT_APP_NAME/.secret" \
         "REDIS_PASSWORD" \
         "IMMICH_AUTH_CLIENT_ID" \
         "IMMICH_AUTH_CLIENT_SECRET" || return 1

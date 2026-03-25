@@ -230,16 +230,6 @@ __migrate_env_file__Keepass_file() {
 
 
 # --- SCRIPT # CHECK ---
-require_functions \
-    require_vars \
-    require_binaries \
-    ak_wait4_instance \
-    ak_secrets_show \
-    ak_fix_proxied_redir        
-    
-
-require_vars MEM_ROOT_DIR ## one more core variable to store docker usable secrets
-require_functions vault_get_secret
 
 ak_secrets_compose_get() {    
     if ! vault_validate_token ; then
@@ -254,15 +244,15 @@ ak_secrets_compose_get() {
             "vault://authentik/AUTHENTIK_SECRET_KEY" \
             "vault://authentik/AUTHENTIK_POSTGRESQL__PASSWORD" \
             "vault://authentik/AUTHENTIK_REDIS__PASSWORD" \
-            "vault://authentik/AUTHENTIK_EMAIL__PASSWORD" \
-        && core_secret_export2_env_vars "authentik" \
+            "vault://authentik/AUTHENTIK_EMAIL__PASSWORD" || return 1
+
+        core_secret_export2_env_vars "authentik/.secret" \
             AUTHENTIK_ADMIN_PASS \
             AUTHENTIK_SECRET_KEY \
             AUTHENTIK_POSTGRESQL__PASSWORD \
             AUTHENTIK_REDIS__PASSWORD \
-            AUTHENTIK_EMAIL__PASSWORD \
-        || return 1
-    )
+            AUTHENTIK_EMAIL__PASSWORD || return 1
+    ) || return 1
     return 0
 }
 
@@ -532,6 +522,7 @@ ak_fn_catalog() {
 }
 
 source $(realpath "$AUTHENTIK_DIR/../vault/vault_lib.sh" )
+
 ak_load_requirements() {        
     base__requirements(){
         AUTHENTIK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"        
@@ -545,8 +536,13 @@ ak_load_requirements() {
         export AUTHENTIK_DB_CONTAINER="authentik-db"
         export AUTHENTIK_INTERNAL_URL="http://$AUTHENTIK_CONTAINER_NAME.$INTERNAL_DOMAIN:9000"
 
+
+        require_functions \
+
+
         show_vars DOMAIN \
             INTERNAL_DOMAIN \
+            MEM_ROOT_DIR \
             AUTHENTIK_DIR \
             AUTHENTIK_DIR_NAME \
             AUTHENTIK_ADMIN_USER \
@@ -556,9 +552,15 @@ ak_load_requirements() {
             AUTHENTIK_DB_CONTAINER \
             DEVOPS_DIR && \
         require_functions \
+            require_vars \
+            require_binaries \
+            ak_wait4_instance \
+            ak_secrets_show \
+            ak_fix_proxied_redir \
+            vault_get_secret \
             core_secret_service_get \
             core_secret_service_put \
-            require_vars require_files || return 1
+            require_files || return 1
     }
     base__requirements || return 1
 }
