@@ -347,7 +347,7 @@ vault_request_stew_token() {
         # never store this token on keepass. 
         #       keepass is to store $user var definition must be mandatory and documented
         PROVIDER_SELECT="mem" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1
-    )
+    ) || return 1
 }
 export -f vault_request_stew_token
 

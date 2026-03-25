@@ -8,6 +8,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG USERNAME
 ARG USER_UID
 ARG USER_GID
+ARG DOCKER_GID=986
 
 # Verificar se foram fornecidos
 RUN if [ -z "$USERNAME" ] || [ -z "$USER_UID" ] || [ -z "$USER_GID" ]; then \
@@ -58,6 +59,20 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | g
     && apt-get update \
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI
+RUN apt-get update && apt-get install -y --no-install-recommends docker.io && rm -rf /var/lib/apt/lists/*
+
+# Create docker group and add user to it
+RUN if getent group docker > /dev/null 2>&1; then \
+    EXISTING_GID=$(getent group docker | cut -d: -f3); \
+    if [ "$EXISTING_GID" != "${DOCKER_GID}" ]; then \
+    groupmod -g ${DOCKER_GID} docker; \
+    fi; \
+    else \
+    groupadd -g ${DOCKER_GID} docker; \
+    fi && \
+    usermod -aG docker ${USERNAME}
 
 # DEBUG: Check if user still exists
 RUN echo "=== BEFORE USER SWITCH ===" && \

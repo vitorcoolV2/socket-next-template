@@ -104,45 +104,26 @@ on_certificate_fail() {
 
 provision_secrets() {
     echo "🔐 Provisioning OpenCode server password..." >&2        
-    (
+    require_vars CLIENT_APP_NAME || return 1
 
-        _sync() {
-            local target="$1" path="$2"
-            if ! PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$target" &>/dev/null; then
-                if PROVIDER_SELECT="vault" core_secret_service_get "$path"; then
-                    # O core_secret_service_get costuma exportar a variável com o nome da última parte do path
-                    # Precisamos garantir que o valor vai para a variável correta antes do put
-                    local var_name="${path##*/}"
-                    local val="${!var_name}"
-                    PROVIDER_SELECT="mem" core_secret_service_put "$CLIENT_APP_NAME/$target" "$val" || return 1
-                else
-                    echo "❌ Erro: Falha ao obter $path do Vault" >&2
-                    return 1
-                fi
-            fi
-        }
-
-        ### 1. Sincronizar segredos externos
-        _sync "OPENCODE_SERVER_PASSWORD" "opencode/OPENCODE_SERVER_PASSWORD" || return 1
-
-        local vars_to_export=(
-            OPENCODE_SERVER_PASSWORD
-        )
-
-        # Garante que as variáveis estão no ambiente da subshell para o export2_env_vars
-        for var in "${vars_to_export[@]}"; do
-            PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var" >/dev/null || return 1
-        done
-        #### write .secret file
-        require_vars "${vars_to_export[@]}" || return 1   
-        core_secret_export2_env_vars "$CLIENT_APP_NAME" "${vars_to_export[@]}" || return 1
-        return 0
-                   
-    ) || return 1
+    PROVIDER_SELECT="keepass" core_secret_service_get "$CLIENT_APP_NAME/OPENCODE_SERVER_PASSWORD" || \
+        TO="keepass" FROM="vault" tool_provision__secret_vars \
+            "OPENCODE_SERVER_PASSWORD=opencode/OPENCODE_SERVER_PASSWORD" \
+        || return 1
+        
+    return 0
 }
 
 deploy_secrets() {
-    echo "deploy secrets - not required for opencode"
+    require_vars CLIENT_APP_NAME || return 1
+
+    (
+        FROM="vault" TO="mem" tool_provision__secret_vars \
+            "OPENCODE_SERVER_PASSWORD=$CLIENT_APP_NAME/OPENCODE_SERVER_PASSWORD" \
+        || return 1
+
+    ) || return 1
+
     return 0
 }
 

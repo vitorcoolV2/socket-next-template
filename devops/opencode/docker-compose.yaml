@@ -7,6 +7,7 @@ services:
         - USERNAME=${USER}
         - USER_UID=${UID}
         - USER_GID=${GID}
+        - DOCKER_GID=986
     image: opencode-${UID}-${GID}:latest
 
     container_name: opencode
@@ -46,7 +47,7 @@ services:
       - 'traefik.enable=true'
       - 'traefik.http.routers.opencode.rule=Host(`opencode.home2500.local`)'
       - 'traefik.http.routers.opencode.entrypoints=websecure'
-      - 'traefik.http.routers.opencode.tls=true'   
+      - 'traefik.http.routers.opencode.tls=true'
       - 'traefik.http.routers.opencode.middlewares=authentik-sso@file,security-headers@file'
       - 'traefik.http.routers.opencode.service=opencode-service'
       - 'traefik.http.services.opencode-service.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT}'
