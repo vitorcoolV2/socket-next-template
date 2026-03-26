@@ -13,7 +13,11 @@ fi
 _BUILD_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 cd $_BUILD_DIR
-source $(realpath "../_0-authentik_lib.sh")
+#source $(realpath "../_0-authentik_lib.sh")
+# Verifica se a função 'ak_up' NÃO existe
+if ! declare -f ak_api_token_restore > /dev/null; then
+    source $(realpath "../_0-authentik_lib.sh")
+fi
 cd $_BUILD_DIR
 echo "working dir: $_BUILD_DIR"
 
@@ -142,9 +146,14 @@ map_asset_to_url() {
 _get_default_brand_pk() {
     local url="${AUTHENTIK_INTERNAL_URL:-"http://authentik-server.app-network:9000"}"
     # Pegamos o ID da marca 'authentik-default'
+    local token=$(
+        PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2>/dev/null
+        echo "$AUTHENTIK_API_TOKEN"
+    )
+    require_vars token || return 1
     local pk
-    local resp
-    resp=$(curl -s -H "Authorization: Bearer $AUTHENTIK_API_TOKEN" \
+    local resp    
+    resp=$(curl -s -H "Authorization: Bearer $token" \
         "$url/api/v3/core/brands/" | jq -r '.')
     #pk=$(echo $resp | jq -r '.results[0].pk // empty')
     pk=$(echo $resp | jq -r '.results[0].brand_uuid // empty')
@@ -157,7 +166,6 @@ _get_default_brand_pk() {
     echo "$pk"
 }
 _apply_authentik_branding() {
-    require_vars DOMAIN AUTHENTIK_API_TOKEN
     local branding_file="$(branding_file_theme "${1:-DARK}")"
     
     if [[ ! -f "$branding_file" ]]; then
@@ -166,15 +174,17 @@ _apply_authentik_branding() {
     fi
     local branding_json=$(cat $branding_file | jq .)
 
+    require_vars DOMAIN
+    local token=$(
+        PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2>/dev/null
+        echo "$AUTHENTIK_API_TOKEN"
+    )
+    require_vars token || return 1
+
 
     # --- PARTE 2: API LOGIC ---
     # Update da Brand (Tema, Cores, Background)
     local brand_pk="$(_get_default_brand_pk)"
-
-    #local brand=$(curl -k -s -H "Authorization: Bearer $AUTHENTIK_API_TOKEN" \
-    #    "https://${brand_domain}/api/v3/core/brands/" | jq -r '.')    
-    # O -r (raw) remove as aspas do valor extraído
-    #local brand_pk="$(echo $brand | jq -r '.results[0].brand_uuid')"
 
     require_vars brand_pk || {
         echo $brand | jq .
@@ -203,7 +213,7 @@ _apply_authentik_branding() {
     local final_payload=$(echo "$branding_json" | jq --arg bg "$flow_bg" '.attributes.settings.background = $bg')
 
     local response=$(curl -k -s -X PATCH "https://${brand_domain}/api/v3/core/brands/${brand_pk}/" \
-         -H "Authorization: Bearer $AUTHENTIK_API_TOKEN" \
+         -H "Authorization: Bearer $token" \
          -H "Content-Type: application/json" \
          -d "$final_payload")
 
@@ -221,7 +231,7 @@ _apply_authentik_branding() {
     
     echo "🔗 [API] Sincronizando Flow (Layout: $flow_layout)"
     curl -k -s -X PATCH "https://${brand_domain}/api/v3/flows/instances/default-authentication-flow/" \
-        -H "Authorization: Bearer $AUTHENTIK_API_TOKEN" \
+        -H "Authorization: Bearer $token" \
         -H "Content-Type: application/json" \
         -d "{\"layout\": \"$flow_layout\"}" | jq '.' > /dev/null
         
@@ -297,7 +307,8 @@ choose_and_apply() {
 
 require_functions \
     ak_api_token_generate \
-    ak_api_token_restore
+    ak_api_token_restore \
+    ak_api_token_validate
 
 echo "You may need to:"
 echo "- . ../../vault/vault_lib.sh"
@@ -311,17 +322,11 @@ echo "- _build_brand_theme"
 # --- EXECUTION ---
 echo "🛠️ Home2500 Branding Engine Loaded."
 _get_brand_theme_ids
-require_vars AUTHENTIK_API_TOKEN && { \
-        ak_api_token_validate || {
-            echo "run:"
-            echo "ak_api_token_restore"    
-            echo "ak_api_token_generate"    
-        }
-    } || { 
-        echo "run:"
-        echo "ak_api_token_generate"
-    }
-
+ak_api_token_validate || {
+    echo "run:"
+    echo "ak_api_token_restore"    
+    echo "ak_api_token_generate"    
+}
 
 echo "choose_and_apply"
 echo "_build_brand_theme <theme>"

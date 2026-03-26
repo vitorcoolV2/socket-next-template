@@ -83,49 +83,51 @@ __docker_reset__clean() {
 [[ " $@ " == *" --cleanup "* ]] && __docker_reset__clean
 
 
+kp test && kp open
 ###### BOOT HARD CORE (PIHOLE + VAULT) - boot before authentik. 
-kp open
 source $(core_resolve_file "pihole/_0.pihole_lib.sh")  
 ##ph api open
-wait4_http_url_ready "$PIHOLE_URL/admin/" || \
+if ! wait4_http_url_ready "$PIHOLE_URL/admin/"; then
   ph down && ph up && \
     wait4_http_url_ready "$PIHOLE_URL/admin/" 10 || exit 1
-## pihole trial requiremens
+fi
+## pihole trial requiremens. pihole web api service to register...
+ph api password restore 2> /dev/null || ph api password rotate || exit 1
+# really important pihole on this self "caps" system  
 ph api auth     && echo "Ready to register names" \
 ph api dns sync && echo "Desired names + Pihole" \
   echo "PIHOLE ONLINE" || exit 1
 
 ####### VAULT
 source $(core_resolve_file "vault/vault_lib.sh")  
-restart_vault() {
-  (
-    cd "$DEVOPS_DIR/vault"                                          
-    docker compose up -d   ## KEEP THIS LINE !!!!!!!!! important. Will not start vault without
-
-    
-    
-  ) || return 1
+vault_open() {  
+  is_sealed 2> /dev/null && vault_unseal || return 1    
 }  
-wait4_http_url_ready $VAULT_ADDR || restart_vault || exit 1
-is_sealed && vault_unseal || return 1    
-    ### NO https no request
+wait4_http_url_ready $VAULT_ADDR 1 2> /dev/null || vault_up || exit 1
+wait4_http_url_ready $VAULT_ADDR 5 && echo "VAULT ONLINE" || exit 1
+## no vault no certification as is, so handle vault
+vault_open || return 1
+#### I beleave Steward is a self protecting role entity. He knows the means to do, mostly the risks|the predictable stones on the way.
+## the user vault/VAULT_TOKEN. this boot start is steward role 4 now. every thing is 4 steward role 2 do
 vault_request_stew_token || return 1
 vault_validate_token || return 1
 require_vars "VAULT_CACERT"
-is_sealed && vault_unseal || return 1    
-wait4_http_url_ready $VAULT_ADDR 5 && echo "VAULT ONLINE" || exit 1
+
 
 
 ###### AUTHENTIK RESTART
 source $(core_resolve_file "authentik/_0-authentik_lib.sh")
-ak_up || return 1
+ak_down
+ak_up || exit 1
+
 ph api auth && \
 ph api dns sync && \
-wait4_http_url_ready "$AUTHENTIK_INTERNAL_URL" 10 || exit 1
+wait4_http_url_ready "$AUTHENTIK_INTERNAL_URL" 25 || exit 1
+
 # after start. request last token or generate one
 # will fail when authentik is not available HEAR. ! very important
 ak_api_token_restore \
-  || ak_api_token_generate
+  || ak_api_token_generate || return 1
 
 
 ###### TRAEFIK, AUTHENTIK, 
@@ -135,32 +137,18 @@ ph api auth
 ph api dns sync
 
 
-
-
-
-# authentik fully ready
-wait4_http_url_ready $AUTHENTIK_INTERNAL_URL 50
-
-
 # no TOKEN to continue. next fase apply blue Authentik blueprint
-ak_api_token_validate || return 1
+ak_api_token_validate || exit 1
 
 #### WAIT whoami (service container) is the first (little stone|step) to OIDC TESTING REQUIREMENTS GROUD. 
 #### if not available y better review Authentik from simpler setup
-wait4_http_url_ready "whoami.$DOMAIN" || (tk_down && tk_up)
-wait4_http_url_ready "$AUTHENTIK_URL" 50  
+wait4_http_url_ready "whoami.$DOMAIN" 1 2> /dev/null || ak_fix_proxied_redir 2> /dev/null
+wait4_http_url_ready "whoami.$DOMAIN" 1 || exit 1
+wait4_http_url_ready "$AUTHENTIK_URL" 1 || exit 1
 
-set_authentik_theme()  {
-  (
-    source $(core_resolve_file "authentik/theme/_builder.sh")  
-    vault_validate_token
-    _build_brand_theme "emotion"     
-  )
-}
-set_authentik_theme
-
-
-
+ak_login || exit 1
+ak_theme_light || exit 1
+exit
 # review stack when authentik https app can be deployed by understandable composition manifest
 
 COMPOSE_STACK_FILES=( "opencode" "backup" "fotos" "files")

@@ -351,7 +351,8 @@ ak_up() {
     (
         cd $AUTHENTIK_DIR
         if ak_secrets_compose_get; then
-            docker compose up -d  || return 1   
+            docker compose up -d  && \
+            ak_wait4_instance || return 1   
             
         fi
     )

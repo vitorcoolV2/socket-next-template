@@ -1508,7 +1508,7 @@ core_secret_load_vars() {
     }
 
     local target_provider=${PROVIDER_SELECT:-mem}
-    echo "🏗️  Preparing secrets injection..." >&2
+    [[ ${#ARGS[@]} -gt 2 ]] && echo "🏗️  Preparing secrets injection..." >&2
 
     for spec in "${ARGS[@]}"; do
         # Parsing da string: provider://namespace/var_name
@@ -1553,7 +1553,7 @@ core_secret_load_vars() {
         #echo "   ✅ Loaded $var_name" >&2
     done
 
-    echo "🚀 All secrets loaded into provider mem" >&2
+    [[ ${#ARGS[@]} -gt 2 ]] && echo "🚀 All secrets loaded into provider mem" >&2
     return 0
 }
 # Mapeia o caminho interno do KeePass (Estrutura de Pastas)
