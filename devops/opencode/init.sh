@@ -98,8 +98,15 @@ on_outpost_add_fail() {
     return 0
 }
 
+on_provision_oidc_fail() {
+    return 0
+}
+
 on_certificate_fail() {
     return 0
+}
+on_deploy_secrets_fail() {
+    return 1
 }
 
 provision_secrets() {

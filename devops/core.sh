@@ -2283,7 +2283,10 @@ core_load_requirements() {
         
     export KEEPASS_ROOT_DIR="vault" 
     export VAULT_ROOT_DIR="secret"
-    export MEM_ROOT_DIR="/run/user/$UID/home2500"
+    export MEM_ROOT_DIR="/tmp/home2500"
+    if [[ -d "/run/user/$UID" ]]; then
+        export MEM_ROOT_DIR="/run/user/$UID/home2500"
+    fi
    
     require_locations MEM_ROOT_DIR || {
         mkdir -p "$MEM_ROOT_DIR"

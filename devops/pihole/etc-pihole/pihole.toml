@@ -1,7 +1,7 @@
 # Pi-hole configuration file (v6.4.1)
 # Encoding: UTF-8
 # This file is managed by pihole-FTL
-# Last updated on 2026-03-24 17:43:06 UTC
+# Last updated on 2026-03-26 10:48:23 UTC
 
 [dns]
   # Upstream DNS Servers to be used by Pi-hole. If this is not set, Pi-hole will not
@@ -134,23 +134,22 @@
     "192.168.1.67 traefik.home2500.local",
     "192.168.1.67 vault.home2500.local",
     "192.168.1.67 whoami.home2500.local",
-    "172.28.0.2 unbound.app-network",
     "172.28.0.6 vault.app-network",
     "172.28.0.11 traefik.app-network",
     "172.28.0.12 whoami.app-network",
     "172.28.0.10 authentik-server.app-network",
-    "172.28.0.7 authentik-worker.app-network",
-    "172.28.0.5 mailcrab.app-network",
-    "172.28.0.8 opencode.app-network",
     "172.28.0.15 backup.app-network",
-    "172.28.0.13 immich-server.app-network",
-    "172.28.0.9 immich-ml.app-network",
     "192.168.1.67 backup.home2500.local",
-    "192.168.1.67 files.home2500.local",
     "192.168.1.67 fotos.home2500.local",
     "192.168.1.67 opencode.home2500.local",
-    "172.28.0.4 authentik-db.app-network",
-    "172.28.0.3 authentik-redis.app-network"
+    "192.168.1.67 files.home2500.local",
+    "172.28.0.9 authentik-worker.app-network",
+    "172.28.0.5 ocis-server.app-network",
+    "172.28.0.2 opencode.app-network",
+    "172.28.0.7 unbound.app-network",
+    "172.28.0.8 authentik-db.app-network",
+    "172.28.0.3 authentik-redis.app-network",
+    "172.28.0.4 mailcrab.app-network"
   ] ### CHANGED, default = []
 
   # If set, queries for plain names, without dots or domain parts, are never forwarded to
@@ -1132,7 +1131,7 @@
     #
     # Allowed values are:
     #     A valid Pi-hole password hash
-    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$814ojxJzaz5Hch6pJJ4XIA==$XGQDRIRG+V/j7bscY4G1X8PWw0jv88rBVn79ti4ssdI=" ### CHANGED, default = ""
+    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$pOfX8kO5AHA5FGngho4b8g==$hgy4bYXwGKFH/r6ryjSQ+KGKfyKvLSSW8Fo3dG2FnDg=" ### CHANGED, default = ""
 
     # Pi-hole 2FA TOTP secret. When set to something different than "", 2FA authentication
     # will be enforced for the API and the web interface. This setting is write-only, you
