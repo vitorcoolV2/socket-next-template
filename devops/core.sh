@@ -1327,6 +1327,101 @@ _get_service_secret_path() {
         return 1
     fi
 }
+_delete_service_secret_path() {    
+    local input_path="$1"  
+    local temp="${input_path%/}"
+    local trimed_path="${temp#/}"
+
+    # --- Validação de Formato ---
+    local segments=$(echo "$trimed_path" | tr -s '/' '\n' | wc -l)
+    if [[ "$segments" -lt 2 ]]; then
+        echo "❌ [ERROR] Formato inválido para deleção: '$input_path'" >&2
+        return 1
+    fi
+
+    local service_nsp="${trimed_path%/*}"
+    local secret_name="${trimed_path##*/}"
+
+    require_vars input_path service_nsp secret_name || return 1
+
+    # --- Seleção de Provedores ---
+    local secret_providers
+    secret_providers="${PROVIDER_SELECT:-${SECRET_PROVIDERS:-"mem vault keepass"}}"
+    unset PROVIDER_SELECT
+
+    local deleted_any=1 # Começa como erro (1), muda para 0 se deletar algo
+
+    # --- Funções Internas de Remoção ---
+
+    _delete_mem_provider() {
+        local mem_path=$(core_secret_mapper_mem "$service_nsp" "$secret_name")
+        if [[ -f "$mem_path" ]]; then
+            rm -f "$mem_path" && echo "🗑️ [MEM] Arquivo removido: $mem_path" >&2 && return 0
+        fi
+        return 1
+    }
+
+    _delete_vault_provider() {
+        local vault_path=$(core_secret_mapper_vault "$service_nsp" "$secret_name")
+        if ! declare -f vault_delete_secret >/dev/null; then
+            source "$(core_resolve_file "vault/vault_lib.sh")" > /dev/null 2>&1
+        fi
+        
+        local _dir="$(dirname "$vault_path")"
+        # Tenta deletar via CLI do Vault
+        if vault_delete_secret "$_dir" "$secret_name" 2>/dev/null; then
+            echo "🗑️ [VAULT] Segredo removido de: $_dir/$secret_name" >&2
+            return 0
+        fi
+        return 1
+    }
+    
+    _delete_keepass_provider() {    
+        local kp_path=$(core_secret_mapper_keepass "$service_nsp" "$secret_name")
+        source "$(core_resolve_file "vault/keepass.sh")"
+        
+        # Assume que 'kp_rm_entry' ou similar existe na sua lib de keepass
+        if kp rm "$kp_path" 2>/dev/null; then
+            echo "🗑️ [KEEPASS] Entrada removida: $kp_path" >&2
+            return 0
+        fi
+        return 1
+    }
+
+    # --- Execução do Loop de Deleção ---
+    echo "🔥 Iniciando deleção de '$input_path' nos provedores: $secret_providers" >&2
+    
+    for provider in $secret_providers; do
+        local func="_delete_${provider}_provider"
+        if declare -f "$func" >/dev/null; then
+            if $func; then
+                deleted_any=0
+            else
+                echo "ℹ️ [${provider^^}] delete function não encontrado." >&2
+            fi
+        fi
+    done
+
+    # --- Limpeza de Ambiente ---
+    # Se a variável estiver exportada no shell atual, removemos
+    if [[ -n "${!secret_name}" ]]; then
+        echo "🧹 Unset da variável de ambiente: $secret_name" >&2
+        unset "$secret_name"
+    fi
+
+    if [[ "$deleted_any" -eq 0 ]]; then
+        echo "✅ Sucesso: Segredo '$secret_name' processado." >&2
+        return 0
+    else
+        echo "⚠️ Aviso: Nenhuma instância de '$secret_name' foi encontrada para deleção." >&2
+        return 1
+    fi
+}
+core_secret_service_delete() {
+    local input_path="$1"   
+    # 3. Execução
+    _delete_service_secret_path "$input_path"
+}
 core_secret_service_get() {
     local input_path="$1"   
     # 3. Execução

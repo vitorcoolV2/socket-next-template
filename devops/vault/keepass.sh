@@ -88,7 +88,6 @@ wrapper_declare() {
 wrapper_declare
 
 
-
 # keepass wrapper
 kp() {
     local cmd="$1"
@@ -717,5 +716,8 @@ kp_fn_catalog() {
 }
 
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
-    kp test
+    if [[ -t 1 || -t 2 ]]; then      
+        kp test
+    fi
+    
 fi    

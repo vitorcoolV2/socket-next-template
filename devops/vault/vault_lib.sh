@@ -102,7 +102,28 @@ vault_save_secret() {
         fi
     )
 }
+vault_delete_secret() {
+    local secret_name="$1"
+    # O field não é estritamente necessário para delete no KV, 
+    # pois o Vault deleta a versão do objeto (path) inteiro.
+    
+    DEBUG=false require_vars secret_name || return 1
+    
+    echo "🗑️ Vault: soft-deleting version at '$secret_name'..." >&2
+    (
+        # Recupera o token de forma isolada
+        PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null 
+        require_vars VAULT_TOKEN || { echo "❌ Vault: Token não disponível." >&2; return 1; }
 
+        # Executa o Soft Delete (apenas a versão mais recente)
+        if vault kv delete -mount=secret "$secret_name" > /dev/null 2>&1; then
+            return 0
+        else
+            echo "⚠️ Vault: Falha ao deletar '$secret_name' (pode não existir)." >&2
+            return 1
+        fi
+    )
+}
 
 vault_secret_path_caps () {
     local secret_path=${1,-"secret/"}
@@ -823,7 +844,7 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     echo "" 2>&1
     require_vars VAULT_CACERT 
 
-    kp test && kp open
+    kp test || kp open
 
     ### check state
     if require_container_running VAULT_CONTAINER_NAME; then
