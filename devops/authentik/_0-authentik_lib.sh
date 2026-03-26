@@ -256,8 +256,12 @@ ak_secrets_compose_get() {
     return 0
 }
 
-ak_api_token_restore() {    
-    core_secret_service_get "authentik/AUTHENTIK_API_TOKEN"    
+ak_api_token_restore() { 
+    (   
+        PROVIDER_SELECT="mem" core_secret_load_vars \
+            "keepass://authentik/AUTHENTIK_API_TOKEN" 2> /dev/null && \
+        ak_api_token_validate || return 1      
+    ) || return 1
 }
 
 ak_api_token_generate() {
