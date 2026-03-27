@@ -122,7 +122,7 @@ ak_wait4_instance() {
 ak_api_token_validate() {
     require_vars AUTHENTIK_INTERNAL_URL AUTHENTIK_CONTAINER_NAME || return 1
     
-    if ! require_container_running "AUTHENTIK_CONTAINER_NAME"; then
+    if ! require_containers_ready "AUTHENTIK_CONTAINER_NAME"; then
         echo "❌ Erro: Instancia authentik server não está a correr." >&2
         return 1
     fi
@@ -440,7 +440,7 @@ ak_login() {
 
     show_vars AUTHENTIK_CONTAINER_NAME
     # Camada 1: Infraestrutura (Docker)
-    if ! require_container_running AUTHENTIK_CONTAINER_NAME; then
+    if ! require_containers_ready AUTHENTIK_CONTAINER_NAME; then
         echo "❌ Erro: Instância authentik server não está a correr." >&2
         # Importante: não usamos exit 1 aqui para não fechar o shell do usuário
     else
@@ -562,7 +562,6 @@ ak_load_requirements() {
             ak_wait4_instance \
             ak_secrets_show \
             ak_fix_proxied_redir \
-            vault_get_secret \
             core_secret_service_get \
             core_secret_service_put \
             require_files || return 1

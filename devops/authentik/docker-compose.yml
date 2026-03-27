@@ -82,6 +82,8 @@ services:
       - /run/user/1000/home2500/authentik/.secret
     command: server
     # until curl -s -k "https://auth.${INTERNAL_DOMAIN}/api/v3/core/config/" | grep -q "version" > /dev/null; do sleep 5; done
+    ports:
+      - 9000
     environment:
       AUTHENTIK_COOKIE_DOMAIN: "home2500.local"
       AUTHENTIK_REDIS__HOST: redis      

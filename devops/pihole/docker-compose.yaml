@@ -4,8 +4,9 @@ services:
 
     image: pihole/pihole:2025.11.1
     container_name: pihole
-
-    environment:
+    ports:
+      - "8080:8080"
+    environment:      
       - PHP_ENV_CONFIG["PHP_ERROR_LOG"]="/var/log/lighttpd/error-pihole.log"
       - PHP_ENV_CONFIG[session.gc_maxlifetime]=86400
       - PHP_ENV_CONFIG[session.cookie_lifetime]=86400

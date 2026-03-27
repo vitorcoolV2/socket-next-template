@@ -38,6 +38,7 @@ vault_config_requirements() {
 
     # Extração de variáveis
     export VAULT_ADDR=$(yq -oy '.api_addr' "$CONFIG_FILE" 2>/dev/null || echo "http://127.0.0.1:8200")
+    export VAULT_SERVICE_PORT=$(extract_url_port $VAULT_ADDR)
     export VAULT_INTERNAL_NS="$VAULT_DIR_NAME.$INTERNAL_DOMAIN"
     export VAULT_NS="$VAULT_DIR_NAME.$DOMAIN"
 
@@ -277,7 +278,7 @@ vault_logout(){
 
 }
 vault_request_root_token() {    
-    ! require_container_running VAULT_CONTAINER_NAME && {
+    ! require_containers_ready VAULT_CONTAINER_NAME && {
         echo "❌ Erro: Instancia $VAULT_CONTAINER_NAME server não está a correr."
         return 1
     }
@@ -306,7 +307,7 @@ vault_request_root_token() {
 }
 vault_request_stew_token() {
   
-    ! require_container_running VAULT_CONTAINER_NAME && {
+    ! require_containers_ready VAULT_CONTAINER_NAME && {
         echo "❌ Erro: Instancia $VAULT_CONTAINER_NAME server não está a correr."
         return 1
     }
@@ -847,7 +848,7 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     kp test || kp open
 
     ### check state
-    if require_container_running VAULT_CONTAINER_NAME; then
+    if require_containers_ready VAULT_CONTAINER_NAME; then
         if is_sealed; then    
             # is_sealed retornou 0 (True), logo o cofre está fechado.
             echo "🔒 Vault is sealed. Action: vault_unseal" >&2

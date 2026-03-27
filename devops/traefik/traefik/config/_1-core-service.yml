@@ -38,8 +38,9 @@ http:
       rootCAs: ["/etc/traefik/certs/ca-chain.pem"]
       serverName: "vault.app-network"
       insecureSkipVerify: true
-    insecure-transport:
+    insecureTransport:
       insecureSkipVerify: true
+      
 
   middlewares:
     security-headers:

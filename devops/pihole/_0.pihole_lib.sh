@@ -104,7 +104,7 @@ ph_api(){
         local wait_time=0.5  # segundos entre tentativas
 
         debug=false 
-        require_container_running PIHOLE_CONTAINER_NAME || return 1
+        require_containers_ready PIHOLE_CONTAINER_NAME || return 1
 
         local web_api_pw=$(
             if PROVIDER_SELECT="mem" core_secret_service_get "pihole/WEB_API_PASSWORD" > /dev/null 2>&1; then           
@@ -192,7 +192,7 @@ ph_api(){
             local PIHOLE_API_PASSWORD="${1}"
 
             local res
-            if res=$(require_container_running PIHOLE_CONTAINER_NAME); then
+            if res=$(require_containers_ready PIHOLE_CONTAINER_NAME); then
                 # 2. Execução no container
                 if docker exec pihole pihole setpassword "$PIHOLE_API_PASSWORD" ; then                                                   
                     echo "🔐 Pi-hole v6: Web Password updated" >&2                    
@@ -793,7 +793,7 @@ ph() {
             fi
         }        
 
-        DEBUG=false require_container_running PIHOLE_CONTAINER_NAME || return 1
+        DEBUG=false require_containers_ready PIHOLE_CONTAINER_NAME || return 1
         #inst__api_ auth || return 2
 
         ##### OS INTEGRATION
