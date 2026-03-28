@@ -1089,7 +1089,7 @@ app_wait4_docker_ip() {
         if app_require_export_container_ip_port > /dev/null; then            
             if [[ -n "$CLIENT_APP_SERVICE_IP" && "$CLIENT_APP_SERVICE_IP" != "invalid IP" ]]; then
                 local url="$CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT"
-                if wait4_http_url_ready $url; then
+                if core_http_url_status $url; then
                 #if require_http_status_ok url; then
                     echo "✅ Container IP detetado: $CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT" >&2
                 fi
@@ -1652,17 +1652,32 @@ tool_stage_workflow() {
     }
 
     # 2. Camada Interna (Serviço a responder no Docker Network)
-    _running__requirements() {
-        if ! require_containers_ready "CLIENT_APP_CONTAINER_NAME"  >/dev/null 2>&1; then
-            echo "❌ Container $CLIENT_APP_CONTAINER_NAME is not running." >&2
+    _running__requirements() {        
+        # Ensure dependencies are met
+        ## app_require_export_container_ip_port || return 1     
+
+        local url=""
+        local max_retries=2
+        local attempt=0
+
+        # Loop until the URL is successfully retrieved or retries run out
+        while [[ -z "$url" && $attempt -lt $max_retries ]]; do
+            url=$(core__container_name__url "$CLIENT_APP_CONTAINER_NAME")
+            
+            if [[ -z "$url" ]]; then
+                ((attempt++))
+                sleep 2
+            fi
+        done
+
+        # Final check: if we have a URL, wait for the HTTP service to be ready
+        if [[ -n "$url" ]]; then
+            wait4_http_url_ready "$url"
+        else
+            echo "Error: Could not resolve URL for $CLIENT_APP_CONTAINER_NAME" >&2
             return 1
-        fi        
-
-        app_require_export_container_ip_port  || return 1     
-        local url="$(core__container_name__url $CLIENT_APP_CONTAINER_NAME)"
-        wait4_http_url_ready "$url"
+        fi
     }
-
     _name_register__requirements() {
         # Tenta resolver NS ou forçar atualização       
         _running__requirements || return 1
@@ -1885,6 +1900,7 @@ tool_stage_workflow() {
                 __fail_stage__handler "$stage"    
                 ## dev response         
                 #DEBUG=true debug_required_type_name "review" "stage" $REQ_STATUS_STOP 4
+                echo "-------------------- Error"
                 echo $status
                 return 1
             fi
@@ -1922,7 +1938,7 @@ app_up() {
         fi
         #### env $(grep -v '^#' $secret_file | xargs)  docker compose up -d --force-recreate immich-server
         ### this is a docker expected http proxiable ip:port
-        sleep 2
+        app_wait4_docker_ip
         local url="$(core__container_name__url $CLIENT_APP_CONTAINER_NAME)"
         show_vars url
         wait4_http_url_ready $url

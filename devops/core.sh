@@ -533,7 +533,7 @@ export -f check_main_mount
 # echo "Provider backup-provider updated" | color -w "backup-provider" -c green
 
 
-require_container_running_oldVer() {
+require_container_running() {
     local _type="container"
     local -a missing_list=() # Array para nomes dos containers que falharam
 

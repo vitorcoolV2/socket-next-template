@@ -151,7 +151,7 @@ ak_theme_light || exit 1
 exit
 # review stack when authentik https app can be deployed by understandable composition manifest
 
-COMPOSE_STACK_FILES=( "opencode" "backup" "fotos" "files")
+COMPOSE_STACK_FILES=( "opencode" "backup" "files")
 
 upCompose() {
   local name=$1

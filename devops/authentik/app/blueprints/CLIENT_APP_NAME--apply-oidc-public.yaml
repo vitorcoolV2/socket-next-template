@@ -31,12 +31,16 @@ entries:
 
 
       redirect_uris:
-        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_1}}'
-        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_2}}'        
-        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_3}}'
-        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_4}}'       
-        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_5}}'
-        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_6}}'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_1}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_2}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_3}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_4}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_5}}'
+          matching_mode: 'strict'
         
       signing_key:
         !Find [

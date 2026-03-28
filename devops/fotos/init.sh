@@ -131,7 +131,8 @@ on_vault_login_fail() {
 }
 on_name_register_fail() {
     echo "name resolve or registring fail"
-    return 1
+    ph auth
+    ph api sync
 }
 on_authentik_login_fail() {
     echo "authentik api token"
