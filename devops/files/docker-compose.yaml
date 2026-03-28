@@ -25,15 +25,22 @@ services:
       # Adicionalmente, para o subsistema de microserviços (Reva)
       - REVA_IDP_INSECURE=false
 
-      # TLS handled by Traefik - OCIS serves HTTP internally
-      - PROXY_ENABLE_TLS=false
+      # TLS handled by Traefik but OCIS needs to serve TLS for passthrough
+      - PROXY_ENABLE_TLS=true
+      # TLS certificates
+      - PROXY_TRANSPORT_TLS_CERT=/etc/ocis/server.crt
+      - PROXY_TRANSPORT_TLS_KEY=/etc/ocis/server.key
 
-      # Allow insecure for internal IDP communication
+      # Allow insecure for internal communication
       - OCIS_INSECURE=true
       - PROXY_INSECURE=true
       - IDP_ENABLE_TLS=false
       - GRAPH_ENABLE_TLS=false
       - WEB_ENABLE_TLS=false
+      # Trust reverse proxy - accept X-Forwarded-* headers
+      - OCIS_FORWARDED_URL_AUTHORIZATION=false
+      - PROXY_TRUSTED_PROXIES=*
+      - PROXY_HTTP_ADDR=0.0.0.0:9200
 
       # Provisionamento Automático (Cria o usuário no oCIS ao logar no Authentik)
       - OCIS_OIDC_AUTO_PROVISION_USERS=true
@@ -117,14 +124,13 @@ services:
 
     labels:
       - 'traefik.enable=true'
-      - 'traefik.http.routers.ocis.rule=Host(`files.home2500.local`)'
-      - 'traefik.http.routers.ocis.entrypoints=websecure'
-      - 'traefik.http.routers.ocis.tls=true'
-      # OCIS handles TLS directly - Traefik connects via HTTPS
-      - 'traefik.http.services.ocis.loadbalancer.server.port=9200'
-      - 'traefik.http.services.ocis.loadbalancer.server.scheme=https'
-      # Skip TLS verification for self-signed cert
-      - 'traefik.http.services.ocis.loadbalancer.serversTransport=insecureTransport@file'
+      # TCP router for HTTPS passthrough
+      - 'traefik.tcp.routers.ocis-tcp.rule=HostSNI(`files.home2500.local`)'
+      - 'traefik.tcp.routers.ocis-tcp.entrypoints=websecure'
+      - 'traefik.tcp.routers.ocis-tcp.tls=true'
+      - 'traefik.tcp.routers.ocis-tcp.tls.passthrough=true'
+      # Pass to OCIS HTTPS port
+      - 'traefik.tcp.services.ocis-tcp.loadbalancer.server.port=9200'
 networks:
   app-network:
     external: true
