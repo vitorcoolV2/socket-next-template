@@ -1,96 +1,72 @@
-# Start from the latest official Ubuntu release
-FROM ubuntu:latest
+# Start from Ubuntu 24.04
+FROM ubuntu:24.04
 
 # Set common environment variables
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Argumentos obrigatórios (sem default). eu sei nao e auto. mas e minha resp (name, user, role)
+# Build Arguments (passed from your docker-compose.yml)
 ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG DOCKER_GID=986
 
-# Verificar se foram fornecidos
-RUN if [ -z "$USERNAME" ] || [ -z "$USER_UID" ] || [ -z "$USER_GID" ]; then \
-    echo "ERROR: Required build arguments missing!"; \
-    echo "Please provide:"; \
-    echo "  --build-arg USERNAME=<username>"; \
-    echo "  --build-arg USER_UID=$(id -u)"; \
-    echo "  --build-arg USER_GID=$(id -g)"; \
-    exit 1; \
-    fi
-
-# Install core tools
+# 1. Install Prerequisites & Docker Repo
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
-    vim \
-    ca-certificates \
-    curl \
-    unzip \
-    gnupg \
-    sudo \
+    ca-certificates curl gnupg lsb-release sudo wget vim unzip jq git openssh-client \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# 2. Install Docker CLI + Plugins (Synchronized Versions)
+RUN apt-get update && apt-get install -y \
+    docker-ce-cli \
+    docker-compose-plugin \
+    docker-buildx-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-# Create group if not exists, otherwise use existing group
-RUN if getent group ${USER_GID} > /dev/null 2>&1; then \
-    OLD_GROUP=$(getent group ${USER_GID} | cut -d: -f1); \
-    if [ "$OLD_GROUP" != "$USERNAME" ]; then \
-    groupmod -n ${USERNAME} ${OLD_GROUP}; \
-    fi \
+# 3. THE FIX: Link plugins to the Global Priority Path
+# This ensures 'docker compose' works even if /home is mounted over
+RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
+    ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose && \
+    ln -sf /usr/libexec/docker/cli-plugins/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx && \
+    ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+
+# 4. Install yq (v4.50.1)
+RUN wget https://github.com/mikefarah/yq/releases/download/v4.50.1/yq_linux_amd64 -O /usr/bin/yq \
+    && chmod +x /usr/bin/yq
+
+# 5. Create User & Map Docker Group
+RUN if getent group ${USER_GID}; then \
+    groupmod -n ${USERNAME} $(getent group ${USER_GID} | cut -d: -f1); \
     else \
-    groupadd -g ${USER_GID} ${USERNAME}; \
+    groupadd --gid ${USER_GID} ${USERNAME}; \
     fi && \
-    if id -u ${USER_UID} > /dev/null 2>&1; then \
-    OLD_USER=$(id -nu ${USER_UID}); \
-    if [ "$OLD_USER" != "$USERNAME" ]; then \
-    OLD_HOME=$(eval echo ~${OLD_USER}); \
-    usermod -l ${USERNAME} ${OLD_USER}; \
-    usermod -d /home/${USERNAME} -m ${USERNAME}; \
-    groupmod -n ${USERNAME} ${OLD_USER} 2>/dev/null || true; \
-    fi \
+    if getent passwd ${USER_UID}; then \
+    usermod -l ${USERNAME} -m -d /home/${USERNAME} $(getent passwd ${USER_UID} | cut -d: -f1); \
     else \
-    useradd -u ${USER_UID} -g ${USER_GID} -m -s /bin/bash ${USERNAME}; \
-    fi
-
-
-# Install GitHub CLI (gh)
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | gpg --dearmor -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install Docker CLI
-RUN apt-get update && apt-get install -y --no-install-recommends docker.io && rm -rf /var/lib/apt/lists/*
-
-# Create docker group and add user to it
-RUN if getent group docker > /dev/null 2>&1; then \
-    EXISTING_GID=$(getent group docker | cut -d: -f3); \
-    if [ "$EXISTING_GID" != "${DOCKER_GID}" ]; then \
-    groupmod -g ${DOCKER_GID} docker; \
-    fi; \
-    else \
-    groupadd -g ${DOCKER_GID} docker; \
+    useradd --uid ${USER_UID} --gid ${USER_GID} -m -s /bin/bash ${USERNAME}; \
     fi && \
-    usermod -aG docker ${USERNAME}
+    echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \
+    chmod 0440 /etc/sudoers.d/${USERNAME} && \
+    (groupadd -g ${DOCKER_GID} docker_host || true) && \
+    usermod -aG ${DOCKER_GID} ${USERNAME} || true
 
-# DEBUG: Check if user still exists
-RUN echo "=== BEFORE USER SWITCH ===" && \
-    cat /etc/passwd | grep ${USERNAME} || echo "User ${USERNAME} NOT FOUND!" && \
-    ls -la /home/ || true
-
-# Switch to the user
+# 6. Switch to User
+RUN chown -R ${USERNAME}:${USER_GID} /home/${USERNAME}
 USER ${USERNAME}
 WORKDIR /home/${USERNAME}
 
-# Create directories
-RUN mkdir -p /home/${USERNAME}/.ssh && \
-    ssh-keyscan github.com >> /home/${USERNAME}/.ssh/known_hosts 2>/dev/null && \
-    mkdir -p /home/${USERNAME}/.local/share/opencode && \
-    mkdir -p /home/${USERNAME}/.config/opencode
+# 7. Setup SSH and local tools
+RUN mkdir -p /home/${USERNAME}/.ssh \
+    && ssh-keyscan github.com >> /home/${USERNAME}/.ssh/known_hosts 2>/dev/null \
+    && chmod 700 /home/${USERNAME}/.ssh
 
-RUN curl -fsSL https://bun.sh/install | bash 
+# 8. Install Bun & OpenCode
+RUN curl -fsSL https://bun.sh/install | bash \
+    && curl -fsSL https://opencode.ai/install | bash
 
+# Final Path Setup
+ENV PATH="/home/${USERNAME}/.local/bin:/home/${USERNAME}/.bun/bin:${PATH}"
 
-# Install OpenCode AI
-RUN curl -fsSL https://opencode.ai/install | bash
+CMD ["bash"]

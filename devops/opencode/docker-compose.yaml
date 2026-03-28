@@ -8,6 +8,8 @@ services:
         - USER_UID=${UID}
         - USER_GID=${GID}
         - DOCKER_GID=986
+    group_add:
+      - "986"
     image: opencode-${UID}-${GID}:latest
 
     container_name: opencode
@@ -35,6 +37,12 @@ services:
       # Docker socket mount for DinD (Docker in Docker) scenarios
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
+      #### DOCKER
+      - PATH=/home/${USER}/.local/bin:/home/${USER}/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - DOCKER_CLI_PLUGINS=/usr/libexec/docker/cli-plugins
+      - DOCKER_CLI_HINTS=false
+      ####
       - DEBIAN_FRONTEND=noninteractive
       - TERM=xterm-256color
       - EDITOR=vim
