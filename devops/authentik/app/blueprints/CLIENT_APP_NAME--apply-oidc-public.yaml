@@ -28,18 +28,15 @@ entries:
 
       allowed_cors_origins:
         - '{{$CLIENT_APP_OIDC_CORS_1}}'
-        - '{{$CLIENT_APP_OIDC_CORS_2}}'
 
 
       redirect_uris:
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_1}}'
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_2}}'        
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_3}}'
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_4}}'       
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_5}}'
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_6}}'
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_7}}'
-        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_8}}'
+        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_1}}'
+        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_2}}'        
+        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_3}}'
+        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_4}}'       
+        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_5}}'
+        - 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_6}}'
         
       signing_key:
         !Find [
