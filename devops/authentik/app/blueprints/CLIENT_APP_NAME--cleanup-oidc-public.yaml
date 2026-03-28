@@ -1,0 +1,30 @@
+version: 1
+## tpl: authentik/app/blueprints/CLIENT_APP_NAME--cleanup-oidc-public.yaml
+## yaml: authentik/blueprints/home2500_{{$CLIENT_APP_NAME}}--cleanup-oidc-public.yaml
+metadata:
+  name: 'Home2500 {{$CLIENT_APP_NAME}} cleanup oidc-public'
+  slug: blueprint-home2500-{{$CLIENT_APP_NAME}}-cleanup-oidc-public
+entries:
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_core.application, [slug, '{{$CLIENT_APP_NAME}}']]
+      group: !Find [authentik_core.group, [name, 'Home-Admins']]
+    state: absent
+    allow_failure: true
+
+  - model: authentik_policies.policybinding
+    identifiers:
+      target: !Find [authentik_core.application, [slug, '{{$CLIENT_APP_NAME}}']]
+      group: !Find [authentik_core.group, [name, 'Home-Developers']]
+    state: absent
+    allow_failure: true
+
+  - model: authentik_core.application
+    identifiers:
+      slug: '{{$CLIENT_APP_NAME}}'
+    state: absent
+
+  - model: authentik_providers_oauth2.oauth2provider
+    identifiers:
+      name: '{{$CLIENT_APP_NAME}}-provider'
+    state: absent

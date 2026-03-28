@@ -59,8 +59,8 @@ export CLIENT_APP_BLUEPRINT_SLUG="CLIENT_APP_NAME"
 ### LOAD CORE
 set +e
 #### lets require a service tool to deploy compose and expose as blue(oidc) authentik vault
-#source $(realpath "$TOOL_DIR/../../authentik/_1-blueprints_lib.sh") > /dev/null 2>&1 
-source $(realpath "$TOOL_DIR/../../authentik/_0-authentik_lib.sh") > /dev/null 2>&1 
+source $(realpath "$TOOL_DIR/../../authentik/_1-blueprints_lib.sh") > /dev/null 2>&1 
+#source $(realpath "$TOOL_DIR/../../authentik/_0-authentik_lib.sh") #> /dev/null 2>&1 
 
 export CLIENT_APP_SECRET_FILE="$(core_secret_mapper_mem "$CLIENT_APP_NAME" ".secret")"
 
@@ -129,7 +129,8 @@ tool_prepare__env_vars() {
             CLIENT_APP_DB_NAME \
             CLIENT_APP_DB_ROLE \
             CLIENT_APP_BLUE_LABEL \
-            CLIENT_APP_BLUE_GROUP
+            CLIENT_APP_BLUE_GROUP \
+            APP_CERT_FOLDER
             
 
         local match_prefix_exceptions="${4:-$TOOL__CLIENT_APP__VAR_PATTERN}"
@@ -139,7 +140,7 @@ tool_prepare__env_vars() {
             "APP_" \
             "CLIENT_APP_" \
             "$match_prefix_exceptions" 2> /dev/null
-
+        
         export CLIENT_APP_DB_ROLE=${CLIENT_APP_DB_ROLE:-admin}
         _resolve_compose__container_name
     else
@@ -155,6 +156,7 @@ APP_BLUE_GROUP=${CLIENT_APP_BLUE_GROUP:-Ferramentas}
 APP_CONTAINER_NAME=${CLIENT_APP_CONTAINER_NAME}
 ## optional
 # APP_SERVICE_PORT=80
+# APP_CERT_FOLDER=./config
 # APP_BLUE_LABEL=$(app_blue_label_fallback "$CLIENT_APP_NAME") 
 # APP_BLUE_TEMPLATE_MODULE=${CLIENT_APP_BLUE_TEMPLATE_MODULE:-proxy}
 # APP_BLUE_META_DESCRIPTION=Service image: $(_get_compose__container_entry | jq ".image")
@@ -842,6 +844,7 @@ app_required_env_vars() {
             "authentik_login" 
             "blue_apply" 
             "outpost_add"
+            "on_complete"
         )
     else        
         TOOL_STAGES=(
@@ -856,6 +859,7 @@ app_required_env_vars() {
             "name_register" 
             "authentik_login" 
             "blue_apply" 
+            "on_complete"
         )
     fi
     export TOOL_STAGES_OFF=(
@@ -904,7 +908,7 @@ app_up_names() {
     # show_vars APP_NS_IP
 
     local service="pihole"
-    if require_container_running service; then
+    if require_containers_ready service; then
        # Garante a biblioteca do Pi-hole
         
         # Verifica se realmente precisamos de mexer no DNS
@@ -1084,7 +1088,7 @@ app_wait4_docker_ip() {
         # Nota: Esta função deve internamente chamar docker_container_name_ip
         if app_require_export_container_ip_port > /dev/null; then            
             if [[ -n "$CLIENT_APP_SERVICE_IP" && "$CLIENT_APP_SERVICE_IP" != "invalid IP" ]]; then
-                local url="http://$CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT"
+                local url="$CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT"
                 if wait4_http_url_ready $url; then
                 #if require_http_status_ok url; then
                     echo "✅ Container IP detetado: $CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT" >&2
@@ -1161,7 +1165,225 @@ app_login() {
     return 1           
 }
 
+tool_renew_certs() {
+    require_vars DOMAIN CLIENT_APP_CERT_FOLDER || return 1
+    local dir=$(realpath -m "$CLIENT_APP_DIR/$CLIENT_APP_CERT_FOLDER")
 
+    _is_relative_inside_dir() {
+        [[ "$CLIENT_APP_CERT_FOLDER" = /* ]] && return 1
+        local BASE=$(realpath -m "$CLIENT_APP_DIR")
+        [[ "$dir" == "$BASE"/* ]]
+    }
+
+    if _is_relative_inside_dir; then
+        mkdir -p "$dir"
+    else
+        echo "❌ CLIENT_APP_CERT_FOLDER must be a relative path inside CLIENT_APP_DIR" >&2
+        return 1
+    fi
+
+    _need_renewal() {
+        require_vars   
+        local RENEWAL_NEEDED=false
+        if [[ ! -f "$dir/crt-chain.pem" ]] || [[ ! -f "$dir/crt.key" ]]; then
+            echo "Erro: Ficheiros em falta em $dir. $CLIENT_APP_NAME necessita de renovação."
+            return 0
+        fi
+
+        # Improved SAN extraction
+        # We use -certopt no_subject,no_issuer etc to keep output clean
+        # Refined SAN extraction to remove the OpenSSL header label
+        CURRENT_NAMES=$(openssl x509 -in "$dir/crt-chain.pem" -noout -ext subjectAltName | \
+            grep -v "subjectAltName" | \
+            sed 's/DNS://g; s/ //g; s/X509v3SubjectAlternativeName://g' | \
+            tr ',' '\n' | grep -v '^$' | sort -u | tr '\n' ',' | sed 's/,$//')
+        
+        show_vars CURRENT_NAMES CLIENT_APP_NS
+        if [[ "$CURRENT_NAMES" != "$CLIENT_APP_NS" ]]; then
+            echo "Name changed. $CLIENT_APP_NAME need renewal"
+            return 0
+        fi
+
+        # 4. Expiring? Yes, need renewal (return 0)
+        if ! openssl x509 -checkend $(( 7 * 24 * 3600 )) -in "$dir/crt-chain.pem" -noout; then
+            echo "Certificate expired. $CLIENT_APP_NAME  need renewal" 
+            return 0
+        fi
+
+        # 5. Everything is fine? No renewal needed (return 1)
+        return 1
+        
+    }
+
+    if ! _need_renewal; then 
+        return 1
+    fi
+
+    # 4. Build and Sort the Desired State
+    vault_request_stew_token  
+    vault_validate_token  
+    vault_config
+    echo "🔐 Requesting new certificate from Vault..."  >&2
+    echo "📜 SANs: $CLIENT_APP_NS"  >&2
+    local RESPONSE=$(
+        PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null
+        
+        vault write -format=json pki_int/issue/home-server-role \
+            common_name="$CLIENT_APP_NS" \
+            alt_names="$CLIENT_APP_NS" \
+            ttl="720h" | jq -e .
+    ) || return 1            
+
+    if [ $? -eq 0 ]; then
+        echo "✅ Certificado gerado com sucesso!"  >&2
+    else
+        echo "❌ Falha crítica: O Steward não conseguiu criar a role ou emitir o cert."  >&2
+        return 1
+    fi     
+    
+    echo $RESPONSE | jq -r '{request_id,renewable,lease_duration,expiration: .data.expiration}'  >&2
+    #expose echo $RESPONSE | jq
+    # Extrair dados do JSON
+    local KEY_DATA=$(echo "$RESPONSE" | jq -r '.data.private_key')
+    local CERT_DATA=$(echo "$RESPONSE" | jq -r '.data.certificate')
+    
+    # IMPORTANTE: O ca_chain do Vault já contém a Intermediate + Root se usaste o Bundle no set-signed
+    local CA_CHAIN=$(echo "$RESPONSE" | jq -r '.data.ca_chain | join("\n")')
+
+    if [[ -z "$KEY_DATA" || "$KEY_DATA" == "null" ]]; then
+        echo "❌ Error: Vault returned no key."  >&2
+        return 1
+    fi
+
+    ## GEN
+    # 1. Guardar a Chave Privada (Apenas a chave!)
+    echo "$KEY_DATA" > "$dir/crt.key" 
+
+    # 2. Guardar o Certificado Leaf (Apenas o certificado do site)
+    echo "$CERT_DATA" > "$dir/crt.crt"
+
+    # 3. Guardar a CA Chain (Intermediate + Root)
+    printf "%s\n" "$CA_CHAIN" > "$dir/ca-chain.pem"
+
+    # 4. CRIAR O FULLCHAIN CORRETAMENTE (Com quebras de linha garantidas)
+    # Usamos printf para garantir que cada bloco termina bem antes do próximo começar
+    {
+        cat "$dir/crt.crt"
+        echo "" # Linha de segurança
+        cat "$dir/ca-chain.pem"
+    } > "$dir/crt-chain.pem"
+
+    echo "✅ Ficheiros PKI gerados em $dir"
+
+    
+    # 7. Permissions (Essencial para o conseguir ler)
+    sudo chown 1000:1000 $dir/*   # 1000 costuma ser o ID do user no docker
+    chmod 644 $dir/*.pem
+    chmod 644 $dir/*.crt
+    chmod 600 $dir/*.key
+
+    return 0
+}
+tool_renew_certs() {
+    require_vars DOMAIN CLIENT_APP_CERT_FOLDER CLIENT_APP_DIR CLIENT_APP_NS || return 1
+    
+    local dir=$(realpath -m "$CLIENT_APP_DIR/$CLIENT_APP_CERT_FOLDER")
+
+    _is_relative_inside_dir() {
+        [[ "$CLIENT_APP_CERT_FOLDER" = /* ]] && return 1
+        local BASE=$(realpath -m "$CLIENT_APP_DIR")
+        [[ "$dir" == "$BASE"/* ]]
+    }
+
+    if _is_relative_inside_dir; then
+        mkdir -p "$dir"
+    else
+        echo "❌ CLIENT_APP_CERT_FOLDER must be a relative path inside CLIENT_APP_DIR" >&2
+        return 1
+    fi
+
+    _need_renewal() {
+        # 1. Check existence
+        if [[ ! -f "$dir/crt-chain.pem" ]] || [[ ! -f "$dir/crt.key" ]]; then
+            echo "ℹ️ Certificados em falta. Gerando novos..." >&2
+            return 0 # Necessita renovação
+        fi
+
+        # 2. Check SANs (Comparison)
+        local CURRENT_NAMES
+        CURRENT_NAMES=$(openssl x509 -in "$dir/crt-chain.pem" -noout -ext subjectAltName 2>/dev/null | \
+            grep -A1 "Subject Alternative Name" | tail -n1 | \
+            sed 's/DNS://g; s/ //g' | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+
+        # Compara contra a lista desejada (também ordenada)
+        local DESIRED_NAMES=$(echo "$CLIENT_APP_NS" | tr ',' '\n' | sort -u | tr '\n' ',' | sed 's/,$//')
+        
+        if [[ "$CURRENT_NAMES" != "$DESIRED_NAMES" ]]; then
+            echo "🔄 SANs alteradas: [$CURRENT_NAMES] -> [$DESIRED_NAMES]. Renovando..." >&2
+            return 0
+        fi
+
+        # 3. Check Expiry (7 dias)
+        if ! openssl x509 -checkend $(( 7 * 24 * 3600 )) -in "$dir/crt-chain.pem" -noout; then
+            echo "⏰ Certificado expirado ou perto do fim. Renovando..." >&2
+            return 0
+        fi
+
+        return 1 # Não precisa de renovação
+    }
+
+    # Se NÃO precisar de renovação, sai da função com sucesso
+    if ! _need_renewal; then 
+        echo "✅ Certificados para $CLIENT_APP_NS estão em dia." >&2
+        return 0
+    fi
+
+    echo "🔐 Requesting new certificate from Vault para $DOMAIN..." >&2
+    
+    # Obter token e fazer pedido
+    local RESPONSE
+    RESPONSE=$(
+        PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null
+        
+        vault write -format=json pki_int/issue/home-server-role \
+            common_name="$DOMAIN" \
+            alt_names="$CLIENT_APP_NS" \
+            ttl="720h" | jq -e .
+    ) || return 1     
+
+    if [[ $? -ne 0 || -z "$RESPONSE" ]]; then
+        echo "❌ Falha ao comunicar com o Vault." >&2
+        return 1
+    fi
+
+    # Extração de dados
+    local KEY_DATA=$(echo "$RESPONSE" | jq -r '.data.private_key')
+    local CERT_DATA=$(echo "$RESPONSE" | jq -r '.data.certificate')
+    local CA_CHAIN=$(echo "$RESPONSE" | jq -r '.data.ca_chain | join("\n")')
+
+    if [[ "$KEY_DATA" == "null" ]]; then
+        echo "❌ Vault não retornou chave privada." >&2
+        return 1
+    fi
+
+    # Escrita de ficheiros
+    echo "$KEY_DATA" > "$dir/crt.key"
+    echo "$CERT_DATA" > "$dir/crt.crt"
+    echo "$CA_CHAIN" > "$dir/ca.pem"
+
+    # Full chain (Leaf + Intermediate + Root)
+    # Usar printf evita problemas com carateres de escape e garante formatação limpa
+    printf "%s\n%s\n" "$CERT_DATA" "$CA_CHAIN" > "$dir/crt-chain.pem"
+
+    # Permissões
+    # Nota: Usar sudo chown pode pedir password. Garante que o script corre com privilégios.
+    sudo chown 1000:1000 "$dir"/* 2>/dev/null
+    chmod 644 "$dir"/*.crt "$dir"/*.pem
+    chmod 600 "$dir"/*.key
+
+    echo "✅ Novos ficheiros gerados em $dir"
+    return 0
+}
 require_single_yaml_file() {
     local ref=${1}
     local yaml_file=${!ref}
@@ -1345,7 +1567,14 @@ tool_stage_workflow() {
         fi
         deploy_secrets
     }
-
+    _on_complete__requirements() {   
+        # this handler invoke optional: init.sh complete to let use define extra mem provider secrets
+        local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME" 
+        if ! require_single_script_function "client_script" "on_complete"; then                            
+            return 0
+        fi
+        on_complete
+    }
     ## by how, from previous stages should be provisioned required secrets:
     ## provision_db handle db role user pass secrets
     ## provision_oidc handle client id secret 
@@ -1424,13 +1653,14 @@ tool_stage_workflow() {
 
     # 2. Camada Interna (Serviço a responder no Docker Network)
     _running__requirements() {
-        if ! require_container_running "CLIENT_APP_CONTAINER_NAME"  >/dev/null 2>&1; then
+        if ! require_containers_ready "CLIENT_APP_CONTAINER_NAME"  >/dev/null 2>&1; then
             echo "❌ Container $CLIENT_APP_CONTAINER_NAME is not running." >&2
             return 1
         fi        
 
         app_require_export_container_ip_port  || return 1     
-        wait4_http_url_ready "$CLIENT_APP_INTERNAL_NS:$CLIENT_APP_SERVICE_PORT"
+        local url="$(core__container_name__url $CLIENT_APP_CONTAINER_NAME)"
+        wait4_http_url_ready "$url"
     }
 
     _name_register__requirements() {
@@ -1444,7 +1674,7 @@ tool_stage_workflow() {
         fi
     
         local container="pihole"
-        if ! require_container_running "container"  ; then #>/dev/null 2>&1; then            
+        if ! require_containers_ready "container"  ; then #>/dev/null 2>&1; then            
             return 1
         fi
         return 0
@@ -1452,7 +1682,7 @@ tool_stage_workflow() {
 
     _authentik_login__requirements() {
         local container="authentik-server"
-        if ! require_container_running "container"  >/dev/null 2>&1; then
+        if ! require_containers_ready "container"  >/dev/null 2>&1; then
             ## missing pihole running not going to resolve names            
             return 1
         fi
@@ -1692,7 +1922,11 @@ app_up() {
         fi
         #### env $(grep -v '^#' $secret_file | xargs)  docker compose up -d --force-recreate immich-server
         ### this is a docker expected http proxiable ip:port
-        app_wait4_docker_ip || return 1
+        sleep 2
+        local url="$(core__container_name__url $CLIENT_APP_CONTAINER_NAME)"
+        show_vars url
+        wait4_http_url_ready $url
+        #app_wait4_docker_ip || return 1
         tool_stage_workflow "running" || return 1
 
         if ! tool_stage_workflow "name_register"; then
@@ -1744,7 +1978,7 @@ app_down() {
 app_down_names() {
     require_vars CLIENT_APP_INTERNAL_NS CLIENT_APP_NS
     local service="pihole"
-    if require_container_running service; then
+    if require_containers_ready service; then
         # 2. Carregar Lib se necessário
         (
             cd $CLIENT_APP_DIR

@@ -26,40 +26,21 @@ entries:
           [slug, default-provider-authorization-implicit-consent],
         ]
 
-      redirect_uris:
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_1}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_2}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_3}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_4}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_5}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_6}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_7}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_8}}',
-            'matching_mode': 'strict',
-          }
+      allowed_cors_origins:
+        - '{{$CLIENT_APP_OIDC_CORS_1}}'
+        - '{{$CLIENT_APP_OIDC_CORS_2}}'
 
+
+      redirect_uris:
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_1}}'
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_2}}'        
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_3}}'
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_4}}'       
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_5}}'
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_6}}'
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_7}}'
+        - 'https://{{$CLIENT_APP_NS}}/{{$CLIENT_APP_OIDC_REDIR_8}}'
+        
       signing_key:
         !Find [
           authentik_crypto.certificatekeypair,
