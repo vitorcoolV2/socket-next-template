@@ -7,7 +7,7 @@ session-ses_*.md
 *~
 .env
 
-
+secrets*
 
 # DEVOPS CORE containers - pihole,vault,authentik,traefik
 vault/config/certs/*.key
