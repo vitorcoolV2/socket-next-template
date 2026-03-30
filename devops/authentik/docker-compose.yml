@@ -118,7 +118,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 2G # Limita o Authentik a 2GB
+          memory: 1G # Limita o Authentik a 2GB
 
   worker:
     image: ghcr.io/goauthentik/server:2024.10.3
@@ -151,7 +151,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock  
     networks:
       - app-network
-
+    deploy:
+      resources:
+        limits:
+          memory: 500MB
     depends_on:
       - postgresql
       - redis

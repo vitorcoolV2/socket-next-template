@@ -193,6 +193,10 @@ on_provision_oidc_fail() {
     return 1
 }
 
+on_complete() {
+    return 0
+}
+
 funcs() {    
    list_functions ${BASH_SOURCE[0]}
 }

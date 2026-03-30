@@ -63,6 +63,89 @@ WHERE oauth2provider_ptr_id = $pk;"
     echo "✅ Completed. Please restart the outpost to clear the cache." >&2
     return 0
 }
+
+ak_upsert_api_token() {
+    require_vars AUTHENTIK_DB_CONTAINER
+    local name="${1}"
+    local role="${2:-"guest"}" # can be guest|user|developer|bot
+    local description="${3:-"authentik provisioning $role account $name"}" 
+   
+    [[ -z "$name" ]] && { echo "❌ Erro: Nome do utilizador é obrigatório." >&2; return 1; }
+
+    local expires_ts    
+    local random_key
+    local ak_id="$(sanitize_db_name "${name}-${role}-token")"
+    local var_name="$(sanitize_var_name "${role^^}_${name^^}_TOKEN")"
+    local KP_USER_DB="$(sanitize_path_name "home2500-$name")" ##
+
+    _guest__policy() {
+        expires_ts="NOW() + INTERVAL '8 hr'"
+        random_key=$(kp generate --lower --upper --numeric -l 48 2>/dev/null)
+        # no KP_DB ???? or try to help guest
+    }
+    _user__policy() {
+        expires_ts="NOW() + INTERVAL '7 days'"
+        random_key=$(kp generate --lower --upper --numeric -l 48 2>/dev/null)
+        kp test 2> /dev/null || kp open || return 1
+    }
+    _developer__policy() {
+        expires_ts="NOW() + INTERVAL '3 months'"
+        random_key=$(kp generate --lower --upper --numeric -l 48 2>/dev/null)
+        kp test 2> /dev/null || kp open || return 1
+    }
+    _bot__policy() {
+        expires_ts="NOW() + INTERVAL '1 months'"
+        random_key=$(kp generate --lower --upper --numeric -l 48 2>/dev/null)
+        KP_DB="$KP_USER_DB" kp test 2> /dev/null || kp open || return 1
+    }
+
+
+    if ! $("_${role}__policy"); then
+        echo "Fail to apply \"$role\" policy. Use on of the roles [guest,user,developer,bot]" >&2
+        return 1
+    fi
+
+    local sql_query="
+    INSERT INTO authentik_core_token (
+        identifier, 
+        key, 
+        user_id, 
+        intent, 
+        description, 
+        expiring,
+        expires
+    )
+    VALUES (
+        '$ak_id', 
+        '$random_key', 
+        (SELECT id FROM authentik_core_user WHERE username='$name' LIMIT 1),
+        'api', 
+        '$description', 
+        true, 
+        $expires_ts
+    )
+    ON CONFLICT (identifier) DO UPDATE 
+    SET key = EXCLUDED.key, 
+        expires = EXCLUDED.expires;
+    "
+
+    # 4. Execução silenciosa
+    if echo "$sql_query" | docker exec -i "$AUTHENTIK_DB_CONTAINER" psql -U authentik -d authentik >/dev/null 2>&1; then
+        echo "✅ Token '$identifier' injetado com sucesso na DB." >&2
+        
+        # 5. Backup no KeePass (Promoção de Segredo)
+        # Usamos subshell para isolar o PROVIDER_SELECT
+        (
+            local secret_name="vault/authentik/$var_name"
+            PROVIDER_SELECT="keepass" core_secret_service_put "$secret_name" "$random_key"
+            echo "🔐 Token guardado no KeePass como: $secret_name" >&2
+        )
+    else
+        echo "❌ Erro ao injetar token na DB do Authentik." >&2
+        return 1
+    fi
+}
+
 export -f ak_fix_proxied_redir
 ak_internal_service_ready() {
     local status
@@ -132,7 +215,6 @@ ak_api_token_validate() {
         PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2>/dev/null
         
         [[ -z "$AUTHENTIK_API_TOKEN" ]] && { echo "❌ [AUTHENTIK] Erro: Token não fornecido." >&2; return 1; }
-
         local url="$AUTHENTIK_INTERNAL_URL/api/v3/core/users/me/"
         echo "🔍 Validando conta Authentik via $url..." >&2
 

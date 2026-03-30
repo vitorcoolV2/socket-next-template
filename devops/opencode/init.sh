@@ -66,10 +66,7 @@ on_compose_fail() {
     echo "review compose file: $(core_relative_path2 $CLIENT_APP_COMPOSE_FILE)"    
     return 1
 }
-on_provision_secrets_fail() {  
-    echo "provision secrets fail"
-    provision_secrets || return 1
-}
+
 on_vault_login_fail() {
     vault_request_stew_token || return 1
     ak_api_token_restore || return 1
@@ -108,7 +105,10 @@ on_certificate_fail() {
 on_deploy_secrets_fail() {
     return 1
 }
-
+on_provision_secrets_fail() {  
+    echo "provision secrets fail"
+    provision_secrets || return 1
+}
 provision_secrets() {
     echo "🔐 Provisioning OpenCode server password..." >&2        
     require_vars CLIENT_APP_NAME || return 1
@@ -131,6 +131,10 @@ deploy_secrets() {
 
     ) || return 1
 
+    return 0
+}
+
+on_complete() {
     return 0
 }
 

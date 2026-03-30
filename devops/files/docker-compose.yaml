@@ -6,14 +6,29 @@ services:
     networks:
       - app-network
     extra_hosts:
-      - 'auth.home2500.local:192.168.1.67' # O IP que detectamos no script
+      - 'auth.home2500.local:192.168.1.67'
       - 'files.home2500.local:192.168.1.67'
     healthcheck:
       test: ['CMD', 'curl', '-f', '-k', 'https://localhost:9200/healthz']
     volumes:
       - ./data:/var/lib/ocis
-      - ocis-config:/etc/ocis
       - /etc/localtime:/etc/localtime:ro
+    ports:
+      - '9200:9200'
+    labels:
+      - 'traefik.enable=true'
+      - 'traefik.http.routers.files.rule=Host(`files.home2500.local`)'
+      - 'traefik.http.routers.files.entrypoints=websecure'
+      - 'traefik.http.routers.files.tls=true'
+      - 'traefik.http.routers.files.service=files'
+      - 'traefik.http.services.files.loadbalancer.server.port=9200'
+      - 'traefik.http.services.files.loadbalancer.server.scheme=http'
+      - 'traefik.http.middlewares.files-headers.headers.sslredirect=true'
+      - 'traefik.http.middlewares.files-headers.headers STSSeconds=31536000'
+      - 'traefik.http.middlewares.files-headers.headers STSIncludeSubdomains=true'
+      - 'traefik.http.middlewares.files-headers.headers STSPreload=true'
+      - 'traefik.http.routers.files.middlewares=files-headers'
+      - 'traefik.docker.network=app-network'
     environment:
       # URLs e Trust
       - OCIS_URL=https://files.home2500.local
@@ -25,11 +40,9 @@ services:
       # Adicionalmente, para o subsistema de microserviços (Reva)
       - REVA_IDP_INSECURE=false
 
-      # TLS handled by Traefik but OCIS needs to serve TLS for passthrough
-      - PROXY_ENABLE_TLS=true
-      # TLS certificates
-      - PROXY_TRANSPORT_TLS_CERT=/etc/ocis/server.crt
-      - PROXY_TRANSPORT_TLS_KEY=/etc/ocis/server.key
+      # TLS - Traefik handles HTTPS, OCIS uses HTTP
+      - PROXY_ENABLE_TLS=false
+      - PROXY_HTTP_ADDR=0.0.0.0:9200
 
       # Allow insecure for internal communication
       - OCIS_INSECURE=true
@@ -53,7 +66,8 @@ services:
       - PROXY_AUTOPROVISION_CLAIM_DISPLAYNAME=name
 
       - PROXY_POLICY_DEFAULT=custom
-      - PROXY_CSP_CONFIG_FILE_LOCATION=/etc/ocis/csp.yaml
+      # CSP disabled - not working due to volume mount issues
+      # CSP disabled - handled at Traefik level via headers middleware
       # Força o log a dizer-nos o que o Proxy está a fazer
       - PROXY_LOG_LEVEL=debug
 
@@ -122,19 +136,10 @@ services:
       # Garante que o log sai em formato legível (não JSON) para facilitar a leitura no terminal
       - OCIS_LOG_PRETTY=true
 
-    labels:
-      - 'traefik.enable=true'
-      # TCP router for HTTPS passthrough
-      - 'traefik.tcp.routers.ocis-tcp.rule=HostSNI(`files.home2500.local`)'
-      - 'traefik.tcp.routers.ocis-tcp.entrypoints=websecure'
-      - 'traefik.tcp.routers.ocis-tcp.tls=true'
-      - 'traefik.tcp.routers.ocis-tcp.tls.passthrough=true'
-      # Pass to OCIS HTTPS port
-      - 'traefik.tcp.services.ocis-tcp.loadbalancer.server.port=9200'
 networks:
   app-network:
     external: true
 
 volumes:
   ocis-config:
-    external: true
+    driver: local

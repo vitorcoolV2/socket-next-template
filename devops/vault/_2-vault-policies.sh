@@ -194,24 +194,28 @@ vault__bot_policy() {
     echo "📋 Creating/updating Bot policy..."
 
     vault policy write bot-policy - <<'EOF'
+# --- Full access to app secrets (for provision_oidc) ---
+path "secret/data/*" { capabilities = ["create", "read", "update", "list", "delete"] }
+path "secret/metadata/*" { capabilities = ["create", "read", "update", "list", "delete"] }
+
 # --- Component stack OIDC credentials for any app (chat, fotos, files, etc.) ---
 path "secret/data/*/OIDC_*" { capabilities = ["create", "read", "update", "list"] }
 path "secret/metadata/*/OIDC_*" { capabilities = ["list", "read"] }
 
 # --- Database passwords for apps ---
-path "secret/data/*/DATABASE_*" { capabilities = ["read", "list"] }
-path "secret/data/*/POSTGRES_*" { capabilities = ["read", "list"] }
-path "secret/data/*/MYSQL_*" { capabilities = ["read", "list"] }
+path "secret/data/*/DATABASE_*" { capabilities = ["create", "read", "update", "list"] }
+path "secret/data/*/POSTGRES_*" { capabilities = ["create", "read", "update", "list"] }
+path "secret/data/*/MYSQL_*" { capabilities = ["create", "read", "update", "list"] }
 
 # --- Redis passwords ---
-path "secret/data/*/REDIS_*" { capabilities = ["read", "list"] }
+path "secret/data/*/REDIS_*" { capabilities = ["create", "read", "update", "list"] }
 
 # --- Authentik tokens (read) ---
-path "secret/data/authentik/*" { capabilities = ["list"] }
+path "secret/data/authentik/*" { capabilities = ["read", "list"] }
 
-# --- User credentials (read) ---
-path "secret/data/*/USER_*" { capabilities = ["read", "list"] }
-path "secret/data/*/PASSWORD" { capabilities = ["read", "list"] }
+# --- User credentials (read/write) ---
+path "secret/data/*/USER_*" { capabilities = ["create", "read", "update", "list"] }
+path "secret/data/*/PASSWORD" { capabilities = ["create", "read", "update", "list"] }
 
 # --- UI Discovery ---
 path "sys/internal/ui/mounts/secret" { capabilities = ["read"] }

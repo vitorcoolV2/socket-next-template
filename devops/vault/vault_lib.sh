@@ -409,21 +409,29 @@ vault_request_token() {
 
 
     (
-        kp test 2> /dev/null || { 
-            echo "requesting vault token role: $vault_role"
-            kp open || return 1
-        }
+        # Check for environment variables first
+        local r_id="$VAULT_ROLE_ID"
+        local s_id="$VAULT_SECRET_ID"
 
-        echo "🔑 Recovering AppRole from KeePass $vault_role..." >&2
-        local creds=$(kp_get_approle "vault/AppRole/$vault_role")
-        local r_id=$(echo "$creds" | awk '{print $1}')
-        local s_id=$(echo "$creds" | awk '{print $2}')
- 
+        if [[ -z "$r_id" || -z "$s_id" ]]; then
+            kp test 2> /dev/null || { 
+                echo "requesting vault token role: $vault_role"
+                kp open || return 1
+            }
+
+            echo "🔑 Recovering AppRole from KeePass $vault_role..." >&2
+            local creds=$(kp_get_approle "vault/AppRole/$vault_role")
+            r_id=$(echo "$creds" | awk '{print $1}')
+            s_id=$(echo "$creds" | awk '{print $2}')
+        fi
 
         [[ -z "$r_id" || -z "$s_id" ]] && { echo "❌ AppRole/$vault_role credentials not found." >&2; return 1; }
 
+        # Use curl to call Vault API directly
         local LOGIN_RESPONSE
-        LOGIN_RESPONSE=$(vault write -format=json auth/approle/login role_id="$r_id" secret_id="$s_id" 2>&1)
+        LOGIN_RESPONSE=$(curl -sk -X POST "$VAULT_ADDR/v1/auth/approle/login" \
+            -H "Content-Type: application/json" \
+            -d "{\"role_id\": \"$r_id\", \"secret_id\": \"$s_id\"}" 2>&1)
         
         VAULT_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.auth.client_token // empty')
         
@@ -432,7 +440,7 @@ vault_request_token() {
         PROVIDER_SELECT="mem keepass" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1       
     )
 }
-
+export -f vault_request_token
 
 vault_validate_token() {
     local token="${1:-$VAULT_TOKEN}"    

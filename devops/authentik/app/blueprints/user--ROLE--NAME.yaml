@@ -1,0 +1,25 @@
+## file: authentik/app/blueprints/user--ROLE--NAME.yaml
+## tpl: authentik/app/blueprints/user--ROLE--NAME.yaml
+## yaml: authentik/blueprints/home2500_user--{{$ROLE}}--{{$NAME}}.yaml
+
+version: 1
+metadata:
+  name: Home2500 {{$ROLE}} {{$NAME}}
+  slug: blueprint-home2500-user-{{$ROLE}}-{{$NAME}}
+  labels:
+    Domain: 'home2500.local'
+    blueprints.goauthentik.io/instantiate: 'true'
+
+entries:
+  - model: authentik_core.user
+    id: user-{{$ROLE}}
+    identifiers:
+      username: '{{$NAME}}'
+    attrs:
+      name: '{{$NAME}}'
+      email: '{{$EMAIL}}'
+      is_active: true
+      is_superuser: false
+      groups:
+        - !Find [authentik_core.group, [name, 'Home-Developers']]
+        - !Find [authentik_core.group, [name, 'Home-Users']]

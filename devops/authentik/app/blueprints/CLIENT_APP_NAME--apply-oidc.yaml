@@ -5,48 +5,86 @@ metadata:
   name: Home2500 {{$CLIENT_APP_NAME}} apply oidc
   slug: blueprint-home2500-{{$CLIENT_APP_NAME}}-apply-oidc
   labels:
-    Domain: "{{$CLIENT_APP_NAME}}.{{$DOMAIN}}"
-    
-entries:  
+    Domain: '{{$CLIENT_APP_NAME}}.{{$DOMAIN}}'
+
+entries:
   - model: authentik_providers_oauth2.oauth2provider
     id: prov-{{$CLIENT_APP_NAME}}-oidc
     identifiers:
-      name: "{{$CLIENT_APP_NAME}}-provider"
+      name: '{{$CLIENT_APP_NAME}}-provider'
     attrs:
-      client_type: "confidential"
-      client_id: "{{$OIDC_ID}}"
-      client_secret: "{{$OIDC_SECRET}}"
-      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      client_type: 'confidential'
+      client_id: '{{$OIDC_ID}}'
+      client_secret: '{{$OIDC_SECRET}}'
+      authorization_flow:
+        !Find [
+          authentik_flows.flow,
+          [slug, default-provider-authorization-implicit-consent],
+        ]
+      invalidation_flow:
+        !Find [
+          authentik_flows.flow,
+          [slug, default-provider-authorization-implicit-consent],
+        ]
 
-      redirect_uris: 
-        - { "url": "https://{{$CLIENT_APP_NS}}/auth/login", "matching_mode": "strict" }
-        - { "url": "https://{{$CLIENT_APP_NS}}/user-settings", "matching_mode": "strict" }
-        - { "url": "https://{{$CLIENT_APP_NS}}/", "matching_mode": "strict" }
-      
-      signing_key: !Find [authentik_crypto.certificatekeypair, [name, "authentik Self-signed Certificate"]]
-      
+      redirect_uris:
+        - {
+            'url': 'https://{{$CLIENT_APP_NS}}/oidc/callback',
+            'matching_mode': 'strict',
+          }
+        - {
+            'url': 'https://{{$CLIENT_APP_NS}}/auth/login',
+            'matching_mode': 'strict',
+          }
+        - {
+            'url': 'https://{{$CLIENT_APP_NS}}/user-settings',
+            'matching_mode': 'strict',
+          }
+        - { 'url': 'https://{{$CLIENT_APP_NS}}/', 'matching_mode': 'strict' }
+
+      signing_key:
+        !Find [
+          authentik_crypto.certificatekeypair,
+          [name, 'authentik Self-signed Certificate'],
+        ]
+
       property_mappings:
-        - !Find [authentik_core.propertymapping, [name, "authentik default OAuth Mapping: OpenID 'email'"]]
-        - !Find [authentik_core.propertymapping, [name, "authentik default OAuth Mapping: OpenID 'openid'"]]
-        - !Find [authentik_core.propertymapping, [name, "authentik default OAuth Mapping: OpenID 'profile'"]]
-  
+        - !Find [
+            authentik_core.propertymapping,
+            [name, "authentik default OAuth Mapping: OpenID 'email'"],
+          ]
+        - !Find [
+            authentik_core.propertymapping,
+            [name, "authentik default OAuth Mapping: OpenID 'openid'"],
+          ]
+        - !Find [
+            authentik_core.propertymapping,
+            [name, "authentik default OAuth Mapping: OpenID 'profile'"],
+          ]
+
   - model: authentik_core.application
     id: app-{{$CLIENT_APP_NAME}}
     identifiers:
-      slug: "{{$CLIENT_APP_NAME}}"
+      slug: '{{$CLIENT_APP_NAME}}'
     attrs:
-      name: "{{$CLIENT_APP_BLUE_LABEL}}"
+      name: '{{$CLIENT_APP_BLUE_LABEL}}'
       provider: !KeyOf prov-{{$CLIENT_APP_NAME}}-oidc
-      group: "{{$CLIENT_APP_BLUE_GROUP}}"
-      meta_description: "{{CLIENT_APP_BLUE_META_DESCRIPTION}}"
-      meta_launch_url: "https://{{$CLIENT_APP_NS}}/"      
-      meta_icon: "{{$AUTHENTIK_URL}}/static/dist/assets/icons/home2500-icon.svg"
+      group: '{{$CLIENT_APP_BLUE_GROUP}}'
+      meta_description: '{{CLIENT_APP_BLUE_META_DESCRIPTION}}'
+      meta_launch_url: 'https://{{$CLIENT_APP_NS}}/'
+      meta_icon: '{{$AUTHENTIK_URL}}/static/dist/assets/icons/home2500-icon.svg'
 
   - model: authentik_policies.policybinding
-    identifiers: { target: !KeyOf "app-{{$CLIENT_APP_NAME}}", group: !Find [authentik_core.group, [name, "Home-Admins"]] }
-    attrs: { order: 0 }          
+    identifiers:
+      {
+        target: !KeyOf 'app-{{$CLIENT_APP_NAME}}',
+        group: !Find [authentik_core.group, [name, 'Home-Admins']],
+      }
+    attrs: { order: 0 }
   - model: authentik_policies.policybinding
-    identifiers: { target: !KeyOf "app-{{$CLIENT_APP_NAME}}", group: !Find [authentik_core.group, [name, "Home-Developers"]] }
-    attrs: { order: 1 }      
-
+    identifiers:
+      {
+        target: !KeyOf 'app-{{$CLIENT_APP_NAME}}',
+        group: !Find [authentik_core.group, [name, 'Home-Developers']],
+      }
+    attrs: { order: 1 }

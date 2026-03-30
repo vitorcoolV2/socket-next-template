@@ -832,8 +832,9 @@ app_required_env_vars() {
 
     if [[ $CLIENT_APP_BLUE_TEMPLATE_MODULE == "proxy" ]];then
         TOOL_STAGES=(
-            "script" 
+            "script"             
             "vault_login"
+            "provision_user"
             "provision_db" 
             "provision_oidc"
             "provision_secrets"     
@@ -843,13 +844,13 @@ app_required_env_vars() {
             "name_register" 
             "authentik_login" 
             "blue_apply" 
-            "outpost_add"
-            "on_complete"
+            "outpost_add"            
         )
     else        
         TOOL_STAGES=(
-            "script" 
+            "script"             
             "vault_login"
+            "provision_user"
             "provision_db" 
             "provision_oidc"
             "provision_secrets"              
@@ -858,8 +859,7 @@ app_required_env_vars() {
             "running" 
             "name_register" 
             "authentik_login" 
-            "blue_apply" 
-            "on_complete"
+            "blue_apply"             
         )
     fi
     export TOOL_STAGES_OFF=(
@@ -923,9 +923,11 @@ app_up_names() {
             #ph api open || return 1
             if ph api auth; then
                 # Registra o Domínio Público no IP do Traefik (Proxy)
+                ph_api dns remove "$CLIENT_APP_NS"
                 ph_api dns add "$APP_NS_IP" "$CLIENT_APP_NS"
            
                 # Registra o Domínio Interno no IP direto do Container
+                ph_api dns remove "$CLIENT_APP_INTERNAL_NS"
                 ph_api dns add "$CLIENT_APP_SERVICE_IP" "$CLIENT_APP_INTERNAL_NS"
                 
                 echo "✅ DNS Records updated successfully." >&2
@@ -1455,11 +1457,41 @@ tool_stage_workflow() {
         app_script_requirements || return 1
     }
 
+    #-------------------------------------------------------------------------------
+    # @function _provision_user__requirements
+    # @description Creates Authentik user from template before vault login
+    #-------------------------------------------------------------------------------
+    _provision_user__requirements() {
+        # Skip if APP_USER_NAME not set
+        [[ -z "$CLIENT_APP_USER_NAME" ]] && return 0
+        
+        require_vars AUTHENTIK_DIR || return 1
+        
+        local ROLE="${CLIENT_APP_USER_ROLE:-developer}"
+        local NAME="$CLIENT_APP_USER_NAME"
+        local EMAIL="${CLIENT_APP_USER_EMAIL:-${NAME}@home2500.local}"
+        
+        local TPL_DIR="$AUTHENTIK_DIR/app/blueprints"
+        local TPL_FILE="$TPL_DIR/user--ROLE--NAME.yaml"
+        local OUTPUT_FILE="$AUTHENTIK_DIR/blueprints/home2500--${ROLE}--${NAME}.yaml"
+        
+        require_files TPL_FILE || return 1
+        
+        echo "👤 Creating Authentik user: $NAME (role: $ROLE)..." >&2
+        
+        blue_template_vars "$TPL_FILE" "$OUTPUT_FILE" \
+            "ROLE=$ROLE" "NAME=$NAME" "EMAIL=$EMAIL" || return 1
+        
+        blue_apply "$OUTPUT_FILE" || return 1
+        
+        echo "✅ User $NAME created with role $ROLE" >&2
+    }
+
     _vault_login__requirements() {        
         (
-            ## @todo - login should be from Developer role base on vault || steward role
-            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null /dev/null \
-                || vault_request_stew_token || return 1
+            ## Use bot role for app provisioning
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null \
+                || vault_request_token "bot" || return 1
 
             vault_validate_token || return 1        
         ) || return 1
@@ -1471,7 +1503,7 @@ tool_stage_workflow() {
     #-------------------------------------------------------------------------------
     # @function _provision_db__requirements
     # @description Garante que a Database exista e que as credenciais de ADMIN
-    #              estejam disponíveis na memória para o provisionamento.
+    #              estejam disponíveis na me_provision_oidc__requirements memória para o provisionamento.
     #-------------------------------------------------------------------------------
     _provision_db__requirements() {
         # 1. Verifica se a App solicita uma base de dados específica      
@@ -1524,7 +1556,8 @@ tool_stage_workflow() {
 
         unset OIDC_ID
         unset OIDC_SECRET
-        (
+        (            
+            kp test || kp open
             echo "🛡️  OIDC Module detected. Checking secrets for $CLIENT_APP_NAME..." >&2
             if ! PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" 2> /dev/null && \
                 ! PROVIDER_SELECT="keepass" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" 2> /dev/null; then
@@ -1544,6 +1577,8 @@ tool_stage_workflow() {
             FROM="vault" TO="mem" tool_provision__secret_vars \
                 "OIDC_ID=$CLIENT_APP_NAME/OIDC_ID" \
                 "OIDC_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" || return 1
+
+            #show_vars OIDC_ID OIDC_SECRET
         ) || return 1
         ## does not show var created on subshell show_vars OIDC_ID OIDC_SECRET
         return 0
@@ -1613,6 +1648,10 @@ tool_stage_workflow() {
                     PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var_name" 2>/dev/null
                     local value="${!var_name}"
                     
+                    #show_vars var_name 
+                    #show_vars $var_name
+                    #show_vars value
+
                     if [[ ! -z "$value" ]]; then   
                         echo -e "\e[32mOK\e[0m (len: ${#value})" >&2
                     else
@@ -1657,7 +1696,7 @@ tool_stage_workflow() {
         ## app_require_export_container_ip_port || return 1     
 
         local url=""
-        local max_retries=2
+        local max_retries=${CLIENT_APP_WAIT_RETRY:-2}
         local attempt=0
 
         # Loop until the URL is successfully retrieved or retries run out
@@ -1757,13 +1796,6 @@ tool_stage_workflow() {
                 $CLIENT_APP_BLUE_APPLY_TPL \
                 $tmp 2> /dev/null || return 1
             LABEL=">>> TMP" require_single_blue_file tmp || return 1
-
-            if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "proxy" ]]; then                
-                require_service_redirect_auth "$CLIENT_APP_NAME" || return 1            
-            fi
-            if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" == "oidc"* ]]; then                
-                app_oidc_validate "$CLIENT_APP_NAME" || return 1
-            fi      
 
 
             if files_are_equal $tmp $CLIENT_APP_BLUE_APPLY; then
@@ -1911,6 +1943,7 @@ tool_stage_workflow() {
             return 1  
         fi
     done
+    _on_complete__requirements
 }
 app_oidc_validate() {
     local app_name=${1:-$CLIENT_APP_NAME}
@@ -1987,7 +2020,7 @@ app_down() {
         else            
             docker compose -f "$CLIENT_APP_COMPOSE_FILE" down --remove-orphans || return 1            
         fi    
-        docker rm -f $CLIENT_APP_CONTAINER_NAME 
+        
     ) || return 1
 }
 
