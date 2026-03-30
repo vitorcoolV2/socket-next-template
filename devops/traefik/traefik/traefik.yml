@@ -15,11 +15,11 @@ api:
   dashboard: true
   #insecure: true #true  # Set to false and add authentication in production
 
-experimental:
-  plugins:
-    rewrite-body:
-      moduleName: "github.com/packruler/rewrite-body"
-      version: "v1.2.0"
+#experimental:
+#  plugins:
+#    rewrite-body:
+#      moduleName: "github.com/packruler/rewrite-body"
+#      version: "v1.2.0"
 
 
 entryPoints:

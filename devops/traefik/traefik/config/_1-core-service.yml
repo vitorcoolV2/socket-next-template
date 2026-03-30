@@ -64,10 +64,20 @@ http:
       headers:
         contentSecurityPolicy: |
           default-src 'self';
-          script-src 'self' 'unsafe-inline' 'unsafe-eval';
+          script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-QI23YWMJrD/tljM6/82tpL8EwqdBoptwZfycFHA9IiQ=';
           style-src 'self' 'unsafe-inline';
           img-src 'self' data: blob: https://auth.home2500.local;
           font-src 'self' data:;
-          connect-src 'self' blob: https://auth.home2500.local http://auth.home2500.local https://raw.githubusercontent.com/owncloud/awesome-ocis/;
+          connect-src 'self' data: blob: 
+            https://opencode.ai 
+            https://opencode.home2500.local 
+            https://auth.home2500.local 
+            http://auth.home2500.local 
+            https://raw.githubusercontent.com/owncloud/awesome-ocis/;
           frame-src 'self' https://auth.home2500.local http://auth.home2500.local;
           worker-src 'self';
+          form-action 'self' https://auth.home2500.local;
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsSeconds: 31536000

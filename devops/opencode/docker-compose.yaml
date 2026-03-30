@@ -31,7 +31,7 @@ services:
       - /home/${USER}/.local/state/opencode:/home/${USER}/.local/state/opencode
       #- /home/${USER}/.local/bin/opencode:/home/${USER}/.local/bin/opencode
       ## same config
-      - /home/${USER}/.config/opencode:/home/${USER}/.config/opencode
+      #- /home/${USER}/.config/opencode:/home/${USER}/.config/opencode
       - /home/${USER}/.opencode:/home/${USER}/.opencode
       ## ssh
       - /home/${USER}/.ssh:/home/${USER}/.ssh:ro
@@ -39,7 +39,16 @@ services:
       - /home/${USER}/.bashrc:/home/${USER}/.bashrc
       # Docker socket mount for DinD (Docker in Docker) scenarios
       - /var/run/docker.sock:/var/run/docker.sock
+      - ../trusted-ca.pem:/etc/ssl/certs/home2500-ca.pem:ro
+      ## local AI model config
+      - ./config/skills/:/home/${USER}/.config/opencode/skills/
+      - ./config/opencode.json:/home/${USER}/.config/opencode/opencode.json
+      - ./config/OPENCODE.md:/home/${USER}/.config/opencode/OPENCODE.md
     environment:
+      # allow local chat.home2500.local self cert
+      - NODE_EXTRA_CA_CERTS=/etc/ssl/certs/home2500-ca.pem
+      # Optional: if you still hit issues with specific older libraries
+      - SSL_CERT_FILE=/etc/ssl/certs/home2500-ca.pem
       #### DOCKER
       - PATH=/home/${USER}/.local/bin:/home/${USER}/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
       - DOCKER_HOST=unix:///var/run/docker.sock
@@ -57,13 +66,25 @@ services:
     networks:
       - app-network
     labels:
-      - 'traefik.enable=true'
-      - 'traefik.http.routers.opencode.rule=Host(`opencode.home2500.local`)'
-      - 'traefik.http.routers.opencode.entrypoints=websecure'
-      - 'traefik.http.routers.opencode.tls=true'
-      - 'traefik.http.routers.opencode.middlewares=authentik-sso@file,security-headers@file'
-      - 'traefik.http.routers.opencode.service=opencode-service'
-      - 'traefik.http.services.opencode-service.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT}'
+      - "traefik.enable=true"
+      - "traefik.http.routers.opencode.rule=Host(`opencode.home2500.local`)"
+      - "traefik.http.routers.opencode.entrypoints=websecure"
+      - "traefik.http.routers.opencode.tls=true"
+      
+      # 1. Simplified Middleware Chain
+      # We keep authentik-sso, but use opencode-csp to handle all headers (CSP, XSS, Sniff)
+      - "traefik.http.routers.opencode.middlewares=authentik-sso@file,opencode-csp"
+
+      # 2. Combined Security Headers (Removes need for security-headers@file)
+      - "traefik.http.middlewares.opencode-csp.headers.browserXssFilter=true"
+      - "traefik.http.middlewares.opencode-csp.headers.contentTypeNosniff=true"
+      #- "traefik.http.middlewares.opencode-csp.headers.customResponseHeaders.Content-Security-Policy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-QI23YWMJrD/tljM6/82tpL8EwqdBoptwZfycFHA9IiQ='; style-src 'self' 'unsafe-inline'; connect-src 'self' data: https://opencode.ai https://opencode.home2500.local; img-src 'self' data:;"
+      - "traefik.http.middlewares.opencode-csp.headers.customResponseHeaders.Content-Security-Policy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' data: https://opencode.ai https://opencode.home2500.local; img-src 'self' data:;"
+      # 3. Streamlined Service Config
+      # Traefik automatically links the router to the service in the same container.
+      - "traefik.http.services.opencode.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT}"
+      - "traefik.http.services.opencode.loadbalancer.responseForwarding.flushInterval=-1"
+
     command: bash -c "/home/${USER}/.opencode/bin/opencode web --port ${CLIENT_APP_SERVICE_PORT} --hostname 0.0.0.0"
     restart: unless-stopped
 

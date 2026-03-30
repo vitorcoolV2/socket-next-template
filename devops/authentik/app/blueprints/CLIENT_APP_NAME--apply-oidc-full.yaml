@@ -19,39 +19,20 @@ entries:
       authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
       invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
 
+      allowed_cors_origins:
+        - '{{$CLIENT_APP_OIDC_CORS_1}}'
+
       redirect_uris:
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_1}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_2}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_3}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_4}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_5}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_6}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_7}}',
-            'matching_mode': 'strict',
-          }
-        - {
-            'url': 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_8}}',
-            'matching_mode': 'strict',
-          }
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_1}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_2}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_3}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_4}}'
+          matching_mode: 'strict'
+        - url: 'https://{{$CLIENT_APP_NS}}{{$CLIENT_APP_OIDC_REDIR_5}}'
+          matching_mode: 'strict'
 
       signing_key:
         !Find [

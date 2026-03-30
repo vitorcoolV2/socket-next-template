@@ -26,9 +26,10 @@ services:
       - TRAEFIK_NETWORK=app-network
       - DOCKER_API_VERSION=1.52
     command:
-      - "--experimental.plugins.rewrite-body.moduleName=github.com/packruler/rewrite-body"
-      - "--experimental.plugins.rewrite-body.version=v1.2.0"
       - "--log.level=INFO"    
+      #- "--experimental.plugins.rewrite-body.moduleName=github.com/packruler/rewrite-body"
+      #- "--experimental.plugins.rewrite-body.version=v1.2.0"
+      
 
     networks:
       app-network:

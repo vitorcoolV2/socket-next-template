@@ -1944,6 +1944,7 @@ tool_stage_workflow() {
         fi
     done
     _on_complete__requirements
+    return 0
 }
 app_oidc_validate() {
     local app_name=${1:-$CLIENT_APP_NAME}
