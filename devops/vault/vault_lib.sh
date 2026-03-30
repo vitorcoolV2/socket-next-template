@@ -127,13 +127,16 @@ vault_delete_secret() {
 }
 
 vault_secret_path_caps () {
-    local secret_path=${1,-"secret/"}
-    
-    require_vars VAULT_TOKEN || return 1
+    local secret_path=${1:-"secret/"}    
     require_vars secret_path || return 1
-    # Verificamos o path de dados e o path de sistema (onde ocorre o 403)
-    local CAPS=$(vault token capabilities "$secret_path")    
-    echo "   - [$secret_path] : $CAPS" 2>&1    
+    (
+        PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null 
+        require_vars VAULT_TOKEN || return 1
+        
+        # Verificamos o path de dados e o path de sistema (onde ocorre o 403)
+        local CAPS=$(vault token capabilities "$secret_path")    
+        echo "   - [$secret_path] : $CAPS" 2>&1    
+    ) || return 1    
 }
 is_sealed() {
     local status
@@ -284,10 +287,12 @@ vault_request_root_token() {
     }
 
     (        
-        PROVIDER_SELECT="keepass" core_secret_service_get "root/ROOT_TOKEN" 
-
+        echo '>>>>>>>>> "mem" vault/root/VAULT_TOKEN <<<<<<< "keepass"'
+        kp test 2> /dev/null || kp open
+        PROVIDER_SELECT="keepass" core_secret_service_get "root/VAULT_TOKEN" 
+        vault_secret_path_caps
         # 2. Validar usando a função especializada
-        if ! vault_validate_token "$ROOT_TOKEN" "root" 2> /dev/null; then            
+        if ! vault_validate_token "$VAULT_TOKEN" "root" 2> /dev/null; then            
             # Se a validação falhou, limpamos o cache para forçar novo login
             PROVIDER_SELECT="mem" core_secret_mem_delete "vault/VAULT_TOKEN"
             echo "⚠️  Cleaning invalid/expired token from mem." >&2
@@ -298,10 +303,10 @@ vault_request_root_token() {
         if ! curl -sk --connect-timeout 2 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
             echo "❌ Vault API down at $VAULT_ADDR" >&2 && return 1
         fi
-        is_sealed && return 1  # need { echo "🔓 Unsealing..." >&2; vault_unseal || return 1; }
+        is_sealed && { echo "🔓 Unsealing..." >&2; vault_unseal || return 1; }
         
-        
-        PROVIDER_SELECT="mem" core_secret_service_put "vault/VAULT_TOKEN" "$ROOT_TOKEN" || return 1
+        # never save vault/VAULT_TOKEN to any persistent media. specialy the root
+        PROVIDER_SELECT="mem" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1
 
     )
 }
@@ -317,7 +322,7 @@ vault_request_stew_token() {
          #echo "$VAULT_TOKEN"
         
         # 2. Validar usando a função especializada
-        if ! vault_validate_token "$VAULT_TOKEN" "approle" 2> /dev/null; then            
+        if ! vault_validate_token "$VAULT_TOKEN" "steward-policy" 2> /dev/null; then            
             # Se a validação falhou, limpamos o cache para forçar novo login
             PROVIDER_SELECT="mem" core_secret_mem_delete "vault/VAULT_TOKEN"
             echo "⚠️  Cleaning invalid/expired token from mem." >&2
@@ -368,14 +373,71 @@ vault_request_stew_token() {
         # ok: show all;;show_vars LOGIN_RESPONSE VAULT_TOKEN 
         # never store this token on keepass. 
         #       keepass is to store $user var definition must be mandatory and documented
-        PROVIDER_SELECT="mem" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1
+        PROVIDER_SELECT="mem keepass" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1
     ) || return 1
 }
 export -f vault_request_stew_token
 
+vault_request_token() {
+    local role="${1:-"user"}" ## can be user|developer|bot
+    
+    ! require_containers_ready VAULT_CONTAINER_NAME && {
+        echo "❌ Error: $VAULT_CONTAINER_NAME not running."
+        return 1
+    }
+
+    local vault_role="$(sanitize_path_name "${role}-role")"
+    local vault_policy="$(sanitize_path_name "${role}-policy")"
+    local var_name="VAULT_TOKEN"
+    ## default policy . if valid stay
+    (
+        PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2>/dev/null
+        
+        if ! vault_validate_token "$VAULT_TOKEN" "$vault_policy" 2>/dev/null; then            
+            PROVIDER_SELECT="mem" core_secret_service_delete "vault/VAULT_TOKEN" 2> /dev/null
+            echo "⚠️ Cleaning invalid/expired token from mem." >&2
+        else    
+            echo "VAULT_TOKEN still valid"
+            return 0
+        fi        
+    )
+
+    if ! curl -sk --connect-timeout 2 "$VAULT_ADDR/v1/sys/health" > /dev/null 2>&1; then
+            echo "❌ Vault API down at $VAULT_ADDR" >&2 && return 1
+    fi
+    is_sealed && return 1
+
+
+    (
+        kp test 2> /dev/null || { 
+            echo "requesting vault token role: $vault_role"
+            kp open || return 1
+        }
+
+        echo "🔑 Recovering AppRole from KeePass $vault_role..." >&2
+        local creds=$(kp_get_approle "vault/AppRole/$vault_role")
+        local r_id=$(echo "$creds" | awk '{print $1}')
+        local s_id=$(echo "$creds" | awk '{print $2}')
+ 
+
+        [[ -z "$r_id" || -z "$s_id" ]] && { echo "❌ AppRole/$vault_role credentials not found." >&2; return 1; }
+
+        local LOGIN_RESPONSE
+        LOGIN_RESPONSE=$(vault write -format=json auth/approle/login role_id="$r_id" secret_id="$s_id" 2>&1)
+        
+        VAULT_TOKEN=$(echo "$LOGIN_RESPONSE" | jq -r '.auth.client_token // empty')
+        
+        [[ -z "$VAULT_TOKEN" ]] && { echo "❌ Failed to get token" >&2; return 1; }
+                
+        PROVIDER_SELECT="mem keepass" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1       
+    )
+}
+
+
 vault_validate_token() {
-    local token="${1:-$VAULT_TOKEN}"
-    local name="$2"
+    local token="${1:-$VAULT_TOKEN}"    
+    local match_policy="${2:-default}" ## or not if empty
+    local name="${2:-approle}"
     local vault_url="${VAULT_ADDR:-"https://$VAULT_INTERNAL_NS"}"
 
     (
@@ -413,6 +475,13 @@ vault_validate_token() {
             local ttl_min=$(( ttl / 60 ))
             
             echo "✅ [VAULT SUCCESS] Autenticado como: $display_name" >&2
+            # B. Validação de Política (Usando Regex para evitar matches parciais como 'default' em 'default-admin')
+            if [[ -n "$match_policy" ]]; then
+                if [[ ! ",$policies," =~ ,$match_policy, ]]; then
+                    echo "❌ [ERROR] Política '$match_policy' não encontrada em: [$policies]" >&2
+                    return 1
+                fi
+            fi
             echo "   ⏳ TTL: ${ttl_min}m | 📜 Políticas: [${policies//,/ ,}]" >&2
             [[ $ttl_min -gt 0 ]] && [[ $ttl -lt 600 ]] && echo "⚠️  [WARNING] Token prestes a expirar (<10m)!" >&2
             if [[ ! -z $name &&  $name != $display_name ]]; then 
@@ -432,7 +501,7 @@ vault_validate_token() {
     )
 
 }
-export -f vault_request_stew_token
+
 
 vault_up() {    
     (
@@ -593,7 +662,7 @@ vault__self_certificate() {
         echo "✅ Certificados gerados com sucesso em $CERTS_FOLDER"  >&2
     ) || return 1
 }
-vault__steward_policy() {
+vault__steward_policy__DO_NOT_DELETE() {
   echo "Initializing/Updating Steward Role..."
 
   # 1. Define the Steward Policy (Fixed syntax)

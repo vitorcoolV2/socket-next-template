@@ -1,7 +1,7 @@
 # Pi-hole configuration file (v6.4.1)
 # Encoding: UTF-8
 # This file is managed by pihole-FTL
-# Last updated on 2026-03-28 05:28:46 UTC
+# Last updated on 2026-03-28 20:26:59 UTC
 
 [dns]
   # Upstream DNS Servers to be used by Pi-hole. If this is not set, Pi-hole will not
@@ -134,7 +134,6 @@
     "192.168.1.67 backup.home2500.local",
     "172.28.0.3 mailcrab.app-network",
     "192.168.1.67 mailcrab.home2500.local",
-    "172.28.0.9 opencode.app-network",
     "192.168.1.67 opencode.home2500.local",
     "192.168.1.67 pihole.app-network",
     "fe80::57b1:b3ff:509e:85d0 pihole.app-network",
@@ -148,7 +147,10 @@
     "192.168.1.67 whoami.home2500.local",
     "192.168.1.67 files.home2500.local",
     "192.168.1.67 fotos.home2500.local",
-    "172.28.0.5 files.app-network"
+    "172.28.0.5 opencode.app-network",
+    "172.28.0.13 ai.app-network",
+    "172.28.0.9 chat.app-network",
+    "192.168.1.67 chat.home2500.local"
   ] ### CHANGED, default = []
 
   # If set, queries for plain names, without dots or domain parts, are never forwarded to

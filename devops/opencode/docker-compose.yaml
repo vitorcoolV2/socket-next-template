@@ -11,8 +11,11 @@ services:
     group_add:
       - "986"
     image: opencode-${UID}-${GID}:latest
-
     container_name: opencode
+    deploy:
+      resources:
+        limits:
+          memory: 1GB      
     stdin_open: true # Keep STDIN open for interactive commands
     tty: true # Allocate a pseudo-TTY
     working_dir: /home/${USER}

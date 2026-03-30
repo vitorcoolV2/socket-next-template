@@ -321,6 +321,123 @@ kp() {
             
     }
 
+    kp_init() {
+        local force=false
+        local check_only=false
+        
+        # Parse arguments
+        for arg in "$@"; do
+            case "$arg" in
+                --force|-f)
+                    force=true
+                    ;;
+                --check|-c)
+                    check_only=true
+                    ;;
+                --help|-h)
+                    echo "Usage: kp init [--force] [--check]"
+                    echo "  --force, -f  Reinitialize even if DB exists"
+                    echo "  --check, -c  Only validate setup, don't create"
+                    return 0
+                    ;;
+            esac
+        done
+        
+        echo "🚀 Initializing KeePass configuration..." >&2
+        
+        # Validate required variables
+        if ! require_vars KP_DB KP_KEY 2>/dev/null; then
+            echo "❌ Error: KP_DB and KP_KEY must be defined" >&2
+            return 1
+        fi
+        
+        # Create directories
+        mkdir -p "$(dirname "$KP_DB")" || { echo "❌ Cannot create KP_DB directory"; return 1; }
+        mkdir -p "$(dirname "$KP_KEY")" || { echo "❌ Cannot create KP_KEY directory"; return 1; }
+        
+        # Check existing setup
+        if [[ -f "$KP_DB" ]]; then
+            echo "✅ DB already exists: $KP_DB" >&2
+            if [[ "$force" == "true" ]]; then
+                echo "⚠️  Will reinitialize (--force)..." >&2
+            fi
+        else
+            echo "ℹ️  DB not found: $KP_DB" >&2
+        fi
+        
+        if [[ "$check_only" == "true" ]]; then
+            [[ -f "$KP_KEY" ]] && echo "✅ Key file exists: $KP_KEY" || echo "❌ Key file missing: $KP_KEY"
+            return 0
+        fi
+        
+        # Generate key file if missing
+        if [[ ! -f "$KP_KEY" ]] || [[ "$force" == "true" ]]; then
+            echo "🔐 Generating key file: $KP_KEY" >&2
+            if ! openssl rand -out "$KP_KEY" 256 2>/dev/null; then
+                echo "❌ Error: Failed to generate key file" >&2
+                return 1
+            fi
+            chmod 600 "$KP_KEY"
+            echo "✅ Key file created" >&2
+        else
+            echo "✅ Key file already exists: $KP_KEY" >&2
+        fi
+        
+        # Check if we should proceed (check mode)
+        if [[ "$check_only" == "true" ]]; then
+            return 0
+        fi
+        
+        # Create DB if missing or force
+        if [[ ! -f "$KP_DB" ]] || [[ "$force" == "true" ]]; then
+            echo "📦 Creating KeePass database: $KP_DB" >&2
+            
+            # Get master password - support env var or stdin
+            local master_pass=""
+            
+            if [[ -n "$KP_MASTER_PASSWORD" ]]; then
+                master_pass="$KP_MASTER_PASSWORD"
+                echo "🔑 Using KP_MASTER_PASSWORD from environment" >&2
+            elif [[ ! -t 0 ]]; then
+                # Read from stdin (pipe)
+                read -r master_pass
+            else
+                runtime_init || return 1
+                echo -n "🔑 Enter master password for new database: " >&2
+                command read -rs master_pass
+                echo "" >&2
+            fi
+            
+            if [[ -z "$master_pass" ]]; then
+                echo "❌ Error: Password cannot be empty" >&2
+                return 1
+            fi
+            
+            # Create DB with key file - pass password twice for confirmation
+            if printf '%s\n%s\n' "$master_pass" "$master_pass" | keepassxc-cli db-create "$KP_DB" --set-key-file "$KP_KEY" -p 2>&1; then
+                echo "✅ Database created successfully" >&2
+                
+                # Save session password
+                echo -n "$master_pass" > "$KP_PASS_FILE"
+                chmod 600 "$KP_PASS_FILE"
+                
+                # Activate session
+                wrapper_lock || return 1
+                export KP_SESSION=1
+                
+                echo "✅ KeePass initialized and session opened" >&2
+                return 0
+            else
+                echo "❌ Error: Failed to create database" >&2
+                return 1
+            fi
+        else
+            echo "✅ Database already exists: $KP_DB" >&2
+        fi
+        
+        return 0
+    }
+
     # Lógica Principal de Inicialização
     if [[ "$cmd" == "close" ]]; then
         close_session 
@@ -328,6 +445,9 @@ kp() {
     elif [[ "$cmd" == "test" ]]; then            
         test "${args[@]}"
         return 0    
+    elif [[ "$cmd" == "init" ]]; then
+        kp_init "${args[@]}"
+        return 0
     elif [[ "$cmd" == "create" ]]; then        
         local openHandler="open___${KP_OPEN_POLICY:-block}_policy"            
         return 0    

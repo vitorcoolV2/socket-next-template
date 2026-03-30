@@ -1,7 +1,6 @@
 # ./traefik/config/_2-core-dynamic.yml
 # /etc/traefik/config/_2-core-dynamic.yml
 http:
-
   # ----------------------------------------------------------------
   # SERVICES (Ajusta as portas se necessário)
   # ----------------------------------------------------------------
@@ -9,38 +8,44 @@ http:
     authentik-service:
       loadBalancer:
         servers:
-          - url: "http://authentik-server.app-network:9000"          
+          - url: 'http://authentik-server.app-network:9000'
 
     mailcrab-service:
       loadBalancer:
         servers:
-          - url: "http://mailcrab.app-network:1080"       
+          - url: 'http://mailcrab.app-network:1080'
 
     pihole-service:
       loadBalancer:
         servers:
-          - url: "http://192.168.1.67:8080"
+          - url: 'http://192.168.1.67:8080'
 
     vault-service:
       loadBalancer:
         servers:
-          - url: "https://vault.app-network:443"  
+          - url: 'https://vault.app-network:443'
+
+    ocis-service:
+      loadBalancer:
+        servers:
+          - url: 'https://files.app-network:9200'
+        serversTransport: ocis-insecure
 
     whoami-service:
       loadBalancer:
         servers:
-          - url: "http://whoami.app-network:80"
-
+          - url: 'http://whoami.app-network:80'
 
   ## home2500 certification objective
   serversTransports:
     vault-internal:
-      rootCAs: ["/etc/traefik/certs/ca-chain.pem"]
-      serverName: "vault.app-network"
+      rootCAs: ['/etc/traefik/certs/ca-chain.pem']
+      serverName: 'vault.app-network'
+      insecureSkipVerify: true
+    ocis-insecure:
       insecureSkipVerify: true
     insecureTransport:
       insecureSkipVerify: true
-      
 
   middlewares:
     security-headers:
@@ -53,4 +58,16 @@ http:
         stsIncludeSubdomains: true
         stsPreload: true
         customRequestHeaders:
-          X-Forwarded-Proto: "https"
+          X-Forwarded-Proto: 'https'
+
+    ocis-csp:
+      headers:
+        contentSecurityPolicy: |
+          default-src 'self';
+          script-src 'self' 'unsafe-inline' 'unsafe-eval';
+          style-src 'self' 'unsafe-inline';
+          img-src 'self' data: blob: https://auth.home2500.local;
+          font-src 'self' data:;
+          connect-src 'self' blob: https://auth.home2500.local http://auth.home2500.local https://raw.githubusercontent.com/owncloud/awesome-ocis/;
+          frame-src 'self' https://auth.home2500.local http://auth.home2500.local;
+          worker-src 'self';

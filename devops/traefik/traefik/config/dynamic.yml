@@ -11,13 +11,13 @@ http:
     pihole-redirect:
       redirectRegex:
         # Se for apenas a raiz exata, manda para /admin/
-        regex: "^https://pihole.home2500.local/$"
-        replacement: "https://pihole.home2500.local/admin/"    
+        regex: '^https://pihole.home2500.local/$'
+        replacement: 'https://pihole.home2500.local/admin/'
 
     # --- Authentik ForwardAuth ---
     authentik-sso:
       forwardAuth:
-        address: "http://authentik-server.app-network:9000/outpost.goauthentik.io/auth/traefik"        
+        address: 'http://authentik-server.app-network:9000/outpost.goauthentik.io/auth/traefik'
         trustForwardHeader: true
         authResponseHeaders:
           - X-authentik-username
@@ -44,9 +44,8 @@ http:
         rewrite-body:
           lastModified: true
           rewrites:
-            - regex: "</head>"      
+            - regex: '</head>'
               replacement: "<script src='/static/dist/theme-toggle.js' defer></script></head>"
-
 
   # ----------------------------------------------------------------
   # ROUTERS
@@ -54,87 +53,91 @@ http:
   routers:
     # Portal Authentik (Sem middleware de auth para evitar loop)
     authentik-portal:
-      rule: "Host(`auth.home2500.local`)"
-      entryPoints: ["websecure"]
+      rule: 'Host(`auth.home2500.local`)'
+      entryPoints: ['websecure']
       priority: 200
-      service: "authentik-service"
+      service: 'authentik-service'
       tls: {}
-      middlewares: ["security-headers","inject-theme-js"]
-      
-    
+      middlewares: ['security-headers', 'inject-theme-js']
+
     whoami-public:
-      rule: "Host(`whoami.home2500.local`)"
-      entryPoints: ["websecure"]
+      rule: 'Host(`whoami.home2500.local`)'
+      entryPoints: ['websecure']
       service: whoami-service
-      middlewares: ["authentik-sso"]
+      middlewares: ['authentik-sso']
       tls: {}
 
     mailcrab:
-      rule: "Host(`mailcrab.home2500.local`)"
-      entryPoints: ["websecure"]
-      service: mailcrab-service      
-      tls: {}      
-      middlewares: ["authentik-sso", "security-headers"]
+      rule: 'Host(`mailcrab.home2500.local`)'
+      entryPoints: ['websecure']
+      service: mailcrab-service
+      tls: {}
+      middlewares: ['authentik-sso', 'security-headers']
 
     ## --------------- Vault
 
     # 2. VAULT UI (Prioridade Normal): Protegido pelo Authentik SSO
     vault:
-      rule: "Host(`vault.home2500.local`)"
-      entryPoints: ["websecure"]
+      rule: 'Host(`vault.home2500.local`)'
+      entryPoints: ['websecure']
       #priority: 100
       service: vault-service
       tls: {}
 
-
     # 1. AUTH BYPASS (High Priority)
     # Prevents Authentik's internal callbacks from being intercepted by the redirector
     pihole-auth-bypass:
-      rule: "Host(`pihole.home2500.local`) && PathPrefix(`/outpost.goauthentik.io/`)"
-      entryPoints: ["websecure"]
+      rule: 'Host(`pihole.home2500.local`) && PathPrefix(`/outpost.goauthentik.io/`)'
+      entryPoints: ['websecure']
       priority: 200
-      service: "authentik-service"
+      service: 'authentik-service'
       tls: {}
 
     # 2. PI-HOLE MAIN
     pihole:
-      rule: "Host(`pihole.home2500.local`)"
-      entryPoints: ["websecure"]
+      rule: 'Host(`pihole.home2500.local`)'
+      entryPoints: ['websecure']
       priority: 100
       service: pihole-service
       middlewares:
-        - "authentik-sso"
-        - "pihole-redirect"        
+        - 'authentik-sso'
+        - 'pihole-redirect'
       tls: {}
 
     traefik-dashboard:
-      rule: "Host(`traefik.home2500.local`)"
-      entryPoints: ["websecure"]
+      rule: 'Host(`traefik.home2500.local`)'
+      entryPoints: ['websecure']
       service: api@internal
-      middlewares: ["authentik-sso", "security-headers"]
+      middlewares: ['authentik-sso', 'security-headers']
       priority: 110
       tls: {}
 
-
+    # OCIS Files
+    ocis:
+      rule: 'Host(`files.home2500.local`)'
+      entryPoints: ['websecure']
+      service: ocis-service
+      middlewares: ['ocis-csp']
+      tls: {}
 
 # ----------------------------------------------------------------
 # TLS
 # ----------------------------------------------------------------
 tls:
   certificates:
-    - certFile: "/etc/traefik/certs/traefik-fullchain.pem"
-      keyFile: "/etc/traefik/certs/traefik.key"
+    - certFile: '/etc/traefik/certs/traefik-fullchain.pem'
+      keyFile: '/etc/traefik/certs/traefik.key'
       stores:
         - default
-    
+
   stores:
     default:
       defaultCertificate:
-        certFile: "/etc/traefik/certs/traefik-fullchain.pem"
-        keyFile: "/etc/traefik/certs/traefik.key"
+        certFile: '/etc/traefik/certs/traefik-fullchain.pem'
+        keyFile: '/etc/traefik/certs/traefik.key'
 
   # Adiciona isto para evitar que pedidos de domínios estranhos
   # tentem usar configurações TLS que não existem
   options:
     default:
-      sniStrict: false # Permite que ele entregue o cert padrão mesmo com SNI errado        
+      sniStrict: false # Permite que ele entregue o cert padrão mesmo com SNI errado

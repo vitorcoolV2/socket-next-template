@@ -67,10 +67,10 @@ if [ "$INITIALIZED" = "false" ]; then
     echo "VAULT_ADDR=$VAULT_ADDR"
     INIT_OUTPUT=$(docker exec -e VAULT_ADDR="http://127.0.0.1:8200" vault vault operator init -key-shares=1 -key-threshold=1 -format=json)    
     UNSEAL_KEY=$(echo "$INIT_OUTPUT" | jq -r '.unseal_keys_b64[0]')
-    ROOT_TOKEN=$(echo "$INIT_OUTPUT" | jq -r '.root_token')
+    VAULT_TOKEN=$(echo "$INIT_OUTPUT" | jq -r '.root_token')
     
     set +e
-    kp_save_entry "vault/root/ROOT_TOKEN" "$ROOT_TOKEN"
+    kp_save_entry "vault/root/VAULT_TOKEN" "$VAULT_TOKEN"
     kp_save_entry "vault/root/UNSEAL_KEY" "$UNSEAL_KEY"
     set -e
     echo "✅ Keys saved to KeePass."

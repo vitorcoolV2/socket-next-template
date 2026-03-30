@@ -41,3 +41,65 @@ kp save-ca-pair <path> <cert> <key> # Save cert + key
 1.  **KeePass**: Manual entry of passwords/keys.
 2.  **Vault**: `core.sh` syncs KeePass entries to Vault during the boot sequence.
 3.  **Runtime**: Services (Traefik, Authentik, Apps) fetch secrets from Vault or Mem-storage via `core_secret_service_get`.
+
+## Roles
+
+Home2500 uses a role-based access control system for Vault:
+
+| Role               | Purpose                    | TTL | Capabilities                            |
+| ------------------ | -------------------------- | --- | --------------------------------------- |
+| **steward-role**   | Full admin                 | 4h  | All secrets, PKI, Auth                  |
+| **developer-role** | App provisioning (tool.sh) | 24h | R/W OIDC secrets, read Authentik tokens |
+| **user-role**      | Read assigned secrets      | 24h | Read home2500/\* secrets                |
+| **guest-role**     | Public secrets only        | 24h | Read public/\* only                     |
+
+### Setup Roles
+
+Run the policy creation script:
+
+```bash
+cd devops/vault
+./_2-vault-policies.sh
+```
+
+### Getting Credentials
+
+After creating a role, get the AppRole credentials:
+
+```bash
+# Developer role
+vault read auth/approle/role/developer-role/role-id
+vault write -f auth/approle/role/developer-role/secret-id
+```
+
+### Storing in KeePass
+
+Store AppRole credentials at: `vault/AppRole/<role-name>`
+
+| Entry                          | Username | Password  |
+| ------------------------------ | -------- | --------- |
+| `vault/AppRole/steward-role`   | role_id  | secret_id |
+| `vault/AppRole/developer-role` | role_id  | secret_id |
+| `vault/AppRole/user-role`      | role_id  | secret_id |
+| `vault/AppRole/guest-role`     | role_id  | secret_id |
+
+## Policy Definitions
+
+### developer-policy (for tool.sh)
+
+Required for running `devops/authentik/app/tool.sh` to provision client apps:
+
+```hcl
+# OIDC credentials for any app
+path "secret/data/*/OIDC_*" { capabilities = ["create", "read", "update", "list"] }
+
+# Database passwords (read)
+path "secret/data/*/DATABASE_*" { capabilities = ["read", "list"] }
+path "secret/data/*/POSTGRES_*" { capabilities = ["read", "list"] }
+
+# Redis passwords (read)
+path "secret/data/*/REDIS_*" { capabilities = ["read", "list"] }
+
+# Authentik tokens (read)
+path "secret/data/authentik/*" { capabilities = ["read", "list"] }
+```
