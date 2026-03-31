@@ -1,6 +1,15 @@
 {
     "$schema": "https://opencode.ai/config.json",
     "model": "ollama/MFDoom/deepseek-coder-v2-tool-calling:latest",
+    "permission": {
+        "bash": "allow",
+        "read": "allow",
+        "edit": "ask",
+        "write": "ask",
+        "list": "allow",
+        "skill": "allow",
+        "webfetch": "ask"
+    },
     "provider": {
         "ollama": {
             "name": "Local Ollama",
@@ -41,9 +50,17 @@
                 }
             },
             "options": {
-                "baseURL": "http://ai.app-network:11434/v1"
+                "baseURL": "http://ai.app-network:11434/v1",
+                "allowUnsafeTools": true,
+                "shell": "/bin/bash"
             }
         }
     },
-    "disabled_providers": []
+    "disabled_providers": [],
+    "instructions": [
+        "devops/opencode/AGENTS.md",
+        "config/skills/**/*.md"
+    ],
+    "autoupdate": true,
+    "default_agent": "plan"
 }

@@ -282,52 +282,7 @@ ph_api(){
             
             # Processamos com jq e fazemos ECHO (não return)
             echo "$raw_json" | jq -r 'map(split(" ") | {address: .[0], host: .[1]})'
-        }
-        _dns__clear_records_not_working() {
-            echo "🧹 A iniciar limpeza total via remoção individual..." >&2
-            # Obter lista de strings "IP HOST"
-            local list=($(ph_api dns get_records | jq -r '.[] | "\(.host)"'))
-            show_vars list
-            if [[ -z "$list" ]]; then
-                echo "✅ Pi-hole já está limpo."
-                return 0
-            fi
-
-            # Usando <<< (Here-string) para evitar que subshells roubem o stdin
-            while read -r domain; do
-                [[ -z "$domain" ]] && continue
-                echo "♻️  Processando: $domain"
-                ph_api dns remove "$domain"
-            done <<< "$list"
-            
-            echo "✨ Limpeza concluída."
-        }
-        _dns__clear_records_Nice() {
-            echo "🧹 A iniciar limpeza total via remoção individual..." >&2
-            
-            # 1. Carrega os registros em um array real do Bash
-            # O comando mapfile (ou readarray) é o mais eficiente para isso
-            local records=()
-            mapfile -t records < <(ph_api dns get_records | jq -r '.[] | .host')
-
-            # 2. Verifica se o array está vazio
-            if [[ ${#records[@]} -eq 0 ]]; then
-                echo "✅ Pi-hole já está limpo."
-                return 0
-            fi
-
-            echo "📦 Registros encontrados: ${#records[@]}" >&2
-
-            # 3. Itera sobre o array
-            for host in "${records[@]}"; do
-                [[ -z "$host" ]] && continue
-                
-                # O ph_api agora pode consumir o stdin à vontade sem quebrar o loop
-                ph_api dns remove "$host"
-            done
-            
-            echo "✨ Limpeza concluída."
-        }        
+        }   
         _dns__clear_records_() {
             echo "🧹 A iniciar limpeza total via remoção individual..." >&2
             
@@ -366,17 +321,6 @@ ph_api(){
             done
             
             echo "✨ Limpeza concluída com sucesso ($total registos)."
-        }
-        _dns__expected_records_() {
-            local resolver_name="$PIHOLE_CONTAINER_NAME.$INTERNAL_DOMAIN"
-            local resolver_ipv4="$(detect_active_ipv4)" 
-            local resolver_ipv6="$(detect_active_ipv6)" 
-            # Combine the Public Proxy-based records and the Direct Internal container records
-            jq -n \
-                --argjson public "$(core_desired_domain_names_json | jq -c .)" \
-                --argjson internal "$(docker_app_network_json | jq -c  .)" \
-                --argjson core "{\"host\": \"$resolver_name\", \"address\": \"$resolver_ip\"}" \
-                '($public + $internal + $core) | unique_by(.host) | sort_by(.host)'
         }
         _dns__expected_records_() {
             local resolver_name="$PIHOLE_CONTAINER_NAME.$INTERNAL_DOMAIN"
@@ -548,30 +492,6 @@ ph_api(){
     __handler_run "api__${cmd}_" "${args[@]}" 
 }
 
-
-ph_test() {
-    local traefik_ip="$(docker_app_network_proxy_ip)"
-    local _DIR_NAME="backup"
-
-    # usage test test 
-    if ph_api auth; then
-        echo "Session Active."
-        # Corrected: Adding the IP addresses
-        #ph_api dns add "$traefik_ip" "$_DIR_NAME.home2500.local"
-        #ph_clear_dns_records
-        ph_pi dns get_records 
-        ph_api logout
-    else
-        echo "Failed to prepare Pi-hole session."
-        return 1
-    fi
-}
-# Perform the DNS Cleanup via API
-
-# 2. Remoção corrigida com a nova fonte de dados
-
-
-
 ##### OS integration
 os_resolvers() {
     local cmd="$1" # get set
@@ -617,42 +537,6 @@ os_resolvers() {
         # Para scripts: echo "${resolvers[@]}"
         # Para uso interno: declare -g NAMESERVER_ARRAY=("${resolvers[@]}")
         echo "${resolvers[@]}"
-    }
-
-    _set__nameservers_() {
-        local backup_file="$os_resolv_file.bak"
-        
-        if [[ $# -eq 0 ]]; then
-            echo "❌ Error: No resolvers provided." >&2
-            return 1
-        fi
-
-        # 1. Backup inicial com sudo
-        sudo cp "$os_resolv_file" "$backup_file"
-        echo "📂 Backup created at $backup_file" >&2
-
-        # 2. Processar conteúdo em memória/temp
-        local temp_resolv=$(mktemp)
-        
-        # Mantém comentários e outras configs (search, options)
-        grep -v '^nameserver' "$os_resolv_file" > "$temp_resolv"
-
-        # Adiciona os novos
-        for ip in "$@"; do
-            local clean_ip=$(echo "$ip" | sed 's/nameserver=//g' | xargs)
-            if [[ -n "$clean_ip" ]]; then
-                echo "nameserver $clean_ip" >> "$temp_resolv"
-            fi
-        done
-
-        # 3. Escrita atómica usando TEE (resolve o Permission Denied do redirecionamento)
-        sudo chattr -i "$os_resolv_file"
-        cat "$temp_resolv" | sudo tee "$os_resolv_file" > /dev/null
-        sudo rm "$temp_resolv"
-
-        echo "✅ Updated $os_resolv_file with $# nameservers."
-        grep '^nameserver' "$os_resolv_file" | sed 's/^/   -> /'
-        sudo chattr +i "$os_resolv_file"
     }
 
     _set__nameservers_() {
@@ -709,7 +593,6 @@ os_resolvers() {
     __handler_run "_${cmd}__nameservers_" "${args[@]}" 
 }
 
-
 ph() {
     local cmd="$1" # test(), password(disable|rotate|restore), auth()
     cmd="${cmd##*(_)}"         
@@ -727,7 +610,7 @@ ph() {
     inst__reboot_() {
         (
             cd $PIHOLE_DIR            
-            inst_down_ && inst__up_
+            inst__down_ && inst__up_
         )
     }
 
@@ -866,6 +749,78 @@ ph() {
     __handler_run "inst__${cmd}_" "${args[@]}" 
 }
 
+
+
+ph_test() {
+    local traefik_ip="$(docker_app_network_proxy_ip)"
+    local _DIR_NAME="backup"
+
+    # usage test test 
+    if ph_api auth; then
+        echo "Session Active."
+        # Corrected: Adding the IP addresses
+        #ph_api dns add "$traefik_ip" "$_DIR_NAME.home2500.local"
+        #ph_clear_dns_records
+        ph_pi dns get_records 
+        ph_api logout
+    else
+        echo "Failed to prepare Pi-hole session."
+        return 1
+    fi
+}
+
+ph_test_os_integration() {    
+    ph disable || return 1
+    ph enable || return 1    
+}
+
+
+
+ph_sort_weights() {
+    local rules_json
+    rules_json=$(cat <<-'EOF'
+[
+  {
+    "prefix": "os_*|*nameservers*",    
+    "weight": 10,
+    "cat": "PIHOLE-OS-INTEGRATION"
+  },
+  {
+    "prefix": "ph_api|api__*|*dns*|*password*|*auth*|*sid",    
+    "weight": 12,
+    "cat": "PIHOLE-API-MANAGEMENT"
+  },
+  {
+    "prefix": "*_catalog|*_sort_weights",
+    "weight": 14,
+    "cat": "PIHOLE-CATALOG"
+  },
+  {
+    "prefix": "ph|inst__*|*enable*|*disable*|*reboot*|*up*|*down*|*health*|*docker*",
+    "weight": 15,
+    "cat": "PIHOLE-CLI"
+  },  
+  
+  {
+    "prefix": ".",
+    "refine": "",
+    "weight": 90,
+    "cat": "MISC"
+  }
+]
+EOF
+)
+    echo "$rules_json" | jq -c '
+        map(. + {refine: (.refine // "")}) 
+        | sort_by(.weight, .prefix) 
+    '
+}
+
+ph_fn_catalog() {
+    core_fn_catalog "${BASH_SOURCE[0]}" "ph_sort_weights" 
+}
+
+
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     #stack_trace
 
@@ -874,6 +829,3 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     #ph api open
 
 fi
-
-
-

@@ -247,14 +247,6 @@ tk_test_tls() {
 }
 
 tk_test_authentik_outpost() {
-    local service_list=$(echo "$SORTED_DESIRED_NAMES" | tr ',' ' ')
-
-    for sd in $service_list; do
-        echo -n "🔍 Testing: $sd "        
-        core_http_url_status "https://$sd"
-    done
-}
-tk_test_authentik_outpost() {
     echo -e "\n--- 🛡️  AUTHENTIK OUTPOST HEALTH CHECK ---"
     
     # Converte a lista separada por vírgulas em um array real do Bash
@@ -432,3 +424,54 @@ require_functions \
     test_2_authentic_routes \
     test_AUTHENTIK_TRAEFIK 
 
+
+tk_sort_weights() {
+    local rules_json
+    rules_json=$(cat <<-'EOF'
+[
+
+  {
+    "prefix": "tk_check_renewal|tk_need_renewal|tk_renew_certs|tk_test_tls",    
+    "weight": 10,
+    "cat": "TRAEFIK-CERT-MANAGEMENT"
+  },
+  {
+    "prefix": "tk_up|tk_down|tk_logs",
+    "weight": 15,
+    "cat": "TRAEFIK-INSTANCE-MANAGEMENT"
+  },
+  {
+    "prefix": "test_*;tk_switch2_*",    
+    "weight": 20,
+    "cat": "TRAEFIK-MODE-SWITCH"
+  },
+    {
+    "prefix": "tk_fn_*|tk_sort_w*",
+    "weight": 50,
+    "cat": "TRAEFIK-FUNCTIONS"
+  },
+
+{
+    "prefix": "tk_*",
+    "weight": 60,
+    "cat": "TRAEFIK-MISC"
+  },
+
+  {
+    "prefix": ".",
+    "refine": "",
+    "weight": 90,
+    "cat": "MISC"
+  }
+]
+EOF
+)
+    echo "$rules_json" | jq -c '
+        map(. + {refine: (.refine // "")}) 
+        | sort_by(.weight, .prefix) 
+    '
+}
+
+tk_fn_catalog() {
+    core_fn_catalog "${BASH_SOURCE[0]}" "tk_sort_weights" 
+}

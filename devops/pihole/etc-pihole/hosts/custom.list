@@ -17,7 +17,7 @@
 #                       WITHIN /etc/dnsmasq.d/yourname.conf                      #
 #    (make sure misc.etc_dnsmasq_d is set to true in /etc/pihole/pihole.toml)    #
 #                                                                                #
-#                      Last updated: 2026-03-30 15:09:29 UTC                     #
+#                      Last updated: 2026-03-31 20:15:31 UTC                     #
 #                              by FTL version v6.4.1                             #
 #                                                                                #
 ##################################################################################
@@ -45,9 +45,8 @@ fe80::57b1:b3ff:509e:85d0 pihole.app-network
 172.28.0.12 whoami.app-network
 192.168.1.67 whoami.home2500.local
 172.28.0.7 files.app-network
-172.28.0.13 chat.app-network
 172.28.0.14 ai.app-network
 192.168.1.67 chat.home2500.local
 
 
-# There are 26 entries in this file
+# There are 25 entries in this file

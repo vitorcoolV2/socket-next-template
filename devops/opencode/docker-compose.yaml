@@ -41,9 +41,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - ../trusted-ca.pem:/etc/ssl/certs/home2500-ca.pem:ro
       ## local AI model config
-      - ./config/skills/:/home/${USER}/.config/opencode/skills/
-      - ./config/opencode.json:/home/${USER}/.config/opencode/opencode.json
-      - ./config/OPENCODE.md:/home/${USER}/.config/opencode/OPENCODE.md
+      - ./config/skills/:/home/${USER}/.config/opencode/skills/:ro
+      - ./config/prompts/:/home/${USER}/.config/opencode/prompts/:ro
+      - ./config/opencode.json:/home/${USER}/.config/opencode/opencode.json:ro
+      - ./config/OPENCODE.md:/home/${USER}/.config/opencode/OPENCODE.md:ro
+      - ./config/AGENTS.md:/home/${USER}/.config/opencode/AGENTS.md:ro
     environment:
       # allow local chat.home2500.local self cert
       - NODE_EXTRA_CA_CERTS=/etc/ssl/certs/home2500-ca.pem

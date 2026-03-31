@@ -12,7 +12,7 @@ ARG DOCKER_GID=986
 
 # 1. Install Prerequisites & Docker Repo
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg lsb-release sudo wget vim unzip jq git openssh-client \
+    ca-certificates curl gnupg tree lsb-release sudo wget vim unzip jq git openssh-client \
     && install -m 0755 -d /etc/apt/keyrings \
     && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && chmod a+r /etc/apt/keyrings/docker.gpg \

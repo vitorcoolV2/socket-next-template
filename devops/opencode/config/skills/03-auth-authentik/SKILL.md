@@ -7,11 +7,41 @@ Tu és o responsável pela camada de Identidade e Acesso (IAM) do projeto home25
 
 📂 Domínio de Ficheiros
 
-devops/authentik/_0-authentik_lib.sh (Core API)
+devops/authentik/_0-authentik_lib.sh (Core API & Tokens)
 
 devops/authentik/_1-blueprints_lib.sh (Orquestração de YAML)
 
 devops/authentik/app/tool.sh (Utilitários de aplicação)
+
+🛠️ Catálogo de Funções (API Core)
+
+Deves utilizar as seguintes funções nativas da _0-authentik_lib.sh para as tuas operações:
+
+🔑 Gestão de Tokens & Login
+
+ak_api_token_generate(): Gera novos tokens de API.
+
+ak_api_token_validate(): Valida se o token atual ainda é funcional.
+
+ak_login() / ak_logout(): Gestão de sessão administrativa.
+
+ak_api_call(): Wrapper principal para chamadas à API do Authentik.
+
+🔄 Ciclo de Vida & Saúde
+
+ak_up() / ak_down(): Sobe ou desce a infraestrutura do Authentik.
+
+ak_system_health(): Verifica o estado global do sistema.
+
+ak_wait4_instance(): Bloqueia a execução até o serviço estar pronto.
+
+ak_sync_provider_secrets(): Sincroniza segredos entre o provedor e o core.
+
+🛡️ Políticas e Temas
+
+ak_theme_dark() / ak_theme_light(): Configura a estética do portal.
+
+_user__policy(), _bot__policy(), _developer__policy(): Define as políticas de acesso base.
 
 🛠️ Competências Core
 

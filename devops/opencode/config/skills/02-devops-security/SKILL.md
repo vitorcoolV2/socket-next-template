@@ -7,11 +7,16 @@ Tu és o guardião das credenciais e da autenticação.
 
 📂 Domínio de Ficheiros
 
+devops/core.sh  specialy core_secret_service_* functions e visao de segurança global do projeto. 
+  - One keepass db 4 each user + a descolatable file key + pin to rule the home role. 
+  -
+
 devops/vault/vault_lib.sh
+devops/vault/keepass.sh  para gestão de segredos e integração com o Vault.
 
 devops/vault/keepass.sh
 
-devops/authentik/
+devops/authentik/_0-authentik_lib.sh (Para interagir com a API do Authentik e gerir segredos relacionados)
 
 🛠️ Competências
 

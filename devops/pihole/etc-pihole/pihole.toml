@@ -1,7 +1,7 @@
 # Pi-hole configuration file (v6.4.1)
 # Encoding: UTF-8
 # This file is managed by pihole-FTL
-# Last updated on 2026-03-30 15:09:29 UTC
+# Last updated on 2026-03-31 20:15:31 UTC
 
 [dns]
   # Upstream DNS Servers to be used by Pi-hole. If this is not set, Pi-hole will not
@@ -149,7 +149,6 @@
     "172.28.0.12 whoami.app-network",
     "192.168.1.67 whoami.home2500.local",
     "172.28.0.7 files.app-network",
-    "172.28.0.13 chat.app-network",
     "172.28.0.14 ai.app-network",
     "192.168.1.67 chat.home2500.local"
   ] ### CHANGED, default = []
