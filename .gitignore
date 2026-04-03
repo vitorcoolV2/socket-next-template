@@ -59,7 +59,7 @@ devops/_*.sh
 
 
 .jest-*
-/docs
+
 .vscode
 /public/test*.html
 *.snap

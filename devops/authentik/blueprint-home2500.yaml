@@ -1,7 +1,7 @@
 version: 1
-## file: authentik/blueprint-home2500.yaml
+## file: authentik/core-home2500.yaml
 metadata:
-  name: Home2500 Infrastructure
+  name: Home2500 Infrastructura
   slug: blueprint-home2500
   labels:
     Domain: "{{DOMAIN}}"
@@ -58,7 +58,9 @@ entries:
     id: prov-vault-sso-gate
     identifiers: { name: "vault-provider" }
     attrs:
-      <<: *proxy_defaults
+      mode: "forward_single"
+      authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+      invalidation_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]      
       internal_host: "https://vault.app-network:443"
       external_host: "https://vault.home2500.local"      
 

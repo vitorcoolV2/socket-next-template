@@ -653,7 +653,7 @@ export -f blue_apply
 
 
 # Apply Home2500 base
-#blue_apply "blueprint-home2500.yaml"
+#blue_apply "core-home2500.yaml"
 #blue_template_show_match_vars "blueprint-home2500-OIDC-tpl.yaml"
 outpost__get_current_json() {
     # 3. Obter Token e fazer a chamada (SEM subshell de execução)

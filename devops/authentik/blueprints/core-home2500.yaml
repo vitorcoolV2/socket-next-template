@@ -1,7 +1,7 @@
 version: 1
-## file: authentik/blueprint-home2500.yaml
+## file: authentik/core-home2500.yaml
 metadata:
-  name: Home2500 Infrastructure
+  name: Home2500 Infrastructura
   slug: blueprint-home2500
   labels:
     Domain: "home2500.local"
