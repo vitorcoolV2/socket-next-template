@@ -27,6 +27,7 @@ echo "pwd: $(pwd)" >&2
 # will trace from require_* functions to source
 export TRACE_STEPS=10
 export REQ_STATUS_OK="OK   "
+export REQ_STATUS_SUCCESS="SUCCESS"
 export REQ_STATUS_UNDEFINED="UNDEF"
 export REQ_STATUS_NOT_FIL="!FIL "
 export REQ_STATUS_NOT_DIR="!DIR "
@@ -494,7 +495,8 @@ require_single_script_function() {
 
     if [[ -z "$func_json" ]]; then
         # Output de Erro alinhado
-        printf "  \e[1;31m󰅙󰅙\e[0m Missing: \e[1;33m%-30s\e[0m \e[1;30m-> [%s]\e[0m\n" "$func" "$(core_relative_path2 $_client_script)" >&2
+        LABEL=${LABEL:-"󰅙󰅙\e[0m Missing: "}
+        printf "  \e[1;31m${LABEL} \e[1;33m%-30s\e[0m \e[1;30m-> [%s]\e[0m\n" "$func" "$(core_relative_path2 $_client_script)" >&2
         return 1
     else
         # Extração de dados puros do JSON
@@ -746,11 +748,12 @@ export -f core_resolve_file
 # from ../.env. 
 # DOMAIN="home2500.local"
 # PUBLIC_SERVICES_LIST="traefik vault auth whoami mailcrab pihole backup"
-detect_active_interface() {
+detect_active_interface() {    
+
     # 1. Tenta usar a variável do .env, senão tenta detetar a interface da rota default
-    local target_name="${NETWORK_INTERFACE}"
+    local target_name="${HOST_NETWORK_INTERFACE}"
     
-    # Se NETWORK_INTERFACE não estiver definida, procura a interface da rota padrão
+    # Se HOST_NETWORK_INTERFACE não estiver definida, procura a interface da rota padrão
     if [ -z "$target_name" ] || [ "$target_name" = "default" ]; then
         target_name=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
     fi
@@ -1094,10 +1097,10 @@ docker_app_network_json() {
             {
                 # Extract the IP and the Name (removing leading slash)
                 address: .NetworkSettings.Networks[$int_dom].IPAddress,
-                host: ((.Name | sub("^/"; "")) + "." + $int_dom)
+                host: ((.Name | sub("^/"; "")) + "." + $int_dom)                
             }
         ]
-    '
+    ' | jq .
 }
 
 require_service_redirect_auth() {
@@ -1459,13 +1462,12 @@ _get_service_secret_path() {
     }
     
     _fetch_keepass_provider() {    
-        echo "fetching keepass" >&2   
+        #echo "fetching keepass" >&2   
         local keepass_service_path=$(core_secret_mapper_keepass "$service_nsp" "$secret_name")
         require_vars keepass_service_path || return 1
-
-        source "$(core_resolve_file "vault/keepass.sh")"
-        ## QA:OK list (group||folder) (entry||file)
-        # show_vars keepass_service_path && kp ls "$(dirname "/$keepass_service_path")" || return 1
+        if ! declare -f kp >/dev/null; then
+            source "$(core_resolve_file "vault/keepass.sh")" > /dev/null 2>&1
+        fi            
 
         current_val=$(kp_get_entry_value "$keepass_service_path")
         ## QA:OK show_vars current_val || return 1
@@ -1658,8 +1660,7 @@ core_secret_mem_delete() {
     # 1. Requisitos de segurança (inline ou externa)
     [[ -z "$MEM_ROOT_DIR" ]] && { echo "❌ ERRO: MEM_ROOT_DIR não definida!"; return 1; }
     [[ "$MEM_ROOT_DIR" == "/" ]] && { echo "❌ ERRO: Proteção contra suicídio acionada!"; return 1; }
-
-        require_functions core_secret_mapper_mem || return 1
+    require_functions core_secret_mapper_mem || return 1
 
     local input_path="$1"  
     local secret_val="$2"
@@ -1679,18 +1680,18 @@ core_secret_mem_delete() {
 
     # 2. Validação de existência
     if [[ ! -e "$target" ]]; then
-        echo "ℹ️  Aviso: '$input_path' não existe em $target . Nada a fazer."
+        echo "ℹ️  Aviso: '$input_path' não existe em $target . Nada a fazer." 
         return 0
     fi
 
     # 3. Proteção Extra: Garantir que o target está DENTRO do MEM_ROOT_DIR
     # Impede que "../../../etc/passwd" seja apagado
     if [[ "$(readlink -f "$target")" != "$(readlink -f "$MEM_ROOT_DIR")"* ]]; then
-        echo "❌ ERRO: Tentativa de apagar fora do ROOT permitido!"
+        echo "❌ ERRO: Tentativa de apagar fora do ROOT permitido!" >&2
         return 1
     fi
 
-    echo "🧹 Destruição segura: $target"
+    echo "🧹 Destruição segura: $target" >&2
 
     # 4. A Abordagem Única (The "Nuke" Approach)
     # - Se for ficheiro: Shred e Remove.
@@ -1891,38 +1892,36 @@ _put_service_secret_path() {
         return 1
     fi
      
-    # Mapeamento de caminhos em cada serviço
-    local keepass_service_path=$(core_secret_mapper_keepass "$service_nsp" "$secret_name")
-    local vault_service_path=$(core_secret_mapper_vault "$service_nsp" "$secret_name")
-    local mem_service_path=$(core_secret_mapper_mem "$service_nsp" "$secret_name")
+    # Validar agumentos necessarios 
+    require_vars secret_providers secret_name service_nsp || return 1
 
-    require_vars secret_name service_nsp \
-        vault_service_path \
-        keepass_service_path \
-        mem_service_path || return 1
-
-    # --- Definições das Funções de Armazenamento ---
+    # --- Definições das Funções orientadas para utilizacao modular Armazenamento ---
     
-    _store_mem_secret() {
-        echo "💾 [MEM] Fazendo cache de $secret_name..." >&2
+    _store_mem_secret() {        
         local mem_service_path=$(core_secret_mapper_mem "$service_nsp" "$secret_name")
+        require_vars \
+            MEM_ROOT_DIR \
+            mem_service_path || return 1
+        
+        local service_dir="$(dirname $mem_service_path)"   
+        require_locations MEM_ROOT_DIR || return 1        
 
-        local service_dir="$(dirname $mem_service_path)"           
         mkdir -p "$service_dir"
         chmod 700 "$service_dir"
-
-        mkdir -p "$(dirname "$mem_service_path")"
+        
         echo "$secret_val" > "$mem_service_path"
         chmod 600 "$mem_service_path"
     }
         
     _store_vault_secret() {
+        local vault_service_path=$(core_secret_mapper_vault "$service_nsp" "$secret_name")
+        require_vars vault_service_path || return 1
         if ! declare -f vault_save_secret >/dev/null; then
              source "$(core_resolve_file "vault/vault_lib.sh")" > /dev/null 2>&1
         fi
 
         if ! is_sealed; then
-            echo "🔒 [VAULT] Salvando $secret_name em $vault_service_path..." >&2
+            echo "🔒 [VAULT] Salvando $vault_service_path/$secret_name..." >&2
             local _dir=$(dirname $vault_service_path)
             if ! VAULT_SKIP_VERIFY=true vault_save_secret "$_dir" "$secret_name" "$secret_val" 2>/dev/null; then
                 echo "⚠️  [VAULT] Falha na escrita em $vault_service_path." >&2
@@ -1932,12 +1931,14 @@ _put_service_secret_path() {
     }
 
     _store_keepass_secret(){
+        local keepass_service_path=$(core_secret_mapper_keepass "$service_nsp" "$secret_name")
+        require_vars keepass_service_path || return 1
         if ! declare -f kp >/dev/null; then
-            source "$(core_resolve_file "vault/keepass.sh")" > /dev/null 2>&1
+            source "$(core_resolve_file "vault/keepass.sh")" > /dev/null 2>&1            
         fi               
 
-        echo "📓 [KEEPASS] Persistindo $secret_name..." >&2
-        if ! kp_save_entry "$keepass_service_path" "$secret_val"; then
+        echo "📓 [KEEPASS] Persistindo $keepass_service_path..." >&2
+        if ! kp_save_entry "$keepass_service_path" "$secret_val" 2> /dev/null; then
             echo "❌ [FATAL] Erro ao gravar novo segredo no KeePass!" >&2
             return 1
         fi
@@ -1949,7 +1950,8 @@ _put_service_secret_path() {
     for provider in $secret_providers; do
         local func_name="_store_${provider}_secret"
         if declare -f "$func_name" >/dev/null; then
-            $func_name || echo "⚠️  Provider $provider falhou, mas continuando..." >&2
+            echo "Persistindo >> [💾${provider^^}] $service_nsp/$secret_name" >&2        
+            $func_name || echo "⚠️  Provider \"$provider\" falhou, mas continuando..." >&2
         else
             echo "❓ Provider desconhecido: $provider" >&2
         fi
@@ -1958,11 +1960,12 @@ _put_service_secret_path() {
     # --- Passo C: Injeção no Ambiente Atual ---
 
     if [[ "$(sanitize_var_name $secret_name)" != "$secret_name" ]]; then
-        ### is not variable. do not export
+        ### is not variable name capable of producing sanitizable var name is naturaly excluded. 
+        ### do not export other secrets
         return 0
     fi    
 
-    echo "✅ [EXPORT] $secret_name (length: ${#secret_val})" >&2
+    echo "  [EXPORT] $secret_name (length: ${#secret_val})" >&2
     export "$secret_name"="$secret_val"
     return 0
 }
@@ -2043,6 +2046,38 @@ sanitize_var_name() {
     # 1. Transforma pontos e traços em underscores
     # 2. Remove caracteres não alfanuméricos residuais
     echo "$var_name" | sed 's/[.-]/_/g' | sed 's/[^a-zA-Z0-9_]//g' 
+}
+# path: devops/opencode/lib/interactive.sh
+
+ask() {
+    local question="$1"
+    local default_is_yes="$2" # true ou false
+    local prompt
+
+    if [ "$default_is_yes" = true ]; then
+        prompt="[S/n] (Sim/não)"
+    else
+        prompt="[s/N] (sim/Não)"
+    fi
+
+    echo -e "\n${LOG_COLOR_WARN}❓ $question $prompt${LOG_COLOR_NC}"
+    read -r response
+
+    # Se a resposta for vazia, usa o default
+    if [[ -z "$response" ]]; then
+        response=$([ "$default_is_yes" = true ] && echo "s" || echo "n")
+    fi
+
+    case "$response" in
+        [sS][iI][mM]|[sS]|[yY][eE][sS]|[yY])
+            core_log_info "✅ Aceite: A continuar..."
+            return 0
+            ;;
+        *)
+            core_log_warning "❌ Negado: Operação cancelada."
+            return 1
+            ;;
+    esac
 }
 ask_provision() {
     local _type="$1"
@@ -2146,7 +2181,11 @@ test____________________________() {
     )
 }
 #### CONTEXT FILE TOOL
-
+core_json_escape() {
+    local input_string="$1"
+    # O jq --arg cria uma variável interna segura e o '.' imprime-a como string válida
+    printf '%s' "$input_string" | jq -R .
+}
 core_search_file_json() {    
     local _file="${1}"
     shift
@@ -2269,6 +2308,69 @@ require_search_file() {
     ')
     return 0
 }
+
+require_mem_path() {
+    local app_name="${1:-$CLIENT_APP_NAME}"
+    local user_id=$(id -u)
+    
+    # 1. Ordem de Preferência (Hierarquia de Volatilidade) 
+    # A: /run/user/UID (RAM específica do utilizador - Mais segura) # este objectivo para Projectos com RAM. @todo 
+    # B: /dev/shm (RAM Partilhada - Mais rápida/comum)
+    # C: /tmp (SSD/Disco - Fallback persistente)
+    local options=(
+        "/run/user/$user_id/home2500"
+        "/dev/shm/home2500"
+        "/tmp/home2500"
+    )
+
+    for path in "${options[@]}"; do
+        # Testar se podemos criar/escrever no diretório pai
+        local parent=$(dirname "$path")
+        if [[ -w "$parent" ]] || mkdir -p "$parent" 2>/dev/null; then
+            export MEM_ROOT_DIR="$path/$app_name"
+            
+            # Criar com segurança atómica
+            mkdir -p "$MEM_ROOT_DIR"
+            chmod 700 "$MEM_ROOT_DIR" # Apenas o Dono da Casa entra aqui
+            
+            core_log_info "🧠 Memory Path Alocado: $MEM_ROOT_DIR (Mode: $([[ "$path" == *"/tmp"* ]] && echo "SSD" || echo "RAM"))"
+            return 0
+        fi
+    done
+
+    core_log_error "FALHA CRÍTICA: Nenhum caminho de memória disponível."
+    return 1
+}
+
+
+# Cores ANSI para Output
+readonly LOG_COLOR_INFO='\033[0;36m'  # Ciano
+readonly LOG_COLOR_ERROR='\033[0;31m' # Vermelho
+readonly LOG_COLOR_WARN='\033[1;33m'  # Amarelo
+readonly LOG_COLOR_NC='\033[0m'       # Sem Cor
+
+# Função de Log de Informação
+core_log_info() {
+    local msg="$1"
+    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    echo -e "${LOG_COLOR_INFO}[INFO] [${timestamp}] ${msg}${LOG_COLOR_NC}"
+}
+
+# Função de Log de Erro (Geralmente sai para o stderr)
+core_log_error() {
+    local msg="$1"
+    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    echo -e "${LOG_COLOR_ERROR}[ERROR] [${timestamp}] ❌ ${msg}${LOG_COLOR_NC}" >&2
+}
+
+# Função de Log de Aviso (Bónus para os teus requisitos de build)
+core_log_warning() {
+    local msg="$1"
+    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    echo -e "${LOG_COLOR_WARN}[WARN] [${timestamp}] ⚠️  ${msg}${LOG_COLOR_NC}"
+}
+
+
 
 ####  CONTEXT EXEC TOOL 
 core_fn_json() {
@@ -2555,21 +2657,15 @@ core_load_requirements() {
     export AUTHENTIK_ADMIN_USER=${AUTHENTIK_ADMIN_USER,-"akadmin"}
     export VAULT_PKI_CN=${VAULT_PKI_CN-"home2500.local"}
     export VAULT_ROOT_CA_NAME=${VAULT_ROOT_CA_NAME,"root-home2500"}
-    export NETWORK_INTERFACE="$NETWORK_INTERFACE"
+    export HOST_NETWORK_INTERFACE="${HOST_NETWORK_INTERFACE:-default}"
+    export HOST_NETWORK_IP="${HOST_NETWORK_IP:-$(detect_active_ipv4)}"
 
     export TRUSTED_CA_FILE="$DEVOPS_DIR/trusted-ca.pem"
         
     export KEEPASS_ROOT_DIR="vault" 
     export VAULT_ROOT_DIR="secret"
-    export MEM_ROOT_DIR="/tmp/home2500"
-    if [[ -d "/run/user/$UID" ]]; then
-        export MEM_ROOT_DIR="/run/user/$UID/home2500"
-    fi
-   
-    require_locations MEM_ROOT_DIR || {
-        mkdir -p "$MEM_ROOT_DIR"
-        chmod 700 "$MEM_ROOT_DIR"
-    }
+
+    require_mem_path && show_vars MEM_ROOT_DIR || echo "export MEM_ROOT_DIR=\"your most\""
 
     # used to extract filtered logs
     #core_desired_domain_names_json 
@@ -2587,7 +2683,8 @@ core_load_requirements() {
         MEM_ROOT_DIR \
         KEEPASS_ROOT_DIR \
         VAULT_ROOT_DIR \
-        NETWORK_INTERFACE \
+        HOST_NETWORK_INTERFACE \
+        HOST_NETWORK_IP \
         TRUSTED_CA_FILE
 }
 unset SKIP_ROOT_SCRIPT_CODE

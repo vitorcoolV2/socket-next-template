@@ -17,7 +17,7 @@ pihole/etc-pihole/*
 
 ### AUTHENTIK
 authentik/blueprints/*
-!authentik/blueprints/blueprint-home2500*.yaml
+!authentik/blueprints/core-home2500*.yaml
 
 # backup
 backup/config/*

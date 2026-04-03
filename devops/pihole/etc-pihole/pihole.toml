@@ -1,7 +1,7 @@
 # Pi-hole configuration file (v6.4.1)
 # Encoding: UTF-8
 # This file is managed by pihole-FTL
-# Last updated on 2026-03-31 20:15:31 UTC
+# Last updated on 2026-04-03 02:51:01 UTC
 
 [dns]
   # Upstream DNS Servers to be used by Pi-hole. If this is not set, Pi-hole will not
@@ -127,17 +127,10 @@
   #     Array of custom DNS records each one in HOSTS form: "IP HOSTNAME [HOSTNAME ...]"
   hosts = [
     "192.168.1.67 auth.home2500.local",
-    "172.28.0.5 authentik-db.app-network",
-    "172.28.0.2 authentik-redis.app-network",
     "172.28.0.10 authentik-server.app-network",
-    "172.28.0.8 authentik-worker.app-network",
     "192.168.1.67 backup.home2500.local",
     "192.168.1.67 files.home2500.local",
-    "192.168.1.67 fotos.home2500.local",
-    "172.28.0.4 mailcrab.app-network",
     "192.168.1.67 mailcrab.home2500.local",
-    "172.28.0.9 opencode.app-network",
-    "192.168.1.67 opencode.home2500.local",
     "192.168.1.67 pihole.app-network",
     "fe80::57b1:b3ff:509e:85d0 pihole.app-network",
     "192.168.1.67 pihole.home2500.local",
@@ -148,9 +141,14 @@
     "192.168.1.67 vault.home2500.local",
     "172.28.0.12 whoami.app-network",
     "192.168.1.67 whoami.home2500.local",
-    "172.28.0.7 files.app-network",
-    "172.28.0.14 ai.app-network",
-    "192.168.1.67 chat.home2500.local"
+    "192.168.1.67 chat.home2500.local",
+    "192.168.1.67 opencode.home2500.local",
+    "172.28.0.7 authentik-worker.app-network",
+    "172.28.0.2 mailcrab.app-network",
+    "172.28.0.4 authentik-db.app-network",
+    "172.28.0.5 authentik-redis.app-network",
+    "172.28.0.9 fotos.home2500.local",
+    "172.28.0.9 immich-server.app-network"
   ] ### CHANGED, default = []
 
   # If set, queries for plain names, without dots or domain parts, are never forwarded to
@@ -1132,7 +1130,7 @@
     #
     # Allowed values are:
     #     A valid Pi-hole password hash
-    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$lIJ0J/AsR52VNhuaxf2R/w==$x+OsL2HrwO3wVuyRPJy3m0HoTI0zpJhHj8ejQtCmhg4=" ### CHANGED, default = ""
+    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$qFnI6qdAwkC8yghkZ9YfKA==$7+4nWZL4b+ilVyf54J5r8XcT2UVnPcnABaaxZfrRuDA=" ### CHANGED, default = ""
 
     # Pi-hole 2FA TOTP secret. When set to something different than "", 2FA authentication
     # will be enforced for the API and the web interface. This setting is write-only, you

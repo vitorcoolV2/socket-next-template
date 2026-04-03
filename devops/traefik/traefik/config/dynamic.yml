@@ -39,13 +39,13 @@ http:
         permanent: true
 
     # --- MIDDLEWARE DE INJEÇÃO ---
-    #inject-theme-js:
-    #  plugin:
-    #    rewrite-body:
-    #      lastModified: true
-    #      rewrites:
-    #        - regex: '</head>'
-    #          replacement: "<script src='/static/dist/theme-toggle.js' defer></script></head>"
+    inject-theme-js:
+      plugin:
+        rewrite-body:
+          lastModified: true
+          rewrites:
+            - regex: '</head>'
+              replacement: "<script src='/static/dist/theme-toggle.js' defer></script></head>"
 
   # ----------------------------------------------------------------
   # ROUTERS
@@ -60,8 +60,8 @@ http:
       priority: 200
       service: 'authentik-service'
       tls: {}
-      middlewares: ['security-headers']
-      #middlewares: ['security-headers', 'inject-theme-js']
+      #middlewares: ['security-headers']
+      middlewares: ['security-headers', 'inject-theme-js']
 
     whoami-public:
       rule: 'Host(`whoami.home2500.local`)'
