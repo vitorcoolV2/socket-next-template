@@ -135,8 +135,7 @@ tool_prepare__env_vars() {
 
         local match_prefix_exceptions="${4:-$TOOL__CLIENT_APP__VAR_PATTERN}"
         
-        core_transform_inject_env_file_vars \
-            "$CLIENT_APP_ENV_FILE" \
+        core_transform_inject_env_file_vars  "$CLIENT_APP_ENV_FILE" \
             "APP_" \
             "CLIENT_APP_" \
             "$match_prefix_exceptions" 2> /dev/null
@@ -202,8 +201,8 @@ _resolve_compose__container_name() {
     # re/solve/set CLIENT_APP_CONTAINER_NAME
 
     unset CLIENT_APP_CONTAINER_NAME
-    core_transform_inject_env_file_vars \
-            "$CLIENT_APP_ENV_FILE" \
+    # @ inject .env file .name
+    core_transform_inject_env_file_vars "$CLIENT_APP_ENV_FILE" \
             "APP_CONTAINER_NAME" \
             "CLIENT_APP_CONTAINER_NAME" 2> /dev/null
 
@@ -801,7 +800,7 @@ app_required_env_vars() {
            
     require_vars CLIENT_APP_CONTAINER_NAME || tool_prepare__env_vars || return 1
     export CLIENT_APP_INTERNAL_NS="$CLIENT_APP_CONTAINER_NAME.$INTERNAL_DOMAIN"
-    echo "🔍 Internal Service: $CLIENT_APP_CONTAINER_NAME" >&2    
+    echo "🔍 Internal Service: \"$CLIENT_APP_CONTAINER_NAME\"" >&2    
     # ok it seams echo "${TOOL_STAGES[@]}"
     # Export final para o motor de template
 
@@ -838,7 +837,8 @@ app_required_env_vars() {
             "provision_db" 
             "provision_oidc"
             "provision_secrets"     
-            "deploy_secrets"        
+            "deploy_secrets"    
+            "build_image"    
             "compose" 
             "running" 
             "name_register" 
@@ -855,6 +855,7 @@ app_required_env_vars() {
             "provision_oidc"
             "provision_secrets"              
             "deploy_secrets"
+            "build_image"
             "compose" 
             "running" 
             "name_register" 
@@ -1116,7 +1117,7 @@ app_script_requirements() {
     local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"       
     
     ### 1. Definição das funções base
-    local base_funcs=("deploy" "deploy_secrets")
+    local base_funcs=("deploy" "deploy_secrets" "on_complete")
 
     ### 2. Gerar handlers de falha dinamicamente
     local fail_stage_funcs=()
@@ -1405,6 +1406,103 @@ require_single_yaml_file() {
         return 1
     fi
 }
+# path: devops/opencode/lib/analitica.sh
+
+tool_report_stack__analitical_jsonV1() {
+    local current_stage="$1"
+    local json="["
+    
+    # Âncora Git
+    local project_root=$(git rev-parse --show-toplevel 2>/dev/null || realpath ".")
+    
+    # --- CREDENCIAIS DO "DONO DA CASA" ---
+    local git_user=$(git config user.name)
+    local git_email=$(git config user.email)
+    local git_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "detached")
+    
+    # --- MAPEAMENTO DO REMOTE (Resource Link) ---
+    # Extrai o URL do remote 'origin' e limpa o '.git' final
+    local remote_url=$(git config --get remote.origin.url | sed 's/\.git$//' | sed 's/git@\(.*\):/https:\/\/\1\//')
+
+    for (( i=1; i<${#FUNCNAME[@]}; i++ )); do
+        local func="${FUNCNAME[$i]}"
+        local file_abs=$(realpath "${BASH_SOURCE[$i]}" 2>/dev/null || echo "${BASH_SOURCE[$i]}")
+        local line="${BASH_LINENO[$i-1]}"
+        
+
+        local rel_path=${file_abs#$project_root/}
+        [[ "$rel_path" == "$file_abs" ]] && rel_path=$(basename "$file_abs")
+
+        # Experiência Atómica do Ficheiro
+        local file_author=$(git log -1 --format="%an" -- "$file_abs" 2>/dev/null || echo "$git_user")
+        local git_hash=$(git log -1 --format="%h" -- "$file_abs" 2>/dev/null || echo "uncommitted")
+
+        # Gerar Link para o Resource (Browser Ready)
+        # Ex: https://github.com/user/repo/blob/main/devops/opencode/init.sh#L212
+        local resource_link="${remote_url}/blob/${git_branch}/${rel_path}#L${line}"
+
+        local entry="{"
+        entry+="\"stage\":\"${func}\","
+        entry+="\"git\":{"
+            entry+="\"user\":\"${git_user}\","
+            entry+="\"email\":\"${git_email}\","
+            entry+="\"branch\":\"${git_branch}\","
+            entry+="\"author_at_file\":\"${file_author}\","
+            entry+="\"hash\":\"${git_hash}\","
+            entry+="\"resource_link\":\"${resource_link}\""
+        entry+="},"
+        entry+="\"intent\":{"
+            entry+="\"rel_path\":\"${rel_path}\","
+            entry+="\"tlink\":\"$(core_relative_path2 "${file_abs}"):${line}:1\""
+        entry+="},"
+        entry+="\"line\":${line},"
+        entry+="\"status\":\"$( [[ $i -eq 1 ]] && echo "failed" || echo "parent_caller" )\""
+        entry+="}"
+
+        json+="$entry"
+        [[ $i -lt $((${#FUNCNAME[@]} - 1)) ]] && json+=","
+    done
+    
+    json+="]"
+    echo "$json" | sed 's/,]$/]/'
+}
+
+
+tool_report_stack__DRY3_analitical_json() {
+    local stage="$1"    
+    local console_log="$2"
+    # Captura a stack completa gerada acima
+    local raw_data
+    raw_data=$(tool_report_stack__analitical_jsonV1 "$stage")
+
+    # O Reducer JQ focado no "Thinking Flow"
+    echo "$raw_data" | jq -e --arg stage "$stage" --arg console "$console_log" '
+        if . == [] then 
+            error("Stack is empty. Ensure execution context exists.") 
+        else
+            {
+                "context": {
+                    "user": .[0].git.user,
+                    "branch": .[0].git.branch,
+                    "repo": (.[0].git.resource_link | split("/blob/")[0]),
+                    "stage": $stage,
+                    "console": $console,
+                    "timestamp": (now | strftime("%Y-%m-%dT%H:%M:%SZ"))
+                },
+                "trace": [
+                    .[] | {
+                        "stage": .stage,
+                        "status": .status,
+                        "line": .line,
+                        "file": .intent.rel_path,
+                        "tlink": .intent.tlink,
+                        "url": .git.resource_link
+                    }
+                ]
+            }
+        end
+    '
+}
 
 #-------------------------------------------------------------------------------
 # @function tool_compose_list_missing_vars
@@ -1418,9 +1516,40 @@ tool_compose_list_missing_vars() {
 tool_stage_workflow() {
     local stages=("${@}")
     [[ ${#stages[@]} -eq 0 ]] && stages=("${TOOL_STAGES[@]}")
+    local deepness=${BASH_F}
+
+    __stage__reporter() {
+        local stage="$1"
+    }    
+
+    __success_stage__handler() {
+        local stage="$1"  
+        local consoleLog="$2"
+        local client_handler_func="on_${stage}_success"
+        local service__func="_${stage}__requirements"
+        local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"         
+        require_files client_script || return 1
+        echo "
+        ---------------------------------------
+        ✅ stage \"$stage\" $REQ_STATUS_SUCCESS"
+        local tool_="${BASH_SOURCE[0]}"
+        # show link to handler
+        if ! LABEL="          handler:" require_single_script_function tool_ "$service__func" ; then            
+            return 1
+        fi
+        return 0
+
+
+        if ! LABEL="          optional \"$stage\" response review:" require_single_script_function client_script "$client_handler_func"; then    
+            return 0        
+        fi
+
+        "$client_handler_func" "$stage" "$data"        
+    }
     
     __fail_stage__handler() {     
         local stage="$1"  
+        local consoleLog="$2"
         local client_handler_func="on_${stage}_fail"
         local service__func="_${stage}__requirements"
         local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"         
@@ -1434,6 +1563,15 @@ tool_stage_workflow() {
             return 1
         fi
         
+
+        local deepness=${#FUNCNAME[@]}
+        echo "          stack depth: $deepness levels"
+
+        # Se quiseres ver a árvore de chamadas (Recursion Accounting)
+        for (( i=1; i<${#FUNCNAME[@]}; i++ )); do
+            echo "            ↳ chamada por: ${FUNCNAME[$i]}() em ${BASH_SOURCE[$i]}:${BASH_LINENO[$i-1]}"
+        done
+
         #show_vars stage client_handler_func
         ## make on_${stage}_fail a mandatory method
         ## ok it seams show_vars client_script client_handler_func client_script
@@ -1442,9 +1580,10 @@ tool_stage_workflow() {
             return 1        
         fi
 
-        "$client_handler_func"
+        "$client_handler_func" "$stage" "$consoleLog" || return 0
     }
-    
+
+
     # 1. Requisitos Base (Impedem qualquer execução se falharem)
     _base__requirements() {        
         tool_prepare__env_vars  || return 1
@@ -1508,7 +1647,15 @@ tool_stage_workflow() {
     _provision_db__requirements() {
         # 1. Verifica se a App solicita uma base de dados específica      
 
-        ! require_vars CLIENT_APP_DB_NAME && return 0 ## means CLIENT_APP_DB_NAME is the trigger to enabled DB
+        if ! require_vars CLIENT_APP_DB_NAME 2> /dev/null; then
+            # Intenção: DB está desativada por omissão de variável.
+            core_log_info "💡 Base de Dados: Desativada (Opcional)."
+            core_log_info "   Para ativar, define: CLIENT_APP_DB_NAME=\"$CLIENT_APP_NAME\""
+            core_log_info "   No ficheiro: $(core_resolve_file "$CLIENT_APP_ENV_FILE")"
+            
+            # Opcional: Injetar no teu futuro JSON analítico que este stage foi "SKIPPED_BY_DESIGN"
+            return 0 
+        fi
             
         unset OIDC_ID
         unset OIDC_SECRET
@@ -1602,6 +1749,35 @@ tool_stage_workflow() {
         fi
         deploy_secrets
     }
+
+    _build_image__requirements() {
+        local compose_file=$CLIENT_APP_COMPOSE_FILE
+        local container_name=$CLIENT_APP_CONTAINER_NAME
+        
+        core_log_info "Verificando requisitos de build para: $container_name"
+
+        # 1. Extrair o nome da imagem definida no compose para este serviço usando yq
+        local image_tag=$(yq ".services.${container_name}.image" "$compose_file")
+        
+        # 2. Verificar se a imagem já existe no Docker local
+        if [[ "$(docker images -q "$image_tag" 2> /dev/null)" == "" ]]; then
+            core_log_warning "Imagem $image_tag não encontrada. Build necessário."
+            return 0
+        fi
+
+        # 3. Verificar se existe uma secção 'build' definida
+        local has_build=$(yq ".services.${container_name} | has(\"build\")" "$compose_file")
+        
+        if [ "$has_build" == "true" ]; then
+            # Aqui podes adicionar lógica de hash (md5sum) do Dockerfile 
+            # para decidir se o build é obrigatório por alteração de ficheiro
+            core_log_info "Serviço possui definição de build. Verificando frescura..."
+            return 0
+        fi
+
+        core_log_info "Requisitos satisfeitos. Imagem atualizada."
+        return 0 # Build não necessário
+    }
     _on_complete__requirements() {   
         # this handler invoke optional: init.sh complete to let use define extra mem provider secrets
         local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME" 
@@ -1675,6 +1851,7 @@ tool_stage_workflow() {
             _gen_tmp() {
                 LABEL="<<< TPL" require_single_yaml_file CLIENT_APP_COMPOSE_FILE || return 1
 
+                # Prepare "mem" entry to preview docker compose fullfill ${model_var}
                 local tmp=$(core_secret_mapper_mem "$CLIENT_APP_NAME" "$(basename $CLIENT_APP_COMPOSE_FILE)")
                 PROVIDER_SELECT="mem" core_secret_service_put \
                     "$CLIENT_APP_NAME/$(basename $CLIENT_APP_COMPOSE_FILE)" \
@@ -1691,7 +1868,32 @@ tool_stage_workflow() {
     }
 
     # 2. Camada Interna (Serviço a responder no Docker Network)
-    _running__requirements() {        
+    _running__requirements___fast() {
+        local container="$CLIENT_APP_CONTAINER_NAME"
+        
+        # 1. Verificar se está a correr
+        if [[ $(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) != "true" ]]; then
+            core_log_error "Contentor $container não está em execução."
+            return 1
+        fi
+
+        # 2. Tentar obter o IP com retries (Race Condition protection)
+        local ip=""
+        for i in {1..5}; do
+            ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container")
+            [[ -n "$ip" ]] && break
+            sleep 1
+        done
+
+        if [[ -z "$ip" ]]; then
+            core_log_error "IP não atribuído ao contentor $container."
+            return 1
+        fi
+        
+        return 0
+    }
+    _running__requirements() {    
+        _running__requirements___fast || return 1
         # Ensure dependencies are met
         ## app_require_export_container_ip_port || return 1     
 
@@ -1904,7 +2106,7 @@ tool_stage_workflow() {
     }
     
 
-    __missing_handler_fn__fallback() {        
+    __missing__stage__handler() {        
         echo "
         ------------------------------------------------------------------
         ⚠️ Stage: \"$stage\" handler is missing. " >&2 
@@ -1919,31 +2121,58 @@ tool_stage_workflow() {
         return 1
     }
 
+    generate_workflow_req_id() {
+        local branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-branch")
+        local microtime=$(date +%s%N | cut -c1-13) # Timestamp com milissegundos
+        local path_hash=$(echo "$PWD" | md5sum | cut -c1-8)
+        
+        # Ex: fix-files-oidc_1712051234_a7b2c3d
+        #echo "$(sanitize_path_name "$branch")_${microtime}_${path_hash}"
+        echo "${path_hash}"
+    }
+
+    #tool_report_stack__DRY2_analitical_json "TESTE" "HAHA"
     # --- Loop de ExecuMissing important clição dos Stages ---
+    local handler_console_result
+    local handler_function   
+    local req_id=$(generate_workflow_req_id) # git branch + a $(sanitize_path_name $unique) 
+    local spot_folder="STAGE-FLOW/$req_id"
+
+    local res_folder="$MEM_ROOT_DIR/$spot_folder"
+    ! require_locations res_folder && {
+        mkdir -p "$res_folder"
+        chmod 700 "$res_folder"
+    }
+
+    local res_file
     for stage in "${stages[@]}"; do     
-        ##echo "running stage: \"$stage\"" >&2   
-        local handler_function="_${stage}__requirements"
+        handler_function="_${stage}__requirements"
         
         # Verifica se a função de stage existe antes de chamar
         if declare -f "$handler_function" > /dev/null; then
-            #echo "running handler function $handler_function"
+            ## ficou bom  :))))) DEBUG=TRUE require_locations res_folder
+            local spot_file="$spot_folder/$stage.stage"
 
-            if status=$(! "$handler_function"); then ## nao existe. nao esta carregada                
-                __fail_stage__handler "$stage"    
-                ## dev response         
-                #DEBUG=true debug_required_type_name "review" "stage" $REQ_STATUS_STOP 4
-                echo "-------------------- Error"
-                echo $status
+            res_file="$MEM_ROOT_DIR/$spot_file"                                 
+            if ! "$handler_function"  > $res_file 2>&1; then
+                ## ERROR/ FAIL STAGE
+                handler_console_result=$(cat $res_file)
+                __fail_stage__handler "$stage" "$handler_console_result"
+                echo "
+                -------------------- Error"
                 return 1
-            fi
-            echo "✅ Stage: \"$stage\" complete
-            " >&2
+            else
+                ## SUCCESS STAGE
+                handler_console_result=$(cat $res_file)
+                __success_stage__handler "$stage" "$handler_console_result"
+                continue
+            fi                        
         else
-            __missing_handler_fn__fallback
+            __missing__stage__handler
             return 1  
         fi
     done
-    _on_complete__requirements
+    _on_complete__requirements "${stages[@]}"
     return 0
 }
 app_oidc_validate() {
@@ -2125,7 +2354,8 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     # Opcional: só mostra a stack se estiver em modo debug
     [[ "$DEBUG" == "true" ]] && stack_trace
         
-    app_required_env_vars
+    app_script_requirements
+    app_required_env_vars 
     tool_stage_workflow 
     
     # Camada de Interatividade para o Vault
