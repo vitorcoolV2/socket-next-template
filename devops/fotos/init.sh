@@ -11,7 +11,42 @@ fi
 
 _DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-source ../authentik/app/tool.sh
+
+provision_secrets() {
+    echo "🔐 Provisionando segredos do Authentik para o Immich..." >&2        
+    (
+        # Define o contexto da aplicação (caso ainda não esteja definido no escopo)
+        require_vars CLIENT_APP_NAME || return 1
+        
+        PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/REDIS_PASSWORD" || \
+            TO="vault" FROM="vault" tool_provision__secret_vars \
+                "REDIS_PASSWORD=authentik/AUTHENTIK_REDIS__PASSWORD" \
+            || return 1        
+        return 0
+                  
+    ) || return 1
+
+}
+
+deploy_secrets() {
+    require_vars CLIENT_APP_NAME || return 1
+
+    (            
+        FROM="vault" TO="mem" tool_provision__secret_vars \
+            "REDIS_PASSWORD=$CLIENT_APP_NAME/REDIS_PASSWORD" \
+            "IMMICH_OAUTH_CLIENT_ID=$CLIENT_APP_NAME/OIDC_ID" \
+            "IMMICH_OAUTH_CLIENT_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" \
+        || return 1
+
+    ) || return 1
+
+    return 0
+}
+on_deploy_secrets_fail() {
+    return 1
+}
+
+
 
 context() {
     require_vars \
@@ -54,8 +89,18 @@ watch_immich_recovery() {
         sleep 5
     done
 }
+on_provision_user_fail() {
+    #  opencode  "explore immich API" && "maintain specs aligned with CORE stage of the art" && deliver "best stories with immich fun API"
+    returrn 0
+}
 on_script_fail() {
-    echo "script fail"
+    local stage="$1"
+    local data="$2"
+    local d2="$2"
+
+    echo "$stage"    
+    echo "$data"    
+    echo "$d2"    
     return 1
 }
 on_login_fail() {
@@ -114,6 +159,9 @@ on_running_fail() {
     fi
     return 1
 }
+on_build_image_fail(){
+    return 1 # ignore image build fail
+}
 on_compose_fail() {
     echo "compose config fail"
 
@@ -154,40 +202,9 @@ on_certificate_fail() {
     return 0 # continue without create certificate
 }
 
-provision_secrets() {
-    echo "🔐 Provisionando segredos do Authentik para o Immich..." >&2        
-    (
-        # Define o contexto da aplicação (caso ainda não esteja definido no escopo)
-        require_vars CLIENT_APP_NAME || return 1
-        
-        PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/REDIS_PASSWORD" || \
-            TO="vault" FROM="vault" tool_provision__secret_vars \
-                "REDIS_PASSWORD=authentik/AUTHENTIK_REDIS__PASSWORD" \
-            || return 1        
-        return 0
-                  
-    ) || return 1
-
-}
 
 ### just return list of secrets provision
-deploy_secrets() {
-    require_vars CLIENT_APP_NAME || return 1
 
-    (            
-        FROM="vault" TO="mem" tool_provision__secret_vars \
-            "REDIS_PASSWORD=$CLIENT_APP_NAME/REDIS_PASSWORD" \
-            "IMMICH_OAUTH_CLIENT_ID=$CLIENT_APP_NAME/OIDC_ID" \
-            "IMMICH_OAUTH_CLIENT_SECRET=$CLIENT_APP_NAME/OIDC_SECRET" \
-        || return 1
-
-    ) || return 1
-
-    return 0
-}
-on_deploy_secrets_fail() {
-    return 1
-}
 
 on_provision_oidc_fail() {
     return 1
@@ -200,3 +217,6 @@ on_complete() {
 funcs() {    
    list_functions ${BASH_SOURCE[0]}
 }
+
+
+source ../authentik/app/tool.sh
