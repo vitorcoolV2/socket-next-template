@@ -1,17 +1,35 @@
 # OCIS Files Integration Issues
 
-## Current Problem (2026-03-28)
+## Current Status (2026-03-30)
 
-OCIS is running but has CSP (Content Security Policy) issues blocking authentication to Authentik.
+### ✅ Working
 
-### Symptoms in Browser
+- OCIS is running at https://files.home2500.local
+- Health check passing: `/healthz` returns 200
+- CSP disabled (handled at Traefik level via headers)
+- LDAP write disabled (using service account instead)
 
-- Page loads at https://files.home2500.local
-- Redirects to login page: `https://files.home2500.local/login?redirectUrl=%2Ffiles%2Fspaces%2Fpersonal`
-- CSP errors in console:
-  - `connect-src` blocks `https://auth.home2500.local/application/o/files/.well-known/openid-configuration`
-  - `font-src` blocks `data:font/woff2`
-  - `script-src` blocks eval (needs `'unsafe-eval'`)
+### ❌ Current Problem
+
+**Certificate trust issue** - OCIS browser can't access Authentik OIDC endpoint.
+
+Browser error:
+
+```
+https://auth.home2500.local/application/o/files/.well-known/openid-configuration
+[HTTP/2 404]
+```
+
+Works with curl -k (skip verify). Browser doesn't trust internal CA.
+
+**Solutions:**
+
+1. Install internal CA cert in browser/system
+2. Add internal CA to system trust store
+
+### Testing
+
+Test at: https://files.home2500.local
 
 ## Traefik Integration - COMPLETED
 

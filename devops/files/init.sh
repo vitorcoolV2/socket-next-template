@@ -42,12 +42,11 @@ on_vault_login_fail() {
 }
 
 
-
 provision_secrets() {
     echo "🔐 Provisionando segredos internos do oCIS $CLIENT_APP_NAME..." >&2        
     
     local all_secrets=(
-        "OIDC_ID" "OCIS_JWT_SECRET" "OCIS_TRANSFER_SECRET" "OCIS_MACHINE_AUTH_API_KEY"
+        "OCIS_JWT_SECRET" "OCIS_TRANSFER_SECRET" "OCIS_MACHINE_AUTH_API_KEY"
         "OCIS_SYSTEM_USER_ID" "OCIS_SYSTEM_USER_API_KEY" "OCIS_SERVICE_ACCOUNT_ID"
         "OCIS_SERVICE_ACCOUNT_SECRET" "OCIS_LDAP_BIND_PASSWORD" "OCIS_IDM_SVC_PASSWORD"
         "OCIS_IDM_ADMIN_PASSWORD" "OCIS_IDM_REVA_PASSWORD" "OCIS_IDM_IDP_PASSWORD"
@@ -57,119 +56,58 @@ provision_secrets() {
         "STORAGE_USERS_MOUNT_ID" "STORAGE_METADATA_MOUNT_ID" "STORAGE_SHARES_MOUNT_ID"
         "GATEWAY_STORAGE_USERS_MOUNT_ID" "GATEWAY_STORAGE_METADATA_MOUNT_ID" "GATEWAY_STORAGE_SHARES_MOUNT_ID"
     )
+    (
+        for secret in "${all_secrets[@]}"; do
+            local secret_val=""
+            local found=false
 
-    for secret in "${all_secrets[@]}"; do
-        local secret_val=""
-        local found=false
-
-        # --- Loop de Descoberta e Promoção ---
-        # Ordem: Memoria -> Vault -> KeePass
-        local providers=("mem" "keepass" "vault" )
-        for i in "${!providers[@]}"; do
-            local p="${providers[$i]}"
-            if PROVIDER_SELECT="$p" core_secret_service_get "$CLIENT_APP_NAME/$secret" 2>/dev/null; then
-                secret_val="${!secret}"
-                secret_val=$(echo "$secret_val" | tr -d '\n\r ')
-                
-                # Validação simples do valor recuperado
-                if [[ -n "$secret_val" && "$secret_val" != *"UNDEF"* && "$secret_val" != "var"* ]]; then
-                    found=true
-                    # Promoção: Se achou no Vault/KP, salva nos níveis abaixo (anteriores no array)
-                    if [[ $i -gt 0 ]]; then
-                        local save_to="${providers[@]:0:$i}"
-                        PROVIDER_SELECT="$save_to" core_secret_service_put "$CLIENT_APP_NAME/$secret" "$secret_val" 2>/dev/null
+            # --- Loop de Descoberta e Promoção ---
+            # Ordem: Memoria -> Vault -> KeePass
+            local providers=("mem" "keepass" "vault" )
+            for i in "${!providers[@]}"; do
+                local p="${providers[$i]}"
+                if PROVIDER_SELECT="$p" core_secret_service_get "$CLIENT_APP_NAME/$secret" 2>/dev/null; then
+                    secret_val="${!secret}"
+                    secret_val=$(echo "$secret_val" | tr -d '\n\r ')
+                    
+                    # Validação simples do valor recuperado
+                    if [[ -n "$secret_val" && "$secret_val" != *"UNDEF"* && "$secret_val" != "var"* ]]; then
+                        found=true
+                        # Promoção: Se achou no Vault/KP, salva nos níveis abaixo (anteriores no array)
+                        if [[ $i -gt 0 ]]; then
+                            local save_to="${providers[@]:0:$i}"
+                            PROVIDER_SELECT="$save_to" core_secret_service_put "$CLIENT_APP_NAME/$secret" "$secret_val" 2>/dev/null
+                        fi
+                        break
                     fi
-                    break
                 fi
+            done
+
+            # --- Geração de Novos Segredos ---
+            if ! $found; then
+                echo "🎲 Gerando novo segredo para $secret..." >&2
+                if [[ "$secret" == *"ID" ]]; then
+                    secret_val=$(cat /proc/sys/kernel/random/uuid)
+                else
+                    secret_val=$(openssl rand -hex 32)
+                fi
+                secret_val=$(echo "$secret_val" | tr -d '\n\r ')
+                printf -v "$secret" "%s" "$secret_val" # Mesma coisa que eval, mas mais seguro
+                PROVIDER_SELECT="keepass vault mem" core_secret_service_put "$CLIENT_APP_NAME/$secret" "$secret_val" 2>/dev/null || return 1
             fi
         done
 
-        # --- Geração de Novos Segredos ---
-        if ! $found; then
-            echo "🎲 Gerando novo segredo para $secret..." >&2
-            if [[ "$secret" == *"ID" ]]; then
-                secret_val=$(cat /proc/sys/kernel/random/uuid)
-            else
-                secret_val=$(openssl rand -hex 32)
-            fi
-            secret_val=$(echo "$secret_val" | tr -d '\n\r ')
-            printf -v "$secret" "%s" "$secret_val" # Mesma coisa que eval, mas mais seguro
-            PROVIDER_SELECT="keepass vault mem" core_secret_service_put "$CLIENT_APP_NAME/$secret" "$secret_val" 2>/dev/null || return 1
-        fi
-    done
+        ### do not create .secret files hear. it will be auto gererated on state compose.
 
-    # --- Arquivos Estáticos e Certificados ---
-    _provision_static_configs
-
-    # --- Exportação para arquivo .secret e Aliases ---
-
-
-    core_secret_export2_env_vars "$CLIENT_APP_NAME/.secret" "${all_secrets[@]}" || return 1
-
+    ) || return 1
     return 0
 
-}
-
-# Função auxiliar para não poluir a principal
-_provision_static_configs() {
-    mkdir -p "$CLIENT_APP_DIR/config"
-
-    if [[ ! -f "$CLIENT_APP_DIR/config/csp.yaml" ]]; then
-        echo "📝 Criando config/csp.yaml com permissões para Authentik..."
-        # Importante: O YAML do oCIS espera as diretivas com aspas simples internas para os valores 'self', etc.
-        cat << 'EOF' > "$CLIENT_APP_DIR/config/csp.yaml"
-directives:
-  child-src:
-    - "'self'"
-  connect-src:
-    - "'self'"
-    - "blob:"
-    - "https://raw.githubusercontent.com/owncloud/awesome-ocis/"
-    - "https://auth.home2500.local"
-  default-src:
-    - "'none'"
-  font-src:
-    - "'self'"
-    - "data:"
-  frame-ancestors:
-    - "'self'"
-    - "https://auth.home2500.local"
-  frame-src:
-    - "'self'"
-  img-src:
-    - "'self'"
-    - "data:"
-    - "blob:"
-    - "https://auth.home2500.local"
-  manifest-src:
-    - "'self'"
-  media-src:
-    - "'self'"
-  object-src:
-    - "'self'"
-    - "blob:"
-  script-src:
-    - "'self'"
-    - "'unsafe-inline'"
-    - "'unsafe-eval'"
-  style-src:
-    - "'self'"
-    - "'unsafe-inline'"
-  worker-src:
-    - "'self'"
-EOF
-    fi
-    
-    if [[ -f "../trusted-ca.pem" ]]; then
-        echo "🔐 Sincronizando trusted-ca.pem..."
-        cat "../trusted-ca.pem" > "$CLIENT_APP_DIR/config/trusted-ca.pem"
-    fi
 }
 
 deploy_secrets() {
     require_vars CLIENT_APP_NAME || return 1
 
-    echo "🔐 Sincronizando credenciais OIDC do vault para mem..." >&2
+    echo "🔐 Sincronizando credenciais para mem..." >&2
                
     # Sincronizar do vault para mem
     (            
@@ -199,7 +137,9 @@ on_deploy_secrets_fail() {
 on_provision_oidc_fail() {
     return 1
 }
-
+on_provision_user_fail() {
+    return 1
+}
 on_script_fail() { echo "script fail"; return 1; }
 on_login_fail() { return 1; }
 on_provision_db_fail() { return 1; } 

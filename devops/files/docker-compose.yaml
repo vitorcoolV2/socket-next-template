@@ -13,6 +13,8 @@ services:
     volumes:
       - ./data:/var/lib/ocis
       - /etc/localtime:/etc/localtime:ro
+      - ./config/home2500-csp.yaml:/etc/ocis/home2500-csp.yaml:ro
+      - ./config/trusted-ca.pem:/etc/ocis/trusted-ca.pem:ro
     ports:
       - '9200:9200'
     labels:
@@ -35,7 +37,9 @@ services:
       - OCIS_OIDC_ISSUER=https://auth.home2500.local/application/o/files/
       - OCIS_OIDC_INSECURE=true
       - OCIS_CERTIFICATE_AUTHORITY=/etc/ocis/trusted-ca.pem
-      - OCIS_OIDC_SKIP_VERIFY=false
+      - PROXY_CSP_CONFIG_FILE_LOCATION=/etc/ocis/home2500-csp.yaml
+      - OCIS_OIDC_SKIP_VERIFY=true
+      - PROXY_OIDC_JWKS_URL=https://auth.home2500.local/application/o/files/jwks/
 
       # Adicionalmente, para o subsistema de microserviços (Reva)
       - REVA_IDP_INSECURE=false
@@ -55,7 +59,7 @@ services:
       - PROXY_TRUSTED_PROXIES=*
       - PROXY_HTTP_ADDR=0.0.0.0:9200
 
-      # Provisionamento Automático (Cria o usuário no oCIS ao logar no Authentik)
+      # Provisioning - Enable to create users on first login
       - OCIS_OIDC_AUTO_PROVISION_USERS=true
       - OCIS_OIDC_USER_CLAIM=preferred_username
       - OCIS_OIDC_UID_CLAIM=sub
@@ -66,8 +70,7 @@ services:
       - PROXY_AUTOPROVISION_CLAIM_DISPLAYNAME=name
 
       - PROXY_POLICY_DEFAULT=custom
-      # CSP disabled - not working due to volume mount issues
-      # CSP disabled - handled at Traefik level via headers middleware
+      # CSP disabled - using Traefik headers instead
       # Força o log a dizer-nos o que o Proxy está a fazer
       - PROXY_LOG_LEVEL=debug
 
@@ -98,7 +101,7 @@ services:
       - IDM_ADMIN_PASSWORD=${OCIS_IDM_ADMIN_PASSWORD}
       - OCIS_IDM_ADMIN_PASSWORD=${OCIS_IDM_ADMIN_PASSWORD}
 
-      # Conexão do Graph (O serviço que cria usuários)
+      # Conexão do Graph (enable write for user provisioning)
       - GRAPH_LDAP_SERVER_WRITE_ENABLED=true
       - GRAPH_LDAP_BIND_DN=uid=libregraph,ou=sysusers,o=libregraph-idm
       - GRAPH_LDAP_BIND_PASSWORD=${OCIS_IDM_ADMIN_PASSWORD}
