@@ -1,0 +1,141 @@
+# path: devops/opencode/Dockerfile
+FROM ubuntu:noble
+
+# Impedir diálogos interativos
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Argumentos de Build para o Steward (UID 2500 conforme definido no setup_stewards.sh)
+ARG DOCKER_GID=986
+ARG APP_USER=${APP_USER}
+ARG APP_UID=${APP_UID}
+ARG APP_GID=${APP_GID}
+ARG APP_VERSION=${APP_VERSION}
+ARG DOMAIN=${DOMAIN}
+
+# --- VALIDAÇÃO DE ARGUMENTOS (Fail-Fast) ---
+RUN test -n "$APP_USER" || (echo "ERRO: APP_USER não definido" && false) 
+RUN test -n "$APP_UID" || (echo "ERRO: APP_UID não definido" && false) 
+RUN test -n "$APP_GID" || (echo "ERRO: APP_GID não definido" && false) 
+RUN test -n "$APP_VERSION" || (echo "ERRO: APP_VERSION não definido" && false) 
+RUN test -n "$DOCKER_GID" || (echo "ERRO: DOCKER_GID não definido" && false) 
+RUN test -n "$DOMAIN" || (echo "ERRO: DOMAIN não definido" && false)
+
+# Metadata Labels
+#LABEL maintainer="Steward <$APP_USER@$DOMAIN>" \
+#    project="${DOMAIN}" \
+#    component="opencode" 
+#    APP_VERSION=${APP_VERSION}
+
+# 1. Instalação de Base & Repositórios (Docker & HashiCorp)
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    gnupg \
+    tree \
+    lsb-release \
+    sudo \
+    wget \
+    vim \
+    unzip \
+    jq \
+    git \
+    openssh-client \
+    procps \
+    dnsutils \
+    iputils-ping \
+    iproute2 \
+    keepassxc && \
+    # Configurar Repositórios Adicionais (Docker & Hashicorp)
+    install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    curl -fsSL https://apt.releases.hashicorp.com/gpg | gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | tee /etc/apt/sources.list.d/hashicorp.list 
+
+# --- 2. Configurar Certificado Trusted CA (DESBLOQUEIO DE PERMISSÕES) ---
+# Garantimos que voltamos a root antes de mexer em /etc/ssl ou /usr/local/share
+USER root
+RUN chmod 755 /etc/ssl/certs && \
+    mkdir -p /usr/local/share/ca-certificates/ && \
+    chmod 755 /usr/local/share/ca-certificates/
+COPY trusted-ca.pem /usr/local/share/ca-certificates/home2500.crt
+
+
+# Link simbólico para compatibilidade com legados que procurem em /etc/ssl/certs/
+RUN ln -sf /usr/local/share/ca-certificates/home2500.crt /etc/ssl/certs/home2500-ca.pem
+
+# 2. Binários Críticos
+RUN apt-get update && apt-get install -y docker-ce-cli docker-compose-plugin vault \
+    && wget https://github.com/mikefarah/yq/releases/download/v4.50.1/yq_linux_amd64 -O /usr/bin/yq \
+    && chmod +x /usr/bin/yq \
+    && rm -rf /var/lib/apt/lists/*
+
+
+
+# 3. Gestão de Identidades (Duplo Utilizador: Steward & Owner)
+# Criamos o grupo comum 'stewards' usando o GID 2500
+RUN touch /var/mail/ubuntu && chown ubuntu /var/mail/ubuntu && userdel -r ubuntu || true 
+RUN groupadd --gid ${APP_GID} stewards || true \
+    # Criamos o grupo docker_host para acesso ao socket
+    && groupadd -g ${DOCKER_GID} docker_host || true \
+    # A. Criar o Steward (Orquestrador - UID 2500)
+    && useradd --uid ${APP_UID} --gid ${APP_GID} -m -s /bin/bash ${APP_USER} \
+    && echo "${APP_USER} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${APP_USER} \
+    && usermod -aG ${DOCKER_GID} ${APP_USER} 
+
+# >>>>>>>>>>>>>>>>>>>>
+
+USER ${APP_USER}
+ENV OPROJECT="/home/${APP_USER}/"
+WORKDIR ${OPROJECT}
+# Final Path Setup
+ENV PATH="/home/${APP_USER}/.local/bin:/home/${APP_USER}/.bun/bin:${PATH}"
+
+# 8. Install Bun & OpenCode
+RUN curl -fsSL https://bun.sh/install | bash \
+    && curl -fsSL https://opencode.ai/install | bash 
+
+# >>>>>>>>>
+
+ENV PROJECT="/home/${APP_USER}/"
+WORKDIR ${PROJECT}
+COPY trusted-ca.pem /etc/ssl/certs/home2500-ca.pem
+
+# 4. Workspace & Core Formation
+USER ${APP_USER}
+
+
+
+# FEED CODE
+# Criar hierarquia de autonomia
+RUN mkdir -p vault pihole authentik traefik && chmod -R 770 ${PROJECT}
+
+# CORE INSTALL (Copia apenas o necessário para a identidade do container)
+COPY .env .env
+COPY core.sh core.sh
+COPY trusted-ca.pem ./trusted-ca.pem
+
+# CSPLK - Orquestração de Bibliotecas (Corrigido o erro do Pi-hole/Vault)
+COPY vault/keepass.sh ./vault/keepass.sh 
+
+COPY opencode/entrypoint.sh ./opencode/entrypoint.sh
+COPY opencode/check_actores.sh ./opencode/check_actores.sh
+COPY opencode/check_actors.sh ./opencode/check_actors.sh
+
+COPY vault/vault_lib.sh ./vault/vault_lib.sh
+COPY authentik/_0-authentik_lib.sh ./authentik/_0-authentik_lib.sh
+COPY authentik/_1-blueprints_lib.sh ./authentik/_1-blueprints_lib.sh
+COPY pihole/_0.pihole_lib.sh ./pihole/_0.pihole_lib.sh
+COPY traefik/_0.traefik_lib.sh ./traefik/_0.traefik_lib.sh
+
+#@TODO: Refatorar para um único script de entrypoint e organizar as libs em pastas específicas  
+COPY opencode/entrypoint.sh ./opencode/entrypoint.sh
+#
+
+
+# Persistência do Core no Shell
+RUN echo "source ./core.sh" >> /home/${APP_USER}/.bashrc
+
+# 5. Entrypoint para manter a autonomia
+CMD ["bash"]

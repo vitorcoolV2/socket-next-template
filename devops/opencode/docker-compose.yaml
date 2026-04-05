@@ -1,94 +1,154 @@
+# path: devops/opencode/docker-compose.yaml
+
 services:
+  # O Guarda-Redes: Filtra o que o OpenCode pode fazer no Docker
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy
+    container_name: docker-proxy
+    privileged: true # Necessário para ler o socket real
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ../trusted-ca.pem:/usr/local/share/ca-certificates/trusted-ca.crt:ro
+    environment:
+      
+      # Bloqueamos tudo por defeito e permitimos apenas o necessário
+      - CONTAINERS=1   # listar/ver containers
+      - SERVICES=1     # ver serviços
+      - NETWORKS=1     # ver redes
+      - BUILD=0        # BLOQUEADO: Não pode buildar novas imagens via socket
+      #- POST=0         # BLOQUEADO: Não pode criar/parar containers (ReadOnly)
+      - POST=1 # Necessário para 'docker compose up/down' ## usa com cuidado, mas o OpenCode é um ambiente controlado e monitorado
+      # Correção do Aviso de Timeout do HAProxy
+      - HAPROXY_TIMEOUT_CONNECT=5s
+      - HAPROXY_TIMEOUT_CLIENT=1m
+      - HAPROXY_TIMEOUT_SERVER=1m
+    networks:
+      - app-network
+
+  # O Motor de Inteligência e Desenvolvimento
   opencode:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../../
+      dockerfile: ./devops/opencode/Dockerfile
+      target: development 
       args:
-        - USERNAME=${USER}
-        - USER_UID=${UID}
-        - USER_GID=${GID}
+        - DOMAIN=${DOMAIN}
+        - APP_USER=steward
+        - APP_UID=2500
+        - APP_GID=2500
         - DOCKER_GID=986
+        - APP_VERSION=v22       
+    image: opencode-${APP_USER}-${APP_VERSION:-latest}
+    user: "2500:2500"
     group_add:
       - "986"
-    image: opencode-${UID}-${GID}:latest
+      - "2500"
+    entrypoint: ["/bin/bash", "-c", "rm -rf /tmp/* && tail -f /dev/null"]
     container_name: opencode
-    deploy:
-      resources:
-        limits:
-          memory: 1GB      
-    stdin_open: true # Keep STDIN open for interactive commands
-    tty: true # Allocate a pseudo-TTY
-    working_dir: /home/${USER}
-    user: ${USER}
+    working_dir: /home/steward/nextjs-app-template
     ports:
-      - "${CLIENT_APP_SERVICE_PORT}"
+      - "4096:4096"
     volumes:
-      ##  persist user run time
-      - ./workspace:/home/${USER}/
-      - ../../:/home/${USER}/nextjs-app-template
-      ##  use host instaled opencode
-      - /home/${USER}/.local/share/opencode:/home/${USER}/.local/share/opencode
-      - /home/${USER}/.local/state/opencode:/home/${USER}/.local/state/opencode
-      #- /home/${USER}/.local/bin/opencode:/home/${USER}/.local/bin/opencode
-      ## same config
-      #- /home/${USER}/.config/opencode:/home/${USER}/.config/opencode
-      - /home/${USER}/.opencode:/home/${USER}/.opencode
-      ## ssh
-      - /home/${USER}/.ssh:/home/${USER}/.ssh:ro
-      ### bash
-      - /home/${USER}/.bashrc:/home/${USER}/.bashrc
-      # Docker socket mount for DinD (Docker in Docker) scenarios
-      - /var/run/docker.sock:/var/run/docker.sock
+      # Home base
+      - /home/steward:/home/steward:rw
+      - ../../:/home/steward/nextjs-app-template/:ro
+      # Injeção manual de CA para confiança imediata
       - ../trusted-ca.pem:/etc/ssl/certs/home2500-ca.pem:ro
-      ## local AI model config
-      - ./config/skills/:/home/${USER}/.config/opencode/skills/:ro
-      - ./config/prompts/:/home/${USER}/.config/opencode/prompts/:ro
-      - ./config/opencode.json:/home/${USER}/.config/opencode/opencode.json:ro
-      - ./config/OPENCODE.md:/home/${USER}/.config/opencode/OPENCODE.md:ro
-      - ./config/AGENTS.md:/home/${USER}/.config/opencode/AGENTS.md:ro
+      
+      # FIX: Mapeamento explícito do binário caso ele esteja na tua home de utilizador (vitor)
+      #- ${HOME}/.opencode:/home/steward/.opencode:ro
+      # TMPDIR em RAM
+      - /run/user/2500/home2500:/tmp:rw
+
+      #- ./config/skills/:/home/steward/.config/opencode/skills/:ro
+      #- ./config/opencode.json:/home/steward/.config/opencode/opencode.json:ro
+
+      # Persistência de binários e caches
+      - ${HOME}/.opencode/:/home/steward/.opencode:rw
+      - ${HOME}/.cargo:/home/steward/.cargo:ro
+      
     environment:
-      # allow local chat.home2500.local self cert
+      - DOCKER_HOST=tcp://docker-proxy:2375
+      - VAULT_ADDR=${VAULT_ADDR:-https://172.28.0.6}
+      - MEM_ROOT_DIR=/tmp/home2500
+      - HOST_NETWORK_IP=${HOST_NETWORK_IP}
+      - USER=steward
+      - DOCKER_HOST=tcp://docker-proxy:2375
       - NODE_EXTRA_CA_CERTS=/etc/ssl/certs/home2500-ca.pem
-      # Optional: if you still hit issues with specific older libraries
-      - SSL_CERT_FILE=/etc/ssl/certs/home2500-ca.pem
-      #### DOCKER
-      - PATH=/home/${USER}/.local/bin:/home/${USER}/.bun/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      - DOCKER_HOST=unix:///var/run/docker.sock
-      - DOCKER_CLI_PLUGINS=/usr/libexec/docker/cli-plugins
-      - DOCKER_CLI_HINTS=false
-      ####
-      - DEBIAN_FRONTEND=noninteractive
-      - TERM=xterm-256color
-      - EDITOR=vim
-      - USER=${USER}
-      - HOME=/home/${USER}
-      # OPENCODE_SERVER_PASSWORD not set - auth handled by Traefik/Authentik OIDC
-      - OPENCODE_SERVER_PORT=${CLIENT_APP_SERVICE_PORT}
-      - TMPDIR=/var/tmp
+      - OPENCODE_SERVER_PORT=4049
     networks:
       - app-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.opencode.rule=Host(`opencode.home2500.local`)"
+      - "traefik.http.routers.opencode.rule=Host(`opencode.${DOMAIN}`)"
       - "traefik.http.routers.opencode.entrypoints=websecure"
       - "traefik.http.routers.opencode.tls=true"
-      
-      # 1. Simplified Middleware Chain
-      # We keep authentik-sso, but use opencode-csp to handle all headers (CSP, XSS, Sniff)
       - "traefik.http.routers.opencode.middlewares=authentik-sso@file,opencode-csp"
-
-      # 2. Combined Security Headers (Removes need for security-headers@file)
       - "traefik.http.middlewares.opencode-csp.headers.browserXssFilter=true"
-      - "traefik.http.middlewares.opencode-csp.headers.contentTypeNosniff=true"
-      #- "traefik.http.middlewares.opencode-csp.headers.customResponseHeaders.Content-Security-Policy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' 'sha256-QI23YWMJrD/tljM6/82tpL8EwqdBoptwZfycFHA9IiQ='; style-src 'self' 'unsafe-inline'; connect-src 'self' data: https://opencode.ai https://opencode.home2500.local; img-src 'self' data:;"
-      - "traefik.http.middlewares.opencode-csp.headers.customResponseHeaders.Content-Security-Policy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' data: https://opencode.ai https://opencode.home2500.local; img-src 'self' data:;"
-      # 3. Streamlined Service Config
-      # Traefik automatically links the router to the service in the same container.
-      - "traefik.http.services.opencode.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT}"
-      - "traefik.http.services.opencode.loadbalancer.responseForwarding.flushInterval=-1"
+      - "traefik.http.middlewares.opencode-csp.headers.customResponseHeaders.Content-Security-Policy=default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval'; connect-src 'self' data: https://opencode.ai https://*.${DOMAIN};"
+      - "traefik.http.services.opencode.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT:-3000}"
+  
+    depends_on:
+      - docker-proxy
 
-    command: bash -c "/home/${USER}/.opencode/bin/opencode web --port ${CLIENT_APP_SERVICE_PORT} --hostname 0.0.0.0"
+  # O Serviço/Aplicação Resultante (Runtime)
+  core-developer:
+    build:
+      context: ../../
+      dockerfile: ./devops/opencode/Dockerfile
+      target: runtime
+      args:
+        - APP_USER=steward
+        - APP_UID=2500
+        - APP_GID=2500
+    image: opencode-app:runtime-v2.7 
+    container_name: core-developer
+    user: "2500:2500"
+    ports: 
+      - "3000:3000"
+    # No app, o código costuma ser Read-Only para estabilidade
+    volumes:
+      - /home/steward/:/home/steward/:rw
+      - ../../:/home/steward/nextjs-app-template:ro 
+      - ../trusted-ca.pem:/etc/ssl/certs/home2500-ca.pem:ro
+      - ${HOME}/.opencode:/home/steward/.opencode:ro
+
+      - /home/vitor/.opencode/:/home/steward/.opencode:rw
+      - /home/vitor/.cargo:/home/steward/.cargo:ro
+      # Injeção manual de CA para confiança imediata
+      - ../trusted-ca.pem:/etc/ssl/certs/home2500-ca.pem:ro
+
+      - /run/user/2500/home2500:/tmp:rw
+    environment:
+      - NODE_ENV=production
+      - TMPDIR=/tmp
+      - SSL_CERT_FILE=/etc/ssl/certs/home2500-ca.pem
+      - PATH=/home/steward/.opencode/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    networks:
+      - app-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.app-service.rule=Host(`opencode.${DOMAIN}`)"
+      - "traefik.http.routers.app-service.entrypoints=websecure"
+      - "traefik.http.routers.app-service.tls=true"
+      - "traefik.http.routers.app-service.middlewares=authentik-sso@file"
+      - "traefik.http.services.app-service.loadbalancer.server.port=${CLIENT_APP_SERVICE_PORT:-3000}"
+    # O App executa o comando real em vez de tail -f    
+    entrypoint: ["/bin/bash", "-c", "/home/steward/devops/opencode/entrypoint.sh && tail -f /dev/null"]
+    command: >
+      bash -c "
+      if [ ! -f /home/steward/.opencode/bin/opencode ]; then
+        echo '❌ ERRO: Binário não encontrado em /home/steward/.opencode/bin/opencode';
+        ls -la /home/steward/.opencode/bin || echo 'Pasta bin não existe';
+        exit 1;
+      fi;
+      rm -rf /tmp/* && 
+      /home/steward/.opencode/bin/opencode web --port 3000 --hostname 0.0.0.0"    
     restart: unless-stopped
+    
+    depends_on:
+      - docker-proxy
+
 
 # Use existing external network
 networks:

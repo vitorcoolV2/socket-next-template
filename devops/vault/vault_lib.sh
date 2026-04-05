@@ -9,9 +9,9 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     return 1 2> /dev/null || exit 1
 fi
 
-_dir="$(dirname "${BASH_SOURCE[0]}")"
+VAULT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 ## vault lib dependency on keepass wrapper....also ../core.sh witch source ../.env
-source  "$_dir/keepass.sh" > /dev/null 2>&1
+source  "$VAULT_DIR/keepass.sh" > /dev/null 2>&1
 
 
 
@@ -437,7 +437,7 @@ vault_request_token() {
         
         [[ -z "$VAULT_TOKEN" ]] && { echo "❌ Failed to get token" >&2; return 1; }
                 
-        PROVIDER_SELECT="mem keepass" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1       
+        PROVIDER_SELECT="mem" core_secret_service_put "vault/VAULT_TOKEN" "$VAULT_TOKEN" || return 1       
     )
 }
 export -f vault_request_token

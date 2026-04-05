@@ -2019,10 +2019,183 @@ core_transform_inject_env_file_vars() {
         fi
     done < "$env_file"
 }
-# to<type representation>: toPascalCase
-to_pascal_case() {
-    echo "$1" | tr '[:upper:]' '[:lower:]' | sed -r 's/(^|_)([a-z])/\U\2/g'
+
+# Redutor de strings para o Dono da Casa
+core_transform_string() {
+    local str="$1"
+    local mode="${2:-pascal}"
+    
+    # Adicionamos "/" à lista de separadores: [-._:+ /]
+    case "$mode" in
+        pascal) 
+            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+|^)([a-z])/\U\2/g' ;;
+        
+        camel)  
+            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)([a-z])/\U\2/g' | sed -r 's/^([A-Z])/\L\1/' ;;
+        
+        human)  
+            # 1. Troca separadores por espaços
+            # 2. Capitaliza cada palavra
+            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g' | sed -r 's/(^| )([a-z])/\U\2/g' | sed 's/^ //;s/ $//' ;;
+        
+        kebab)
+            # 1. Transformar tudo o que é separador em espaço real
+            local space_separated=$(echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g')
+            local result=""
+            # 2. Capitalizar cada palavra individualmente
+            for word in $space_separated; do
+                result+="${word^} "
+            done
+            echo "${result% }" ;; # Remove o espaço final
+        
+        screaming)
+            echo "$str" | tr '[:lower:]' '[:upper:]' | sed -r 's/([-._:+ /]+)/_/g' | sed -r 's/^_|_$//g' ;;
+
+        path)
+            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/\//g' | sed -r 's/^\/|\/$//g' ;;
+            
+        snake)
+            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/_/g' | sed -r 's/^_|_$//g' ;;
+    esac
 }
+core_transform_string() {
+    local str="$1"
+    local mode="${2:-pascal}"
+    
+    # Pré-processamento: Transformar todos os separadores [-._:+ /] em espaços
+    # e converter tudo para minúsculas para ter uma base limpa.
+    local clean=$(echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g' | sed 's/^ //;s/ $//')
+
+    case "$mode" in
+        # 1. human -> "a rolha do rato" (Tudo minúsculas)
+        human)
+            echo "$clean" ;;
+
+        # 2. Human -> "A rolha do rato" (Estilo Frase: só a primeira maiúscula)
+        Human)
+            echo "${clean^}" ;;            
+
+        # 3. HuMan -> "A Rolha Do Rato" (Estilo Título: todas as palavras maiúsculas)
+        HuMan)
+            local result=""
+            for word in $clean; do result+="${word^} "; done
+            echo "${result% }" ;;
+
+        # 4. HUMAN -> "GRITOS" (Estilo Frase: só a primeira maiúscula)
+        HUMAN)
+            echo "${clean^^}" ;;
+
+        # --- Outros Modos Mantidos ---
+        pascal) 
+            echo "$clean" | sed -r 's/ / /g' | sed -r 's/(^| )([a-z])/\U\2/g' | tr -d ' ' ;;
+        camel)  
+            local p=$(echo "$clean" | sed -r 's/(^| )([a-z])/\U\2/g' | tr -d ' ')
+            echo "${p,}" ;; # ${p,} força a primeira letra para minúscula
+        kebab)
+            echo "${clean// /-}" ;;
+        screaming)
+            local s="${clean// /_}"
+            echo "${s^^}" ;; # ${s^^} força tudo para maiúscula
+        snake)
+            echo "${clean// /_}" ;;
+        path)
+            echo "${clean// /\/}" ;;
+        # 10. flat   -> "rainhadobaralho" (Unique IDs/No delimiters)
+        flat)     echo "${clean// /}" ;;
+
+        # 11. initials -> "RDB" (Ícones de Stage/Avatares na UI)
+        initials) 
+            echo "$clean" | awk '{for(i=1;i<=NF;i++) printf toupper(substr($i,1,1))}'
+            echo "" ;;
+    esac
+}
+core_transform_string() {
+    local str="$1"
+    local mode="${2:-pascal}"
+    
+    # Base Limpa: Remove separadores e normaliza para minúsculas
+    local clean=$(echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g' | sed 's/^ //;s/ $//')
+
+    case "$mode" in
+        # --- Família Human (Semântica) ---
+        human)    echo "$clean" ;;                               # rainha do baralho
+        Human)    echo "${clean^}" ;;                            # Rainha do baralho
+        HuMan)    local res=""; for w in $clean; do res+="${w^} "; done; echo "${res% }" ;; # Rainha Do Baralho
+        HUMAN)    echo "${clean^^}" ;;                           # RAINHA DO BARALHO
+
+        # --- Família Code (Sintaxe) ---
+        pascal)   local res=""; for w in $clean; do res+="${w^}"; done; echo "$res" ;;      # RainhaDoBaralho
+        camel)    local res=""; for w in $clean; do res+="${w^}"; done; echo "${res,}" ;;   # rainhaDoBaralho
+        flat)     echo "${clean// /}" ;;                         # rainhadobaralho
+        
+        # --- Família System (Infra) ---
+        kebab)    echo "${clean// /-}" ;;                        # rainha-do-baralho
+        snake)    echo "${clean// /_}" ;;                        # rainha_do_baralho
+        screaming) echo "${clean// /_}" | tr '[:lower:]' '[:upper:]' ;; # RAINHA_DO_BARALHO
+        path)     echo "${clean// /\/}" ;;                       # rainha/do/baralho
+        
+        # --- Família UI (Visual) ---
+        initials) echo "$clean" | awk '{for(i=1;i<=NF;i++) printf toupper(substr($i,1,1))}'; echo "" ;;
+    esac
+}
+# ---------------------------------------------------------
+# 🛠️ String Transformation Shortcuts (The Steward's Tools)
+# ---------------------------------------------------------
+
+# provision_db -> provisionDb (Para JSON/JS)
+to_camel_case() {
+    core_transform_string "$1" "camel"
+}
+
+# provision_db -> ProvisionDb (Para Classes/Tipos)
+to_pascal_case() {
+    core_transform_string "$1" "pascal"
+}
+
+# provision_db -> Provision Db (Para Logs/UI)
+to_human_pascal() {
+    core_transform_string "$1" "human"
+}
+
+# provision_db -> provision-db (Para K8s/Docker)
+to_kebab_case() {
+    core_transform_string "$1" "kebab"
+}
+
+# provision_db -> PROVISION_DB (Para .env/Secrets)
+to_screaming_snake() {
+    core_transform_string "$1" "screaming"
+}
+
+# provision_db -> provision/db (Para Pastas/Namespaces)
+to_path_case() {
+    core_transform_string "$1" "path"
+}
+
+# provision_db -> provision_db (Slug Standard)
+to_snake_case() {
+    core_transform_string "$1" "snake"
+}
+
+test__string_transformation() {
+    # Executando o Loop de Transformação
+    echo "--- 📂 TESTE DE TRANSFORMAÇÃO DE PATH ($PWD) ---"
+
+    for mode in pascal camel \
+        human HuMan Human HUMAN \
+        kebab screaming \
+        path snake flat initials; do
+        result=$(core_transform_string "$PWD" "$mode")
+        printf "%-12s | %s\n" "$mode" "$result"
+    done
+}
+
+# Testes do Steward:
+# "fix-files-oidc"         -> "Fix Files Oidc"
+# "tool.report.stack"      -> "Tool Report Stack"
+# "opencode:runtime-v2.7"  -> "Opencode Runtime V2 7"
+
+
 # 1. Higieniza nomes de caminhos (Permite barras '/' mas remove caracteres perigosos)
 sanitize_path_name() {
     local input="$1"

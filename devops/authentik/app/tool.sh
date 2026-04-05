@@ -87,7 +87,8 @@ show_vars DOMAIN \
 # new service need a port to comunicate and a aditional app
 
 # requirements
-### inthis func let y setup apply/cleanup acording to app/blueprints/** "template name"
+### tool is a BASH modular stage workflow run
+resolverinthis func let y setup apply/cleanup acording to app/blueprints/** "template name"
 
 app_context() {
     require_vars INTERNAL_DOMAIN DOMAIN
@@ -1159,14 +1160,7 @@ app_script_requirements() {
         return 1
     fi
 }
-app_login() {            
-    if vault_request_stew_token; then    
-        ak_api_token_validate || \
-        ak_api_token_generate || return 1
-        return 0
-    fi
-    return 1           
-}
+
 
 tool_renew_certs() {
     require_vars DOMAIN CLIENT_APP_CERT_FOLDER || return 1
@@ -1409,6 +1403,7 @@ require_single_yaml_file() {
 # path: devops/opencode/lib/analitica.sh
 
 tool_report_stack__analitical_jsonV1() {
+
     local current_stage="$1"
     local json="["
     
@@ -1516,71 +1511,80 @@ tool_compose_list_missing_vars() {
 tool_stage_workflow() {
     local stages=("${@}")
     [[ ${#stages[@]} -eq 0 ]] && stages=("${TOOL_STAGES[@]}")
-    local deepness=${BASH_F}
+    local deepness=${#FUNCNAME[@]}
+    local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"         
+        
 
-    __stage__reporter() {
-        local stage="$1"
-    }    
+    indent_flow() {
+        local deepness=$1
+        # Cria uma string de espaços e trunca-a
+        printf "%${deepness}s" ""
+    }
 
     __success_stage__handler() {
         local stage="$1"  
         local consoleLog="$2"
         local client_handler_func="on_${stage}_success"
         local service__func="_${stage}__requirements"
-        local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"         
         require_files client_script || return 1
+        if declare -f "$handler_function" > /dev/null; then 
+            return 0   ## Means is client stage sucess is optional
+        fi
+        require_locations RES_FOLDER || return 1        
+        echo -n "$(indent_flow $deepnees)      " && LABEL="success handler:" require_single_script_function client_script "$client_handler_func"
+        "$client_handler_func" "$stage" "$consoleLog"    
+        return 0
         echo "
         ---------------------------------------
         ✅ stage \"$stage\" $REQ_STATUS_SUCCESS"
-        local tool_="${BASH_SOURCE[0]}"
         # show link to handler
-        if ! LABEL="          handler:" require_single_script_function tool_ "$service__func" ; then            
+        local _tool="${BASH_SOURCE[0]}"
+        if ! LABEL="$(indent_flow $deepnees)       handler:" require_single_script_function "_tool" "$service__func" ; then            
             return 1
         fi
         return 0
 
 
-        if ! LABEL="          optional \"$stage\" response review:" require_single_script_function client_script "$client_handler_func"; then    
+        if ! LABEL="$(indent_flow $deepnees)       optional \"$stage\" response review:" require_single_script_function client_script "$client_handler_func"; then    
             return 0        
         fi
 
         "$client_handler_func" "$stage" "$data"        
     }
     
-    __fail_stage__handler() {     
+    __fail_stage__handler() {             
         local stage="$1"  
         local consoleLog="$2"
         local client_handler_func="on_${stage}_fail"
-        local service__func="_${stage}__requirements"
-        local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"         
+        local service__func="_${stage}__requirements"    
         require_files client_script || return 1
-        echo "
+        require_locations RES_FOLDER || return 1
+        echo "  
         ---------------------------------------
         ❌ stage \"$stage\" $REQ_STATUS_STOP"
-        local tool_="${BASH_SOURCE[0]}"
-        # show link to handler
-        if ! LABEL="          handler:" require_single_script_function tool_ "$service__func" ; then            
-            return 1
-        fi
-        
 
         local deepness=${#FUNCNAME[@]}
-        echo "          stack depth: $deepness levels"
+        echo "$(indent_flow $deepnees)       stack depth: $deepness levels"
 
         # Se quiseres ver a árvore de chamadas (Recursion Accounting)
         for (( i=1; i<${#FUNCNAME[@]}; i++ )); do
-            echo "            ↳ chamada por: ${FUNCNAME[$i]}() em ${BASH_SOURCE[$i]}:${BASH_LINENO[$i-1]}"
+            echo "$(indent_flow $deepnees)         ↳ chamada por: ${FUNCNAME[$i]}() em ${BASH_SOURCE[$i]}:${BASH_LINENO[$i-1]}"
         done
 
         #show_vars stage client_handler_func
         ## make on_${stage}_fail a mandatory method
         ## ok it seams show_vars client_script client_handler_func client_script
         ## no &2 noise
-        if ! LABEL="          response review:" require_single_script_function client_script "$client_handler_func"; then    
+        if ! LABEL="$(indent_flow $deepnees)       response review:" require_single_script_function client_script "$client_handler_func"; then    
             return 1        
         fi
 
-        "$client_handler_func" "$stage" "$consoleLog" || return 0
+        ## raioX vai dar elementos de navegacao no error. local fs/git
+        local raioX=$(tool_report_stack__DRY3_analitical_json "$stage" "$consoleLog")
+        local res_file="$RES_FOLDER/$stage--fail--report-stack.json"     
+        ## raioX é parte to que e necessario para criar o contexto exacto para alimentar a resolucao to fail
+        echo $raioX > $res_file
+        "$client_handler_func" "$stage" "$consoleLog" "$raioX" 
     }
 
 
@@ -1595,7 +1599,7 @@ tool_stage_workflow() {
     _script__requirements() {        
         app_script_requirements || return 1
     }
-
+    app_script_requirements || return 1
     #-------------------------------------------------------------------------------
     # @function _provision_user__requirements
     # @description Creates Authentik user from template before vault login
@@ -1626,16 +1630,11 @@ tool_stage_workflow() {
         echo "✅ User $NAME created with role $ROLE" >&2
     }
 
-    _vault_login__requirements() {        
+    _vault_login__requirements() {       
         (
-            ## Use bot role for app provisioning
-            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null \
-                || vault_request_token "bot" || return 1
-
+            ## @todo Use bot:developer role for app provisioning
             vault_validate_token || return 1        
         ) || return 1
-
-
         ## use can vault_request_*_token on vault_login_fail() fn handler
     }
 
@@ -1704,7 +1703,7 @@ tool_stage_workflow() {
         unset OIDC_ID
         unset OIDC_SECRET
         (            
-            kp test || kp open
+            #kp test || kp open
             echo "🛡️  OIDC Module detected. Checking secrets for $CLIENT_APP_NAME..." >&2
             if ! PROVIDER_SELECT="vault" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" 2> /dev/null && \
                 ! PROVIDER_SELECT="keepass" core_secret_service_get "$CLIENT_APP_NAME/OIDC_ID" 2> /dev/null; then
@@ -1747,7 +1746,7 @@ tool_stage_workflow() {
             echo -e " \e[31m❌ Missing critical 'deploy_secrets' function in $CLIENT_APP_SCRIPT_NAME\e[0m" >&2
             return 0
         fi
-        deploy_secrets
+        deploy_secrets || return 1
     }
 
     _build_image__requirements() {
@@ -1778,14 +1777,7 @@ tool_stage_workflow() {
         core_log_info "Requisitos satisfeitos. Imagem atualizada."
         return 0 # Build não necessário
     }
-    _on_complete__requirements() {   
-        # this handler invoke optional: init.sh complete to let use define extra mem provider secrets
-        local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME" 
-        if ! require_single_script_function "client_script" "on_complete"; then                            
-            return 0
-        fi
-        on_complete
-    }
+    
     ## by how, from previous stages should be provisioned required secrets:
     ## provision_db handle db role user pass secrets
     ## provision_oidc handle client id secret 
@@ -1848,20 +1840,16 @@ tool_stage_workflow() {
             }          
             _auto_provision || return 1
 
-            _gen_tmp() {
-                LABEL="<<< TPL" require_single_yaml_file CLIENT_APP_COMPOSE_FILE || return 1
+            _gen_compose() {
+                LABEL="<<< COMPOSE TPL" require_single_yaml_file CLIENT_APP_COMPOSE_FILE || return 1
 
                 # Prepare "mem" entry to preview docker compose fullfill ${model_var}
-                local tmp=$(core_secret_mapper_mem "$CLIENT_APP_NAME" "$(basename $CLIENT_APP_COMPOSE_FILE)")
-                PROVIDER_SELECT="mem" core_secret_service_put \
-                    "$CLIENT_APP_NAME/$(basename $CLIENT_APP_COMPOSE_FILE)" \
-                    "# empty" 2> /dev/null
-
-                docker compose config > $tmp
-                chmod 644 "$tmp"
-                LABEL=">>> TMP" require_single_yaml_file tmp || return 1
+                local compose_res="$RES_FOLDER/$(basename $CLIENT_APP_COMPOSE_FILE)"                
+                docker compose config > $compose_res
+                chmod 644 "$compose_res"
+                LABEL=">>> COMPOSE" require_single_yaml_file compose_res || return 1
             }
-            _gen_tmp || return 1
+            _gen_compose || return 1
 
         ) || return 1
         return 0
@@ -1990,22 +1978,20 @@ tool_stage_workflow() {
                 fi
             done
             
-            local tmp=$(core_secret_mapper_mem "$CLIENT_APP_NAME" "$(basename $CLIENT_APP_BLUE_APPLY)")
-            PROVIDER_SELECT="mem" core_secret_service_put \
-                "$CLIENT_APP_NAME/$(basename $CLIENT_APP_BLUE_APPLY)" \
-                "# empty"  2> /dev/null
+            local blue_file="$RES_FOLDER/$(basename $CLIENT_APP_BLUE_APPLY)"
+
             blue_template_vars \
                 $CLIENT_APP_BLUE_APPLY_TPL \
-                $tmp 2> /dev/null || return 1
-            LABEL=">>> TMP" require_single_blue_file tmp || return 1
+                $blue_file 2> /dev/null || return 1
+            LABEL=">>> BLUE" require_single_blue_file blue_file || return 1
 
 
-            if files_are_equal $tmp $CLIENT_APP_BLUE_APPLY; then
+            if files_are_equal $blue_file $CLIENT_APP_BLUE_APPLY; then
                 return 0
             else
                 if ! require_files CLIENT_APP_BLUE_APPLY 2> /dev/null; then                
-                    cat $tmp > $CLIENT_APP_BLUE_APPLY
-                    files_are_equal $tmp $CLIENT_APP_BLUE_APPLY || return 1
+                    cat $blue_file > $CLIENT_APP_BLUE_APPLY
+                    files_are_equal $blue_file $CLIENT_APP_BLUE_APPLY || return 1
                 fi
             fi           
         ) || return 1
@@ -2026,7 +2012,7 @@ tool_stage_workflow() {
         # 2. Verificação: Se NÃO tem PK ou NÃO está enabled
         # jq -e retorna 1 (erro) se a condição for falsa
         if echo "$cur" | jq -e '.pk' >/dev/null 2>&1; then
-            echo "ℹ️  State: Is present. Proceedingak_api_token_validate with clean..." >&2
+            echo "ℹ️  State: Is present. Proceeding ak_api_token_validate with clean..." >&2
             return 1
         fi
 
@@ -2112,17 +2098,30 @@ tool_stage_workflow() {
         ⚠️ Stage: \"$stage\" handler is missing. " >&2 
         local stage__func="_${stage}__requirements"
         local workflow_func="tool_stage_workflow"     
-        local tool_="${BASH_SOURCE[0]}"
         # show file function          
          echo -n "       declare "
-        if LABEL="$handler_function() " require_single_script_function tool_ "tool_stage_workflow" ; then            
+        local _tool="${BASH_SOURCE[0]}"
+        if LABEL="$handler_function() " require_single_script_function "_tool" "tool_stage_workflow" ; then            
             return 1
         fi           
         return 1
     }
 
-    generate_workflow_req_id() {
+    ___on_complete__() {   
+        # this handler invoke optional: init.sh complete to let use define extra mem provider secrets
+        local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME" 
+        if ! require_single_script_function "client_script" "on_complete"; then                            
+            return 0
+        fi
+        on_complete || return 0
+    }
+
+    ##### request stage flow - persistence planing
+    git_branch() {
         local branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-branch")
+        echo "$branch"
+    }
+    generate_workflow_req_id() {        
         local microtime=$(date +%s%N | cut -c1-13) # Timestamp com milissegundos
         local path_hash=$(echo "$PWD" | md5sum | cut -c1-8)
         
@@ -2135,36 +2134,49 @@ tool_stage_workflow() {
     # --- Loop de ExecuMissing important clição dos Stages ---
     local handler_console_result
     local handler_function   
-    local req_id=$(generate_workflow_req_id) # git branch + a $(sanitize_path_name $unique) 
-    local spot_folder="STAGE-FLOW/$req_id"
+    local branch="$(git_branch)"
+    require_vars branch
+    local req_id=$(generate_workflow_req_id) # git branch + a $(sanitize_path_name $unique)     
+    local SPOT_FOLDER="$CLIENT_APP_MEM_DIR/$branch/$req_id"
 
-    local res_folder="$MEM_ROOT_DIR/$spot_folder"
-    ! require_locations res_folder && {
-        mkdir -p "$res_folder"
-        chmod 700 "$res_folder"
+    CLIENT_APP_MEM_DIR
+    local RES_FOLDER="$MEM_ROOT_DIR/$SPOT_FOLDER"
+    ! require_locations RES_FOLDER 2> /dev/null && {
+        mkdir -p "$RES_FOLDER"
+        chmod 700 "$RES_FOLDER"
     }
 
     local res_file
+    echo -n " $(indent_flow $deepness) workflow >> "
+    echo "$SPOT_FOLDER"
     for stage in "${stages[@]}"; do     
-        handler_function="_${stage}__requirements"
-        
+        handler_function="_${stage}__requirements"                
+                
+        local _tool="${BASH_SOURCE[0]}"
+        LABEL="$(indent_flow $deepness) $(to_human_pascal ${stage}) handler:" require_single_script_function "_tool" "$handler_function"
+
         # Verifica se a função de stage existe antes de chamar
         if declare -f "$handler_function" > /dev/null; then
-            ## ficou bom  :))))) DEBUG=TRUE require_locations res_folder
-            local spot_file="$spot_folder/$stage.stage"
 
+            ## ficou bom  :))))) DEBUG=TRUE require_locations RES_FOLDER
+            local spot_file="$SPOT_FOLDER/stage-$stage.log"            
             res_file="$MEM_ROOT_DIR/$spot_file"                                 
             if ! "$handler_function"  > $res_file 2>&1; then
                 ## ERROR/ FAIL STAGE
                 handler_console_result=$(cat $res_file)
-                __fail_stage__handler "$stage" "$handler_console_result"
-                echo "
+                if ! __fail_stage__handler "$stage" "$handler_console_result"; then
+                    echo "
+                    -------------------- Recover"
+                    continue
+                else
+                    echo "
                 -------------------- Error"
-                return 1
+                    return 1
+                fi                
             else
                 ## SUCCESS STAGE
                 handler_console_result=$(cat $res_file)
-                __success_stage__handler "$stage" "$handler_console_result"
+                __success_stage__handler "$stage" "$handler_console_result"   
                 continue
             fi                        
         else
@@ -2172,7 +2184,8 @@ tool_stage_workflow() {
             return 1  
         fi
     done
-    _on_complete__requirements "${stages[@]}"
+    echo "$(indent_flow $deepness) << $SPOT_FOLDER"
+    ___on_complete__ "${stages[@]}"
     return 0
 }
 app_oidc_validate() {
@@ -2353,9 +2366,7 @@ fi
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     # Opcional: só mostra a stack se estiver em modo debug
     [[ "$DEBUG" == "true" ]] && stack_trace
-        
-    app_script_requirements
-    app_required_env_vars 
+                
     tool_stage_workflow 
     
     # Camada de Interatividade para o Vault

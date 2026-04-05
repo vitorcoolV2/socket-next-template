@@ -1,72 +1,72 @@
-# Start from Ubuntu 24.04
-FROM ubuntu:24.04
+# path: devops/opencode/Dockerfile
 
-# Set common environment variables
-ENV DEBIAN_FRONTEND=noninteractive
+# ==========================================
+# ESTÁGIO 1: BASE (Identidade e Segurança)
+# ==========================================
+FROM ubuntu:noble AS base
 
-# Build Arguments (passed from your docker-compose.yml)
-ARG USERNAME
-ARG USER_UID
-ARG USER_GID
+# Argumentos de Identidade (Sincronizados com o Host)
+ARG APP_USER=steward
+ARG APP_UID=2500
+ARG APP_GID=2500
 ARG DOCKER_GID=986
+ARG DOMAIN=home2500.local
 
-# 1. Install Prerequisites & Docker Repo
+COPY devops/opencode/entrypoint.sh ./opencode/entrypoint.sh
+
+# Instalação Base Essencial
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl gnupg tree lsb-release sudo wget vim unzip jq git openssh-client \
-    && install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
-    && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-# 2. Install Docker CLI + Plugins (Synchronized Versions)
-RUN apt-get update && apt-get install -y \
-    docker-ce-cli \
-    docker-compose-plugin \
-    docker-buildx-plugin \
+    ca-certificates curl gnupg sudo wget git jq lsb-release \
+    iproute2 procps dnsutils iputils-ping unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# 3. THE FIX: Link plugins to the Global Priority Path
-# This ensures 'docker compose' works even if /home is mounted over
-RUN mkdir -p /usr/local/lib/docker/cli-plugins && \
-    ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/lib/docker/cli-plugins/docker-compose && \
-    ln -sf /usr/libexec/docker/cli-plugins/docker-buildx /usr/local/lib/docker/cli-plugins/docker-buildx && \
-    ln -sf /usr/libexec/docker/cli-plugins/docker-compose /usr/local/bin/docker-compose
+# Injeção Direta de Certificado para evitar erros de SSL/TLS
+COPY devops/trusted-ca.pem ./opencode/home2500-ca.pem
+RUN cat ./opencode/home2500-ca.pem >> /etc/ssl/certs/ca-certificates.crt
 
-# 4. Install yq (v4.50.1)
-RUN wget https://github.com/mikefarah/yq/releases/download/v4.50.1/yq_linux_amd64 -O /usr/bin/yq \
-    && chmod +x /usr/bin/yq
+# Criação da Identidade Steward
+RUN groupadd -g $APP_GID stewards || true && \
+    groupadd -g $DOCKER_GID docker_host || true && \
+    useradd -m -u $APP_UID -g stewards -G docker_host,sudo -s /bin/bash $APP_USER || true && \
+    echo "$APP_USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# 5. Create User & Map Docker Group
-RUN if getent group ${USER_GID}; then \
-    groupmod -n ${USERNAME} $(getent group ${USER_GID} | cut -d: -f1); \
-    else \
-    groupadd --gid ${USER_GID} ${USERNAME}; \
-    fi && \
-    if getent passwd ${USER_UID}; then \
-    usermod -l ${USERNAME} -m -d /home/${USERNAME} $(getent passwd ${USER_UID} | cut -d: -f1); \
-    else \
-    useradd --uid ${USER_UID} --gid ${USER_GID} -m -s /bin/bash ${USERNAME}; \
-    fi && \
-    echo "${USERNAME} ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME} && \
-    chmod 0440 /etc/sudoers.d/${USERNAME} && \
-    (groupadd -g ${DOCKER_GID} docker_host || true) && \
-    usermod -aG ${DOCKER_GID} ${USERNAME} || true
+# ==========================================
+# ESTÁGIO 2: DEVELOPMENT (OpenCode / Agente 01)
+# ==========================================
+FROM base AS development
 
-# 6. Switch to User
-RUN chown -R ${USERNAME}:${USER_GID} /home/${USERNAME}
-USER ${USERNAME}
-WORKDIR /home/${USERNAME}
+USER root
+# Ferramentas de Orquestração e Build (Docker CLI, Compose, Tree)
+RUN install -m 0755 -d /etc/apt/keyrings && \
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
+    apt-get update && apt-get install -y docker-ce-cli docker-compose-plugin tree \
+    && rm -rf /var/lib/apt/lists/*
 
-# 7. Setup SSH and local tools
-RUN mkdir -p /home/${USERNAME}/.ssh \
-    && ssh-keyscan github.com >> /home/${USERNAME}/.ssh/known_hosts 2>/dev/null \
-    && chmod 700 /home/${USERNAME}/.ssh
+# Instalação do Bun (Runtime de IA/JS)
+ENV BUN_INSTALL=/home/$APP_USER/.bun
+ENV PATH=$BUN_INSTALL/bin:$PATH
+RUN curl -fsSL https://bun.sh/install | bash
 
-# 8. Install Bun & OpenCode
-RUN curl -fsSL https://bun.sh/install | bash \
-    && curl -fsSL https://opencode.ai/install | bash
+USER $APP_USER
+WORKDIR /home/$APP_USER/devops
 
-# Final Path Setup
-ENV PATH="/home/${USERNAME}/.local/bin:/home/${USERNAME}/.bun/bin:${PATH}"
+# O OpenCode fica em aguardo para comandos do Steward
+CMD ["tail", "-f", "/dev/null"]
 
-CMD ["bash"]
+# ==========================================
+# ESTÁGIO 3: RUNTIME (Serviço App de Produção)
+# ==========================================
+FROM base AS runtime
+
+# Otimização para Produção
+ENV NODE_ENV=production
+ENV TMPDIR=/tmp
+
+# No runtime, não temos Docker CLI nem Bun por padrão (Segurança Ativa)
+# Apenas o essencial para rodar o serviço exposto
+USER $APP_USER
+WORKDIR /home/$APP_USER/devops
+
+# Entrypoint que limpa a RAM antes de iniciar
+CMD ["/bin/bash", "-c", "rm -rf /tmp/* && exec /bin/bash"]
