@@ -32,6 +32,7 @@ traefik/traefik/certs/*.key
 
 # OPENCODE agent
 opencode/workspace/*
+opencode/share/*
 
 # FILES ocis
 files/data/**/*

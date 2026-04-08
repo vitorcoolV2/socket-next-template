@@ -210,8 +210,11 @@ stack_trace_idx() {
 }
 core_relative_path2() {
     local the_file="$1"
-    # Se o ficheiro não existir ou realpath falhar, mantém o original
-    realpath --relative-to="$PWD" "$the_file" 2>/dev/null || echo "$the_file"
+    (
+        cd $DEVOPS_DIR
+        # Se o ficheiro não existir ou realpath falhar, mantém o original
+        realpath --relative-to="$PWD" "$the_file" 2>/dev/null || echo "$the_file"
+    )
 }
 
 ## usage file line case: corelink_file "envfile" "./env" 4
@@ -401,7 +404,7 @@ debug_required_type_name() {
         # Imprime com quebra de linha no stderr
         echo -e "$_msg" >&2
     }
-    _map_type_name__status "$_type" "$_name" "$_status"
+    
 
     # 2. Stack Trace Dinâmico com Offset
     if [[ "${TRACE_STEPS:-0}" -gt 0 ]]; then
@@ -452,6 +455,7 @@ debug_required_type_name() {
         done
     fi
     echo "" >&2
+    _map_type_name__status "$_type" "$_name" "$_status"
 }
 # Wrappers para facilitar o uso:
 require_files()     { require_devops_assets "file" "$@"; }
@@ -603,7 +607,9 @@ extract_url_port() {
 require_service_ready() {
     local container_name="$1"
 
-    core_http_url_status $(core__container_name__url $container_name) || return 1
+    local candidates=$(core__container_name__url $container_name 2> /dev/null)
+    #show_vars candidates
+    core_http_url_status $candidates || return 1
     return 0    
 }
 # Função principal refatorada para múltiplos containers
@@ -748,7 +754,7 @@ export -f core_resolve_file
 # from ../.env. 
 # DOMAIN="home2500.local"
 # PUBLIC_SERVICES_LIST="traefik vault auth whoami mailcrab pihole backup"
-detect_active_interface() {    
+detect_active__interface() {    
 
     # 1. Tenta usar a variável do .env, senão tenta detetar a interface da rota default
     local target_name="${HOST_NETWORK_INTERFACE}"
@@ -770,28 +776,10 @@ detect_active_interface() {
     >&2 echo "❌ Interface '$target_name' not found or has no IPv4 address."
     return 1
 }
-detect_active_ipv4() {        
-    # Chama a função original e captura o resultado (stdout)
-    # Redirecionamos o stderr para /dev/null para evitar mensagens duplicadas se desejar
-    local interface=$(detect_active_interface)
-    
-    # Verifica se a função anterior falhou
-    if [ $? -ne 0 ] || [ -z "$interface" ]; then
-        return 1
-    fi
 
-    # Extrai o IP da interface retornada
-    local ip_address=$(ip -4 addr show "$interface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
 
-    if [ -z "$ip_address" ]; then
-        >&2 echo "❌ No IPv4 address found for $interface"
-        return 1
-    fi
-
-    echo "$ip_address"
-}
-detect_active_ipv6() {
-    local interface=$(detect_active_interface)
+detect_active__ipv6() {
+    local interface=$(detect_active__interface)
     # Procuramos o endereço inet6 com escopo 'link' (local)
     local ip=$(ip -6 addr show "$interface" | grep "scope link" | awk '{print $2}' | cut -d'/' -f1 | head -n1)
     
@@ -804,8 +792,8 @@ detect_active_ipv6() {
 }
 core_set__domain_name() {
     patch__etc_hosts() {
-        local ip_v4=$(detect_active_ipv4)
-        local ip_v6=$(detect_active_ipv6)
+        local ip_v4=$(detect_active__ipv4)
+        local ip_v6=$(detect_active__ipv6)
         local domain="${1:-$DOMAIN}"
         local hosts_file="/etc/hosts"
         local tmp_hosts=$(mktemp)
@@ -856,8 +844,8 @@ core_get__domain_name() {
     fi
 
     # 2. Detetar IPs Reais das Interfaces (Runtime)
-    local actual_ipv4=$(detect_active_ipv4)
-    local actual_ipv6=$(detect_active_ipv6)
+    local actual_ipv4=$(detect_active__ipv4)
+    local actual_ipv6=$(detect_active__ipv6)
 
     if [[ -z "$actual_ipv4" ]]; then
         >&2 echo "❌ [FAIL] Could not detect a valid active IPv4 on the system."
@@ -911,10 +899,10 @@ core_get__domain_name() {
 }
 core_desired_domain_names_json() {
     local enable_ipv6="${ENABLE_IPV6:-false}"
-    require_functions detect_active_ipv4 detect_active_ipv6
+    require_functions detect_active__ipv4 detect_active__ipv6
 
-    local proxy_ipv4="$(detect_active_ipv4)"
-    local proxy_ipv6="$(detect_active_ipv6)"
+    local proxy_ipv4="$(detect_active__ipv4)"
+    local proxy_ipv6="$(detect_active__ipv6)"
     
     require_vars proxy_ipv4 || return 1 # IPv4 é obrigatório
     
@@ -942,7 +930,7 @@ docker_container_network_json() {
     fi
     echo $network_json | jq 
 }
-docker_container_name_ip() {
+docker_container_name_ip___issues_with_docker_host_network_detection() {
     local container_name="$1"
     local network_name="${INTERNAL_DOMAIN:-app-network}"
     local ipv4_regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
@@ -973,6 +961,67 @@ docker_container_name_ip() {
     fi
     #show_vars _ip
     # 3. Validação Final
+    if [[ -z "$_ip" || ! $_ip =~ $ipv4_regex ]]; then
+        >&2 echo "❌ [NETWORK] No valid IPv4 found for container '$container_name' in any network."
+        return 1
+    fi
+
+    echo "$_ip"
+}
+
+# Helper function to detect the active IPv4 address of the host
+detect_active__ipv4() {        
+    # Chama a função original e captura o resultado (stdout)
+    # Redirecionamos o stderr para /dev/null para evitar mensagens duplicadas se desejar
+    local interface=$(detect_active__interface)
+    
+    # Verifica se a função anterior falhou
+    if [ $? -ne 0 ] || [ -z "$interface" ]; then
+        return 1
+    fi
+
+    # Extrai o IP da interface retornada
+    local ip_address=$(ip -4 addr show "$interface" | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | head -n1)
+
+    if [ -z "$ip_address" ]; then
+        >&2 echo "❌ No IPv4 address found for $interface"
+        return 1
+    fi
+
+    echo "$ip_address"
+}
+
+
+# Main function to resolve container IPs
+docker_container_name_ip() {
+    local container_name="$1"
+    local network_name="${INTERNAL_DOMAIN:-app-network}"
+    local ipv4_regex='^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+    local _ip
+
+    # 1. Check if the container is in "host" network mode
+    local network_mode=$(docker inspect -f '{{.HostConfig.NetworkMode}}' "$container_name" 2>/dev/null)
+    if [[ "$network_mode" == "host" ]]; then
+        ### >&2 echo "⚠️ Container '$container_name' is in 'host' network mode. Using host's active IPv4 address..." 
+        _ip=$(detect_active__ipv4)
+        if [[ $? -eq 0 ]]; then
+            echo "$_ip"
+            return 0
+        else
+            >&2 echo "❌ [HOST] Failed to detect active IPv4 for container in 'host' mode."
+            return 1
+        fi
+    fi
+
+    # 2. Attempt to resolve IP from Docker-managed networks
+    _ip=$(docker inspect -f "{{with index .NetworkSettings.Networks \"$network_name\"}}{{.IPAddress}}{{end}}" "${container_name}" 2>/dev/null)
+
+    # 3. Fallback: Search for any connected network's IP
+    if [[ -z "$_ip" || ! $_ip =~ $ipv4_regex ]]; then
+        _ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "${container_name}" 2>/dev/null | grep -oP "(\d+\.){3}\d+" | head -n1)
+    fi
+
+    # 4. Final validation
     if [[ -z "$_ip" || ! $_ip =~ $ipv4_regex ]]; then
         >&2 echo "❌ [NETWORK] No valid IPv4 found for container '$container_name' in any network."
         return 1
@@ -1071,9 +1120,9 @@ core__container_name_url_candidates() {
 core__container_name__url() {
     local name="$1"
     urls=$(core__container_name_url_candidates "$name")
-    
+    ### empty urls why ?    
     for url in $urls; do        
-        if core_http_url_status "$url"  > /dev/null 2>&1; then            
+        if core_http_url_status "$url"  > /dev/null; then #  > /dev/null 2>&1; then            
             echo "$url"
             return 0        
         fi
@@ -1291,7 +1340,7 @@ wait4_http_url_ready(){
 
 core_http_url_status() {
     local input_url="${1}"
-    [ -z "$input_url" ] && { echo "❌ URL not provided"; return 1; }
+    [ -z "$input_url" ] && { >&2 echo "❌ URL not provided"; return 1; }
 
     # Adicionado 403 porque muitos serviços (Pi-hole, Web-WAFs) bloqueiam a raiz mas estão "vivos"
     local http_status_ok_pattern="^(20[0-9]|30[0-2]|307|308|403)$"
@@ -1325,23 +1374,24 @@ core_http_url_status() {
             continue
         fi
 
+        # show_vars url http_code
         # Validação: Sucesso ou Redirect
         if [[ "$http_code" =~ $http_status_ok_pattern ]]; then
-            echo "✅ [OK] $url responded with $http_code" >&2
+            >&2 echo "✅ [OK] $url responded with $http_code" 
             echo "$response" | jq -c .
             return 0
         fi
 
         # Se chegou aqui e é a última tentativa ou um erro mapeado, reporta o erro
         if [[ "$http_code" =~ $http_status_proxy_err ]]; then
-            echo "⚠️  [WARN] Service Unreachable (HTTP $http_code) at $url" >&2
+            >&2 echo "⚠️  [WARN] Service Unreachable (HTTP $http_code) at $url" 
             echo "$response" | jq -c .
             return "$http_code"
         fi
     done
 
     # Se percorreu todas as opções e nada funcionou
-    echo "❌ [ERROR] All connection attempts failed for $input_url" >&2
+    >&2 echo "❌ [ERROR] All connection attempts failed for $input_url" 
     return 1
 }
 
@@ -2020,6 +2070,19 @@ core_transform_inject_env_file_vars() {
     done < "$env_file"
 }
 
+# Exemplo de uso com o teu transform_string:
+#cat lista_users.txt | core_stream_processor "core_transform_string \"\$line\" 'HuMan'"
+core_stream_processor() {
+    local transform_cmd="$1"
+    ## core_stream_processos 
+    
+    while IFS= read -r line; do
+        # Executa a transformação na linha atual
+        eval "echo \"$line\" | $transform_cmd"
+    done
+}
+
+
 # Redutor de strings para o Dono da Casa
 core_transform_string() {
     local str="$1"
@@ -2247,7 +2310,7 @@ ask() {
             return 0
             ;;
         *)
-            core_log_warning "❌ Negado: Operação cancelada."
+            core_log_warn "❌ Negado: Operação cancelada."
             return 1
             ;;
     esac
@@ -2424,6 +2487,93 @@ core_search_file_json() {
     fi
 }
 
+core_project_permissions_guard() {
+    local root="${DEVOPS_DIR}"
+    local dry_run="${1:-true}" 
+
+    core_log_info "🛡️ Steward Guard: Aplicando permissões estáticas de infraestrutura..."
+
+    (
+        cd "$root" || return
+
+        sudo chown -R 1000:2500 .
+        
+        # --- [ 1. DIRETÓRIOS: Permissão de Travessia (755) ] ---
+        # Essencial para que containers consigam "entrar" nas pastas
+        sudo chown -R 100:1000 vault/config
+        sudo chmod 755 vault/config
+        sudo chmod 755 vault/config/certs
+        sudo chmod 755 traefik/traefik
+        sudo chmod 755 pihole/etc-pihole
+        
+
+        # --- [ 2. CONFIGURAÇÕES: Leitura Pública (644) ] ---
+        # O UID 100 (Vault) precisa de leitura no que é config
+        sudo chmod 644 vault/config/*.hcl
+        sudo chmod 644 vault/config/certs/*.crt
+        sudo chmod 644 traefik/traefik/*.yml 2>/dev/null
+        sudo chmod 644 .env 2>/dev/null
+
+        # --- [ 3. SEGREDOS: Acesso Restrito (600) ] ---
+        # Chaves privadas e ACME não podem ser lidos por "outros"
+        # Nota: Se o Vault reclamar de 600 na key, muda para 640/644
+        sudo chmod 600 vault/config/certs/vault.key
+        sudo  600 traefik/traefik/acme.json 2>/dev/null
+
+        # --- [ 4. SCRIPTS: Execução para Dono/Grupo (750) ] ---
+        # Corrige o problema dos scripts que não corriam
+        find . -maxdepth 2 -name "*.sh" -exec chmod 750 {} +
+    )
+    
+    if [[ "$dry_run" == "false" ]]; then
+        core_log_success "Permissões aplicadas. A tentar reanimar o Vault..."
+        docker restart vault
+    else
+        core_log_warn "Modo Simulação: Nada foi alterado no sistema."
+    fi
+}
+#-------------------------------------------------------------------------------
+# @function core_project_files_visible
+# @description Filtra a realidade pelo .gitignore
+#-------------------------------------------------------------------------------
+core_project_files_visible() {
+    local target_dir="${1:-.}"
+    local mode="${2:-flat}"
+    
+    # Git-only: se não está no git (ou não é ignorado), não existe para o Steward
+    local raw_list
+    raw_list=$(git ls-files --others --cached --exclude-standard "$target_dir" 2>/dev/null)
+
+    if [[ "$mode" == "tree" ]]; then
+        echo "📂 $target_dir"
+        echo "$raw_list" | sed -e 's/[^\/]*\//  │/g' -e 's/│\([^│]\)/┣━━ \1/' -e 's/┣━━ \([^│]*\)$/┗━━ \1/'
+    else
+        echo "$raw_list"
+    fi
+}
+
+core_project_files_permissions_json() {
+    local target_dir="${1:-.}"
+    local resources
+    
+    # Obtemos a lista de ficheiros (visíveis/trackeáveis)
+    resources=$(core_project_files_visible "$target_dir" "flat")
+
+    # 2. Abrimos um subshell para capturar todo o output do loop
+    (
+        while IFS= read -r resource; do
+            [[ -z "$resource" ]] || [[ ! -e "$resource" ]] && continue
+
+            # Extração robusta com stat
+            # Usamos o 'jo' para criar o objeto individual (flat)
+            stat -c "%a %U %G %F" "$resource" | {
+                read -r perms owner group type
+                jo resource="$resource" p="$perms" u="$owner" g="$group" t="$type"
+            }
+        done <<< "$resources"
+    ) | jq -s -c .
+}
+
 require_search_file() {
     local ref=${1}
     local _file=${!ref}
@@ -2483,44 +2633,61 @@ require_search_file() {
 }
 
 require_mem_path() {
-    local app_name="${1:-$CLIENT_APP_NAME}"
+    local app_input="${1:-}"
     local user_id=$(id -u)
     
-    # 1. Ordem de Preferência (Hierarquia de Volatilidade) 
-    # A: /run/user/UID (RAM específica do utilizador - Mais segura) # este objectivo para Projectos com RAM. @todo 
-    # B: /dev/shm (RAM Partilhada - Mais rápida/comum)
-    # C: /tmp (SSD/Disco - Fallback persistente)
+    # 1. Reset Atómico (Sempre!)
+    unset MEM_ROOT_DIR CLIENT_APP_MEM_DIR CLIENT_APP_NAME
+
+    # 2. Identificar se somos uma APP ou o CORE
+    # Se o PWD termina em /devops, não definimos APP_NAME automaticamente
+    local current_folder=$(basename "$PWD")
+    local app_name=""
+
+    if [[ -n "$app_input" ]]; then
+        app_name="$app_input"
+    elif [[ "$current_folder" != "devops" && "$PWD" == *"/devops/"* ]]; then
+        # Só assume o nome da pasta se estivermos ABAIXO de devops/
+        app_name="$current_folder"
+    fi
+
     local options=(
         "/run/user/$user_id/home2500"
         "/dev/shm/home2500"
         "/tmp/home2500"
     )
 
-    for path in "${options[@]}"; do
-        # Testar se podemos criar/escrever no diretório pai
-        local parent=$(dirname "$path")
+    for base_path in "${options[@]}"; do
+        local parent=$(dirname "$base_path")
         if [[ -w "$parent" ]] || mkdir -p "$parent" 2>/dev/null; then
-            export MEM_ROOT_DIR="$path/$app_name"
             
-            # Criar com segurança atómica
-            mkdir -p "$MEM_ROOT_DIR"
-            chmod 700 "$MEM_ROOT_DIR" # Apenas o Dono da Casa entra aqui
+            # 3. Define a Raiz da RAM (Sempre disponível)
+            export MEM_ROOT_DIR="$base_path"
+            mkdir -p "$MEM_ROOT_DIR" 2>/dev/null
+
+            # 4. Define a APP apenas se o contexto for válido
+            if [[ -n "$app_name" ]]; then
+                export CLIENT_APP_NAME="$app_name"
+                export CLIENT_APP_MEM_DIR="${MEM_ROOT_DIR}/${app_name}"
+                mkdir -p "$CLIENT_APP_MEM_DIR" && chmod 700 "$CLIENT_APP_MEM_DIR"
+                core_log_info "🧠 App Memory: $CLIENT_APP_MEM_DIR"
+            else
+                core_log_info "🌐 Core Memory Root: $MEM_ROOT_DIR (No App Context)"
+            fi
             
-            core_log_info "🧠 Memory Path Alocado: $MEM_ROOT_DIR (Mode: $([[ "$path" == *"/tmp"* ]] && echo "SSD" || echo "RAM"))"
             return 0
         fi
     done
 
-    core_log_error "FALHA CRÍTICA: Nenhum caminho de memória disponível."
     return 1
 }
-
 
 # Cores ANSI para Output
 readonly LOG_COLOR_INFO='\033[0;36m'  # Ciano
 readonly LOG_COLOR_ERROR='\033[0;31m' # Vermelho
 readonly LOG_COLOR_WARN='\033[1;33m'  # Amarelo
 readonly LOG_COLOR_NC='\033[0m'       # Sem Cor
+readonly LOG_COLOR_SUCCESS='\033[0;32m' # Verde (Adicionado)
 
 # Função de Log de Informação
 core_log_info() {
@@ -2537,10 +2704,84 @@ core_log_error() {
 }
 
 # Função de Log de Aviso (Bónus para os teus requisitos de build)
-core_log_warning() {
+core_log_warn() {
     local msg="$1"
     local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
     echo -e "${LOG_COLOR_WARN}[WARN] [${timestamp}] ⚠️  ${msg}${LOG_COLOR_NC}"
+}
+core_log_success() {
+    local msg="$1"
+    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+    
+    # Redirecionamos para >&2 para o log não quebrar pipes de dados
+    echo -e "${LOG_COLOR_SUCCESS}[SUCCESS] [${timestamp}] ✅ ${msg}${LOG_COLOR_NC}" >&2
+}
+
+core_branch() {    
+    (
+        cd $DEVOPS_DIR
+        local branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-branch")
+        echo "$branch"
+    )
+}
+
+core_root_depth() {
+    git_project_root_depth $DEVOPS_DIR
+}
+#-------------------------------------------------------------------------------
+# @function git_project_root_depth
+# @description Calcula a profundidade (L) do PWD em relação à raiz do Git
+#-------------------------------------------------------------------------------
+git_project_root_depth() {
+    local root_dir
+    root_dir=$(git rev-parse --show-toplevel 2>/dev/null)
+    
+    if [[ -z "$root_dir" ]]; then
+        echo "0" # Se não for Git, assume Root (L0)
+        return
+    fi
+
+    # Calcula a distância: remove a root do PWD e conta as barras /
+    local relative_path="${PWD#$root_dir}"
+    relative_path="${relative_path#/}" # Remove barra inicial se existir
+    
+    if [[ -z "$relative_path" ]]; then
+        echo "0"
+    else
+        # Conta o número de pastas no caminho relativo
+        local depth
+        depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
+        echo $((depth + 1))
+    fi
+}
+#-------------------------------------------------------------------------------
+# @function git_project_root
+# @description Localiza a raiz do projeto (onde está o .git)
+#-------------------------------------------------------------------------------
+git_project_root() {
+    local root
+    root=$(git rev-parse --show-toplevel 2>/dev/null)
+    
+    if [[ -n "$root" ]]; then
+        echo "$root"
+        return 0
+    else
+        # Se falhar (ex: dentro de um submodule ou erro de perm), tenta subir manualmente
+        local curr="$PWD"
+        while [[ "$curr" != "/" ]]; do
+            [[ -d "$curr/.git" ]] && echo "$curr" && return 0
+            curr=$(dirname "$curr")
+        done
+    fi
+    return 1
+}
+git_relative_path2() {
+    local the_file="$1"
+    (
+        cd $(git_project_root)
+        # Se o ficheiro não existir ou realpath falhar, mantém o original
+        realpath --relative-to="$PWD" "$the_file" 2>/dev/null || echo "$the_file"
+    )
 }
 
 
@@ -2831,7 +3072,7 @@ core_load_requirements() {
     export VAULT_PKI_CN=${VAULT_PKI_CN-"home2500.local"}
     export VAULT_ROOT_CA_NAME=${VAULT_ROOT_CA_NAME,"root-home2500"}
     export HOST_NETWORK_INTERFACE="${HOST_NETWORK_INTERFACE:-default}"
-    export HOST_NETWORK_IP="${HOST_NETWORK_IP:-$(detect_active_ipv4)}"
+    export HOST_NETWORK_IP="${HOST_NETWORK_IP:-$(detect_active__ipv4)}"
 
     export TRUSTED_CA_FILE="$DEVOPS_DIR/trusted-ca.pem"
         
@@ -2855,6 +3096,8 @@ core_load_requirements() {
         SERVICES_PIPE \
         MEM_ROOT_DIR \
         KEEPASS_ROOT_DIR \
+        CLIENT_APP_MEM_DIR \
+        CLIENT_APP_NAME \
         VAULT_ROOT_DIR \
         HOST_NETWORK_INTERFACE \
         HOST_NETWORK_IP \

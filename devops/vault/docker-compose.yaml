@@ -13,13 +13,13 @@ services:
   vault:
     image: hashicorp/vault:1.21.1
     container_name: vault
+    user: "100:2500"
     ports:
       - "8200:${VAULT_SERVICE_PORT}" # Porta API/UI
       #- "8201:8201" # Cluster
     networks:
       app-network:
         ipv4_address: 172.28.0.6
-
 
     environment:
       - VAULT_SKIP_VERIFY=true

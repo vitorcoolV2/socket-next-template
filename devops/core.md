@@ -114,26 +114,26 @@ Reads an env file and exports variables with prefix transformation.
 
 ## Network Functions
 
-### detect_active_interface
+### detect_active__interface
 
 ```bash
-detect_active_interface
+detect_active__interface
 ```
 
 Detects the active network interface (default route interface).
 
-### detect_active_ipv4
+### detect_active__ipv4
 
 ```bash
-detect_active_ipv4
+detect_active__ipv4
 ```
 
 Returns the IPv4 address of the active interface.
 
-### detect_active_ipv6
+### detect_active__ipv6
 
 ```bash
-detect_active_ipv6
+detect_active__ipv6
 ```
 
 Returns the IPv6 address of the active interface.

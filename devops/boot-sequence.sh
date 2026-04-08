@@ -84,12 +84,13 @@ __docker_reset__clean() {
 
 
 kp test && kp open
+kp ls /vault > /dev/null || exit 1
 ###### BOOT HARD CORE (PIHOLE + VAULT) - boot before authentik. 
 source $(core_resolve_file "pihole/_0.pihole_lib.sh")  
 ##ph api open
-if ! wait4_http_url_ready "$PIHOLE_URL/admin/"; then
+if ! wait4_http_url_ready "$PIHOLE_URL/admin/" 3; then
   ph down && ph up && \
-    wait4_http_url_ready "$PIHOLE_URL/admin/" 10 || exit 1
+    wait4_http_url_ready "$PIHOLE_URL/admin/" 10 || ph health && exit 1
 fi
 ## pihole trial requiremens. pihole web api service to register...
 ph api password restore 2> /dev/null || ph api password rotate || exit 1
@@ -112,7 +113,7 @@ vault_open || return 1
 vault_request_stew_token || return 1
 vault_validate_token || return 1
 require_vars "VAULT_CACERT"
-
+is_sealed || return 1
 
 
 ###### AUTHENTIK RESTART

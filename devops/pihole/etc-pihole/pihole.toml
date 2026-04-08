@@ -1,7 +1,7 @@
 # Pi-hole configuration file (v6.4.1)
 # Encoding: UTF-8
 # This file is managed by pihole-FTL
-# Last updated on 2026-04-04 22:38:05 UTC
+# Last updated on 2026-04-08 11:40:38 UTC
 
 [dns]
   # Upstream DNS Servers to be used by Pi-hole. If this is not set, Pi-hole will not
@@ -131,26 +131,23 @@
     "192.168.1.67 backup.home2500.local",
     "192.168.1.67 files.home2500.local",
     "192.168.1.67 mailcrab.home2500.local",
-    "192.168.1.67 pihole.app-network",
-    "fe80::57b1:b3ff:509e:85d0 pihole.app-network",
     "192.168.1.67 pihole.home2500.local",
-    "172.28.0.11 traefik.app-network",
     "192.168.1.67 traefik.home2500.local",
     "172.28.0.6 vault.app-network",
     "192.168.1.67 vault.home2500.local",
-    "172.28.0.12 whoami.app-network",
     "192.168.1.67 whoami.home2500.local",
     "192.168.1.67 chat.home2500.local",
-    "192.168.1.67 opencode.home2500.local",
     "192.168.1.67 fotos.home2500.local",
-    "172.28.0.8 authentik-worker.app-network",
-    "172.28.0.7 immich-ml.app-network",
-    "172.28.0.4 unbound.app-network",
-    "172.28.0.13 ai.app-network",
-    "172.28.0.3 authentik-db.app-network",
+    "172.28.0.7 authentik-worker.app-network",
+    "172.28.0.2 unbound.app-network",
     "172.28.0.5 authentik-redis.app-network",
-    "172.28.0.9 immich-server.app-network",
-    "172.28.0.2 mailcrab.app-network"
+    "192.168.1.67 opencode.home2500.local",
+    "fe80::3b1f:629f:921c:fa95 pihole.app-network",
+    "192.168.1.67 pihole.app-network",
+    "172.28.0.11 traefik.app-network",
+    "172.28.0.12 whoami.app-network",
+    "172.28.0.4 authentik-db.app-network",
+    "172.28.0.3 mailcrab.app-network"
   ] ### CHANGED, default = []
 
   # If set, queries for plain names, without dots or domain parts, are never forwarded to
@@ -380,7 +377,7 @@
     #
     # Allowed values are:
     #     true or false
-    active = true
+    active = false ### CHANGED, default = true
 
     # How should FTL reply to blocked queries?
     #
@@ -1132,7 +1129,7 @@
     #
     # Allowed values are:
     #     A valid Pi-hole password hash
-    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$osFNIB9MiQqi1xlV4uyxVw==$6XOFIaH4AwjfhQIg+w96KGmP78KSQZf0j666phy3Lmo=" ### CHANGED, default = ""
+    pwhash = "$BALLOON-SHA256$v=1$s=1024,t=32$kVjl4cvos16Tf4HlOhgBGA==$4rdOM3sNDqJRbfQGd9ufoELs3CEHfgNZmV7btFmxnP8=" ### CHANGED, default = ""
 
     # Pi-hole 2FA TOTP secret. When set to something different than "", 2FA authentication
     # will be enforced for the API and the web interface. This setting is write-only, you
@@ -1697,8 +1694,8 @@
   all = false
 
 # Configuration statistics:
-# 162 total entries out of which 152 entries are default
-# --> 10 entries are modified
+# 162 total entries out of which 151 entries are default
+# --> 11 entries are modified
 # 4 entries are forced through environment:
 #   - dns.listeningMode
 #   - dns.domain.name

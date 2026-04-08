@@ -13,7 +13,8 @@ TOOL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOL_NAME=$(basename ${BASH_SOURCE[0]})
 
 export CLIENT_APP_NAME=$(basename $CLIENT_APP_DIR)
-
+export CLIENT_APP_MEM_DIR="$MEM_ROOT_DIR/$CLIENT_APP_NAME"
+show_vars MEM_ROOT_DIR CLIENT_APP_MEM_DIR
 tool_prepare__script_name() {
     # 1. Busca arquivos .sh que contenham a definição da função deploy()
     # Usamos -l para listar apenas o nome do arquivo e -E para a regex
@@ -88,7 +89,7 @@ show_vars DOMAIN \
 
 # requirements
 ### tool is a BASH modular stage workflow run
-resolverinthis func let y setup apply/cleanup acording to app/blueprints/** "template name"
+# setup apply/cleanup acording to app/blueprints/** "template name"
 
 app_context() {
     require_vars INTERNAL_DOMAIN DOMAIN
@@ -833,35 +834,39 @@ app_required_env_vars() {
     if [[ $CLIENT_APP_BLUE_TEMPLATE_MODULE == "proxy" ]];then
         TOOL_STAGES=(
             "script"             
-            "vault_login"
+            "owner_login"
             "provision_user"
             "provision_db" 
             "provision_oidc"
             "provision_secrets"     
-            "deploy_secrets"    
+            "user_login"
+            "deploy_secrets"                
+            "hydrate_compose" 
             "build_image"    
-            "compose" 
             "running" 
             "name_register" 
             "authentik_login" 
+            "blue_hydrate_apply" 
             "blue_apply" 
             "outpost_add"            
         )
     else        
         TOOL_STAGES=(
             "script"             
-            "vault_login"
+            "owner_login"
             "provision_user"
             "provision_db" 
             "provision_oidc"
-            "provision_secrets"              
-            "deploy_secrets"
+            "provision_secrets"  
+            "user_login"            
+            "deploy_secrets"            
+            "hydrate_compose" 
             "build_image"
-            "compose" 
             "running" 
             "name_register" 
             "authentik_login" 
-            "blue_apply"             
+            "blue_hydrate_apply" 
+            "blue_apply"            
         )
     fi
     export TOOL_STAGES_OFF=(
@@ -888,7 +893,7 @@ app_names_sync() {
     echo "🌐 Configurando DNS no Pi-hole..." >&2
     
     # ph_api auth agora tem os 5 retries internos
-    ph api open || return 1    
+    ph api password restore || return 1    
     if ph api auth; then
         ph api dns sync
         echo "✅ DNS atualizado." >&2
@@ -1094,7 +1099,6 @@ app_wait4_docker_ip() {
             if [[ -n "$CLIENT_APP_SERVICE_IP" && "$CLIENT_APP_SERVICE_IP" != "invalid IP" ]]; then
                 local url="$CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT"
                 if core_http_url_status $url; then
-                #if require_http_status_ok url; then
                     echo "✅ Container IP detetado: $CLIENT_APP_SERVICE_IP:$CLIENT_APP_SERVICE_PORT" >&2
                 fi
                 break
@@ -1217,8 +1221,9 @@ tool_renew_certs() {
     fi
 
     # 4. Build and Sort the Desired State
-    vault_request_stew_token  
-    vault_validate_token  
+    kp close || kp open || return 1  ## each renew must be approved by owner. so we close    
+    vault_request_stew_token  ##
+    vault_validate_token return 1 ## vault steward are accourding 
     vault_config
     echo "🔐 Requesting new certificate from Vault..."  >&2
     echo "📜 SANs: $CLIENT_APP_NS"  >&2
@@ -1274,7 +1279,7 @@ tool_renew_certs() {
 
     
     # 7. Permissions (Essencial para o conseguir ler)
-    sudo chown 1000:1000 $dir/*   # 1000 costuma ser o ID do user no docker
+    sudo chown "$APP_UID:$APP_UID" $dir/*   # 1000 costuma ser o ID do user no docker
     chmod 644 $dir/*.pem
     chmod 644 $dir/*.crt
     chmod 600 $dir/*.key
@@ -1382,26 +1387,215 @@ tool_renew_certs() {
     return 0
 }
 require_single_yaml_file() {
-    local ref=${1}
-    local yaml_file=${!ref}
+    local var_name=${1}
+    local yaml_file=${!var_name}
     local func="$2"
     
     # Validação silenciosa, mas erro ruidoso se falhar
-    [[ -z "$yaml_file" ]] && { echo "❌ Erro: Referência yaml_file vazia." >&2; return 1; }
-  
+    [[ -z "$yaml_file" ]] && { echo "❌ Erro: var $var_name vazia." >&2; return 1; }
+
+    local rel_path="$(realpath --relative-to="$PWD" "$yaml_file")"
+    ##show_vars rel_path yaml_file
     if yq eval '.' "$yaml_file" >/dev/null 2>&1; then
         # Output de Sucesso com colunas fixas e link clicável
         LABEL=${LABEL:-"✅\e[0m Valid YAML: "}
-        printf "  \e[1;32m${LABEL} \e[1;34m%-30s\e[0m \e[1;90m->\e[0m \e[4;36m%s\e[0m\n" "yaml_file" "$(realpath --relative-to="$PWD" "$yaml_file")" >&2
+        printf "  \e[1;32m${LABEL} \e[1;34m%-30s\e[0m \e[1;90m->\e[0m \e[4;36m%s\e[0m\n" "$var_name" $yaml_file >&2
         return 0
     else
         # Output de Erro alinhado
-        printf "  \e[1;31m󰅙󰅙\e[0m Invalid YAML: \e[1;33m%-30s\e[0m \e[1;30m-> [%s]\e[0m\n" "yaml_file" "$(realpath --relative-to="$PWD" "$yaml_file")" >&2
+        printf "  \e[1;31m󰅙󰅙\e[0m Invalid YAML: \e[1;33m%-30s\e[0m \e[1;30m-> [%s]\e[0m\n" "$var_name" "$yaml_file" >&2
         return 1
     fi
 }
-# path: devops/opencode/lib/analitica.sh
+require_single_yaml_file() {
+    local var_name=${1}
+    local yaml_file=${!var_name}
+    
+    # 1. Validação de existência da variável
+    [[ -z "$yaml_file" ]] && { 
+        printf "  \e[1;31m󰅙 Erro:\e[0m Variável \e[1;33m%s\e[0m está vazia\n" "$var_name" >&2
+        return 1 
+    }
 
+    # 2. Preparar caminhos (Relativo para beleza, Absoluto para o link de sistema)
+    local rel_path=$(realpath --relative-to="$PWD" "$yaml_file" 2>/dev/null || echo "$yaml_file")
+    local abs_path=$(realpath "$yaml_file")
+
+    # 3. Validação e Output
+    if yq eval '.' "$yaml_file" >/dev/null 2>&1; then
+        # Default Label se não vier de fora
+        local display_label=${LABEL:-"YAML"}
+        
+        # FORMATO: [ÍCONE] [LABEL] [NOME_VAR] -> [LINK_RELATIVO]
+        # O link sublinhado (\e[4m) no caminho facilita o clique no VS Code/ITerm2
+        printf "  \e[1;32m \e[1;34m%-10s \e[0m\e[1;30m%-25s \e[1;90m-> \e[4;36m%s\e[0m\n" \
+               "$display_label" "$var_name" "$rel_path" >&2
+        
+        # Limpa a LABEL global para o próximo uso não herdar lixo
+        unset LABEL
+        return 0
+    else
+        printf "  \e[1;31m󰅙 INVALID \e[1;33m%-25s \e[1;30m[%s]\e[0m\n" \
+               "$var_name" "$rel_path" >&2
+        unset LABEL
+        return 1
+    fi
+}
+require_single_yaml_file() {
+    local var_name=${1}
+    local yaml_file=${!var_name}
+    
+    # 1. Validação de segurança
+    [[ -z "$yaml_file" ]] && { 
+        printf "  \e[1;31m󰅙 Erro:\e[0m Variável \e[1;33m%s\e[0m está vazia\n" "$var_name" >&2
+        return 1 
+    }
+
+    # 2. Lógica de Caminho Inteligente (Clean Path)
+    # Se estiver na RAM (/run/user), mostra o Full Path para ser clicável.
+    # Se estiver no disco local, mostra o Relativo para ser legível.
+    local display_path
+    if [[ "$yaml_file" == "/run/user/"* ]]; then
+        display_path="$yaml_file"
+    else
+        display_path=$(realpath --relative-to="$PWD" "$yaml_file" 2>/dev/null || echo "$yaml_file")
+    fi
+
+    # 3. Renderização Alinhada (A "Fila" de Steward)
+    # %-15s  -> Reserva 15 espaços para a Label (<<< COMPOSE TPL)
+    # %-35s  -> Reserva 35 espaços para o nome da Variável
+    if yq eval '.' "$yaml_file" >/dev/null 2>&1; then
+        local icon="\e[1;32m\e[0m"
+        local label_color="\e[1;34m"
+        local arrow="\e[1;90m->\e[0m"
+        
+        printf "  %b %b%-15s \e[1;30m%-35s %b \e[4;36m%s\e[0m\n" \
+               "$icon" "$label_color" "${LABEL:-YAML}" "$var_name" "$arrow" "$display_path" >&2
+        
+        unset LABEL # Limpa para a próxima chamada
+        return 0
+    else
+        printf "  \e[1;31m󰅙 %-15s \e[1;33m%-35s \e[1;90m-> \e[1;31m[INVALID YAML]\e[0m\n" \
+               "ERROR" "$var_name" >&2
+        unset LABEL
+        return 1
+    fi
+}
+require_single_yaml_file() {
+    local var_name=${1}
+    local yaml_file=${!var_name}
+    local varTypeLabel=$(core_transform_string "$var_name" "Pascal")
+    local label="${LABEL:-$varTypeLabel}"
+    
+    # 1. Validação de Dados
+    if [[ -z "$yaml_file" ]]; then
+        printf "  { \"status\": \"ERROR\", \"label\": \"%s\", \"var\": \"%s\", \"msg\": \"Variable is empty\" }\n" \
+               "$label" "$var_name" >&2
+        return 1
+    fi
+
+    # 2. Sanitização de Caminho (Absolute for RAM, Clean for Disk)
+    local final_path="$yaml_file"
+    [[ "$yaml_file" != "/run/user/"* ]] && final_path=$(realpath "$yaml_file")
+
+    # 3. Output WYSIWYG (JSON Style)
+    if yq eval '.' "$yaml_file" >/dev/null 2>&1; then
+        # Usamos cores discretas para não poluir, mas mantemos a estrutura de dados
+        printf "  { \"status\": \"\e[1;32mOK\e[0m\", \"type\": \"\e[1;34m%-12s\e[0m\", \"var\": \"%-30s\", \"path\": \"\e[4;36m%s\e[0m\" }\n" \
+               "$label" "$var_name" "$final_path" >&2
+        
+        unset LABEL
+        return 0
+    else
+        printf "  { \"status\": \"\e[1;31mFAIL\e[0m\", \"type\": \"%-12s\", \"var\": \"%-30s\", \"msg\": \"Invalid YAML syntax\" }\n" \
+               "$label" "$var_name" >&2
+        
+        unset LABEL
+        return 1
+    fi
+}
+require_single_yaml_file() {
+    local var_name=${1}
+    local yaml_file=${!var_name}
+    local label="${LABEL:-YAML_CHECK}"
+    
+    # 1. Preparar o status e o caminho
+    local status="OK"
+    local msg="Valid YAML"
+    local final_path="$yaml_file"
+
+    # Validação de existência de variável
+    if [[ -z "$yaml_file" ]]; then
+        status="ERROR"
+        msg="Variable $var_name is empty"
+    # Validação de Sintaxe YAML
+    elif ! yq eval '.' "$yaml_file" >/dev/null 2>&1; then
+        status="FAIL"
+        msg="Invalid YAML syntax"
+    fi
+
+    # Converter para caminho absoluto para garantir que é clicável no terminal
+    [[ -e "$yaml_file" ]] && final_path=$(realpath "$yaml_file")
+
+        # 1. Transforma em Humano (ex: "Client App Compose File")
+    local raw_human=$(core_transform_string "$var_name" "HuMan")
+
+    # 2. Converte para PascalCase Formal:
+    #  - Remove "Client " do início
+    #  - Capitaliza a primeira letra de cada palavra
+    #  - Remove todos os espaços
+    local pascal_type=$(echo "$raw_human" | \
+        sed 's/^[Cc]lient //I' | \
+        sed -E 's/(^| )([a-z])/\U\2/g' | \
+        tr -d ' ')
+
+    # 3. Entrega ao JO (Seguro e sem erros de argumento)
+    jo status="$status" \
+        type="$pascal_type" \
+        label="$label" \
+        var="$var_name" \
+        path="$final_path" \
+        message="$msg" | jq '.' >&2
+
+    # Limpeza de contexto
+    unset LABEL
+    
+    # 3. Retorno funcional
+    [[ "$status" == "OK" ]] && return 0 || return 1
+}
+require_single_yaml_file() {
+    local var_name=${1}
+    local yaml_file=${!var_name}
+    require_vars var_name $var_name || return 1
+    local varTypeLabel=$(core_transform_string "yaml $var_name" "Pascal")
+    local label="${LABEL:-$varTypeLabel}"
+    
+    local status="OK"
+    local msg="Valid YAML"
+    
+    # 1. Validações
+    [[ -z "$yaml_file" ]] && status="ERROR" && msg="Var empty"
+    [[ ! -f "$yaml_file" ]] && status="MISSING" && msg="File not found"
+    
+    # 2. Resolução de Caminho para o VS Code
+    local final_path
+    final_path=$(realpath "$yaml_file")
+
+    # 3. Transformação PascalCase (Formal)
+    local pascal_type=$(core_transform_string "$var_name" "HuMan")
+
+    local _final="${final_path:-ln $yaml_file}"
+    # 4. Output JO
+    jo status="$status" \
+       type="$pascal_type" \
+       label="$label" \
+       var="$var_name" \
+       path="$_final" \
+       message="$msg" | jq '.' >&2
+
+    unset LABEL
+    [[ "$status" == "OK" ]] && return 0 || return 1
+}
 tool_report_stack__analitical_jsonV1() {
 
     local current_stage="$1"
@@ -1512,15 +1706,17 @@ tool_stage_workflow() {
     local stages=("${@}")
     [[ ${#stages[@]} -eq 0 ]] && stages=("${TOOL_STAGES[@]}")
     local deepness=${#FUNCNAME[@]}
-    local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"         
-        
-
+    local client_script="$CLIENT_APP_DIR/$CLIENT_APP_SCRIPT_NAME"    
+    # No tool.sh (agnóstico)
+    local stage_visible_pattern="${CLIENT_APP_STAGE_VISIBLE_PATTERN:-.*provision.*|.*login.*|.*vault.*|.*image.*}"
+    ##### request stage flow - persistence planing            
+    
     indent_flow() {
         local deepness=$1
         # Cria uma string de espaços e trunca-a
         printf "%${deepness}s" ""
     }
-
+    ## __* functions are kind of private.
     __success_stage__handler() {
         local stage="$1"  
         local consoleLog="$2"
@@ -1530,38 +1726,22 @@ tool_stage_workflow() {
         if declare -f "$handler_function" > /dev/null; then 
             return 0   ## Means is client stage sucess is optional
         fi
-        require_locations RES_FOLDER || return 1        
+        require_locations res_folder || return 1        
         echo -n "$(indent_flow $deepnees)      " && LABEL="success handler:" require_single_script_function client_script "$client_handler_func"
         "$client_handler_func" "$stage" "$consoleLog"    
         return 0
-        echo "
-        ---------------------------------------
-        ✅ stage \"$stage\" $REQ_STATUS_SUCCESS"
-        # show link to handler
-        local _tool="${BASH_SOURCE[0]}"
-        if ! LABEL="$(indent_flow $deepnees)       handler:" require_single_script_function "_tool" "$service__func" ; then            
-            return 1
-        fi
-        return 0
-
-
-        if ! LABEL="$(indent_flow $deepnees)       optional \"$stage\" response review:" require_single_script_function client_script "$client_handler_func"; then    
-            return 0        
-        fi
-
-        "$client_handler_func" "$stage" "$data"        
     }
-    
+    ## __* functions are kind of private.
     __fail_stage__handler() {             
         local stage="$1"  
         local consoleLog="$2"
         local client_handler_func="on_${stage}_fail"
         local service__func="_${stage}__requirements"    
         require_files client_script || return 1
-        require_locations RES_FOLDER || return 1
+        require_locations res_folder || return 1
         echo "  
         ---------------------------------------
-        ❌ stage \"$stage\" $REQ_STATUS_STOP"
+        ❌ stage $(core_transform_string "$stage" HuMan) $REQ_STATUS_FAIL"
 
         local deepness=${#FUNCNAME[@]}
         echo "$(indent_flow $deepnees)       stack depth: $deepness levels"
@@ -1581,15 +1761,147 @@ tool_stage_workflow() {
 
         ## raioX vai dar elementos de navegacao no error. local fs/git
         local raioX=$(tool_report_stack__DRY3_analitical_json "$stage" "$consoleLog")
-        local res_file="$RES_FOLDER/$stage--fail--report-stack.json"     
+        local raioX_file="$res_folder/$(core_transform_string "$stage fail" "pascal")--report-stack.json"     
+        require_locations res_folder
+        #show_vars raioX_file 
         ## raioX é parte to que e necessario para criar o contexto exacto para alimentar a resolucao to fail
-        echo $raioX > $res_file
-        "$client_handler_func" "$stage" "$consoleLog" "$raioX" 
+        echo $raioX > $raioX_file
+
+        #### Hear i know handler exists, to handler fail of stage
+        ### Can existing fail handler, recover the * workflow ?
+        ### - yes if it produces result 0. that why default fail result is 1...
+        "$client_handler_func" \
+            "$stage" "$consoleLog" "$raioX" && return 0
+        ### Defaut fail result
+        return 1
     }
 
+   
+    __generate_workflow_req_id() { 
+        local microtime=$(date +%s%N | cut -c1-13) # Timestamp com milissegundos
+        local path_hash=$(echo "$PWD" | md5sum | cut -c1-8)
 
+        # 1. Detectar Profundidade do Layer (L)
+        local layer_depth=$(git_project_root_depth)    
+        ## F${deepness} will give has evidence of recursivity using tool_stage_workflow. witch is good if we can handle it without loop.    
+        ## let have fun, testing this litle behavior
+        echo "$(core_branch)/L${layer_depth}_F${deepness}--${path_hash}"
+    }    
+    
+    ### vitor need to keep track of :groups permition to inner projects using .gitignore && core_steward_list
+    __steward__project_permissions_refresh() {
+         # Define o grupo 2500 como dono do grupo em todo o projeto
+        local proj_root_dir=$(git_project_root)
+        
+        # 1. Definição de Identidade (Host vs Steward)
+        local owner="${CLIENT_APP_UID_OWNER:-1000}"
+        local group="${CLIENT_APP_GID:-2500}"
+        local file_own="${owner}:${group}"
+
+        show_vars proj_root_dir file_own
+
+        sudo chown -R "$file_own" $proj_root_dir
+        # Garante que pastas são atravessáveis (7) e ficheiros legíveis (5/4) pelo grupo
+        sudo find $proj_root_dir -type d -exec chmod 750 {} +
+        sudo find $proj_root_dir -type f -exec chmod 640 {} +
+        # Aplica o grupo steward (2500) mesmo nas pastas de "fix" na RAM ou SSD
+        ## group 
+        sudo chown -R "$file_own" $proj_root_dir/devops/opencode/share/
+        sudo chmod -R 770 $proj_root_dir/devops/opencode/share/
+
+        sudo chown -R "$file_own" $proj_root_dir/devops/authentik/blueprints/
+        sudo chmod -R 750 $proj_root_dir/devops/authentik/blueprints/
+
+        sudo chown -R "$file_own" $proj_root_dir/devops/authentik/blueprints/home2500_${CLIENT_APP_NAME}*
+        sudo chmod -R 750 $proj_root_dir/devops/authentik/blueprints/home2500_${CLIENT_APP_NAME}*
+        core_steward_list
+    }
+
+     # output folder: fs mem: rw: lets use speed mem. lets fly
+    local res_folder="$CLIENT_APP_MEM_DIR/share/$(__generate_workflow_req_id)" ## this became a requirement, lets give use the mem
+    # Owner: Vitor (1000) | Group: Steward (2500)
+    local owner=${CLIENT_APP_UID_OWNER:-$USER}
+    local group=${CLIENT_APP_GID:-:owner}
+    chown "$owner:$group" "$res_folder" 2>/dev/null
+    chmod 770 "$res_folder" 2>/dev/null
+    # --- [ FIX: Atomic Directory Provisioning ] ---
+    if ! [[ -d "$res_folder" ]]; then
+        mkdir -p "$res_folder" 2>/dev/null || {
+            core_log_error "❌ Falha crítica: Não foi possível criar o diretório $res_folder"
+            return 1
+        }
+        
+    fi
+
+    # Validação final de sanidade: o Steward consegue escrever aqui?
+    [[ -w "$res_folder" ]] || {
+        core_log_error "❌ Permissão Negada: $res_folder não é gravável pelo Steward."
+        return 1
+    }
+    # --- [ FIX: Atomic Directory Provisioning ] ---
+    if ! [[ -d "$res_folder" ]]; then
+        mkdir -p "$res_folder" 2>/dev/null || {
+            core_log_error "❌ Falha crítica: Não foi possível criar o diretório $res_folder"
+            return 1
+        }
+        # Owner: Vitor (1000) | Group: Steward (2500)
+        chown 1000:2500 "$res_folder" 2>/dev/null
+        chmod 700 "$res_folder" 2>/dev/null
+    fi
+
+    # Validação final de sanidade: o Steward consegue escrever aqui?
+    [[ -w "$res_folder" ]] || {
+        core_log_error "❌ Permissão Negada: $res_folder não é gravável pelo Steward."
+        return 1
+    }
+    # ----------------------------------------------
+ 
+    __file_inspect_link() {
+        local file_path="$1"
+        local name="$(basename "$file_path")"
+        
+        local owner="${CLIENT_APP_UID_OWNER:-1000}"
+        local group="${CLIENT_APP_GID:-2500}"
+        
+        # 1. Caminho Absoluto para o Sistema (Garante que o mkdir/ln funciona)
+        # Usamos o PROJECT_ROOT para ancorar o DEVOPS_DIR independentemente do source
+        local root=$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")
+        local absolute_target_dir="${root}/devops/opencode/share"
+        
+        mkdir -p "$absolute_target_dir" 2>/dev/null
+
+        # 2. Definir o path do Link (Onde o link vai morar no SSD)
+        # Mantemos a tua estrutura de nomeação
+        local inspect_link_path="${absolute_target_dir}/${name}"
+
+        # 3. Calcular o caminho RELATIVO do ficheiro real em relação ao link
+        # Isso permite que o link funcione mesmo se moveres a pasta do projeto
+        local relative_to_file
+        relative_to_file=$(realpath --relative-to="$absolute_target_dir" "$file_path")
+
+        # [DEBUG] Mostra o que vai acontecer
+        inspect_link="$inspect_link_path"
+        #show_vars inspect_link relative_to_file
+
+        # 4. Operações de Sistema
+        if [[ -f "$file_path" ]]; then
+            # Permissões no ficheiro real
+            chown "${owner}:${group}" "$file_path" 2>/dev/null
+            chmod 644 "$file_path" 2>/dev/null
+            
+            # O truque do ln -sf:
+            # ln -sf "ALVO_RELATIVO" "CAMINHO_ABSOLUTO_DO_LINK"
+            ln -sf "$relative_to_file" "$inspect_link_path"
+            
+            chown -h "${owner}:${group}" "$inspect_link_path" 2>/dev/null
+            
+            # Exporta para o log
+            echo "$inspect_link_path"
+        fi
+    }
     # 1. Requisitos Base (Impedem qualquer execução se falharem)
-    _base__requirements() {        
+    _base__requirements() {  
+        ### client INTERFACE      
         tool_prepare__env_vars  || return 1
         app_required_env_vars || return 1
         require_vars CLIENT_APP_CONTAINER_NAME || return 1
@@ -1599,45 +1911,106 @@ tool_stage_workflow() {
     _script__requirements() {        
         app_script_requirements || return 1
     }
-    app_script_requirements || return 1
+    app_script_requirements 2> /dev/null || return 1
+
+    ## workflow stage to unlock system 
+    _user_login__requirements() {               
+        ## @todo Use bot:developer role for app provisioning                           
+        ## use can vault_request_*_token on vault_login_fail() fn handler
+        local policy="${CLIENT_APP_USER_ROLE:-developer}-policy"
+        (          
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1
+            PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2> /dev/null || return 1
+
+            #show_vars VAULT_TOKEN CLIENT_APP_USER_ROLE
+            #vault_validate_token $VAULT_TOKEN $policy || return 1
+            ak_api_token_restore $AUTHENTIK_API_TOKEN || return 1
+        )  
+
+        return 0 
+    }
+
+    ## workflow stage to unlock system resources
+    _owner_login__requirements() {                           
+        local policy="steward-policy"
+        (          
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1
+            PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2> /dev/null || return 1
+            #show_vars VAULT_TOKEN CLIENT_APP_USER_ROLE
+            vault_validate_token $VAULT_TOKEN $policy || return 1
+            ak_api_token_validate $AUTHENTIK_API_TOKEN $OWNER || return 1
+        ) 
+        return 0
+    }
+
     #-------------------------------------------------------------------------------
     # @function _provision_user__requirements
-    # @description Creates Authentik user from template before vault login
+    # @description Creates OS user && Authentik user from template before vault login
     #-------------------------------------------------------------------------------
+
     _provision_user__requirements() {
-        # Skip if APP_USER_NAME not set
-        [[ -z "$CLIENT_APP_USER_NAME" ]] && return 0
-        
-        require_vars AUTHENTIK_DIR || return 1
-        
-        local ROLE="${CLIENT_APP_USER_ROLE:-developer}"
-        local NAME="$CLIENT_APP_USER_NAME"
-        local EMAIL="${CLIENT_APP_USER_EMAIL:-${NAME}@home2500.local}"
-        
-        local TPL_DIR="$AUTHENTIK_DIR/app/blueprints"
-        local TPL_FILE="$TPL_DIR/user--ROLE--NAME.yaml"
-        local OUTPUT_FILE="$AUTHENTIK_DIR/blueprints/home2500--${ROLE}--${NAME}.yaml"
-        
-        require_files TPL_FILE || return 1
-        
-        echo "👤 Creating Authentik user: $NAME (role: $ROLE)..." >&2
-        
-        blue_template_vars "$TPL_FILE" "$OUTPUT_FILE" \
-            "ROLE=$ROLE" "NAME=$NAME" "EMAIL=$EMAIL" || return 1
-        
-        blue_apply "$OUTPUT_FILE" || return 1
-        
-        echo "✅ User $NAME created with role $ROLE" >&2
-    }
+        # 1. Early Exit: Salta se não houver utilizador definido
+        [[ -z "$CLIENT_APP_USER" ]] && return 0
 
-    _vault_login__requirements() {       
-        (
-            ## @todo Use bot:developer role for app provisioning
-            vault_validate_token || return 1        
-        ) || return 1
-        ## use can vault_request_*_token on vault_login_fail() fn handler
-    }
+        # 1. Validação de Requisitos Core
+        require_vars \
+            CLIENT_APP_USER \
+            CLIENT_APP_UID \
+            CLIENT_APP_GID \
+            AUTHENTIK_DIR || return 1
 
+        # Tambem e requirements, Se nao existir o template, imagina quem vais fazer.
+        # Faz um ticket com pedido. Avalia o caso do APP_USER e o role que vais atribuir.
+        # As ideia sao boas quando sao construtivas,
+        local USER_TPL_FILE="$AUTHENTIK_DIR/app/blueprints/APP_USER--ROLE.yaml"
+        LABEL="<<< USER_TPL_FILE" \
+            require_single_yaml_file "USER_TPL_FILE" || return 1
+        
+
+        # 3. Preparação de Identidade (PascalCase|HuMan para o Email)
+        local APP_NAME="$CLIENT_APP_NAME"
+        local APP_USER="$CLIENT_APP_USER"
+        local APP_USER_ROLE="${CLIENT_APP_USER_ROLE:-developer}"
+        local _name="$(core_transform_string "${CLIENT_APP_USER}_CORE_$CLIENT_APP_UID" "HuMan")"
+        local APP_USER_NAME="${CLIENT_APP_USER_NAME:-$_name}"
+        local APP_USER_PATH="home2500/home-developers"
+        # 1. Detectar Profundidade do Layer (L)
+        local APP_LAYER_DEPTH="L$(git_project_root_depth)"
+        local output_file="$AUTHENTIK_DIR/blueprints/home2500_{{$APP_NAME}}--L{{APP_LAYER_DEETH}--{$APP_USER}--{$APP_USER_ROLE}.yaml"
+
+        
+        
+        local email_prefix=$(core_transform_string "${APP_USER_NAME}" "HuMan" | tr -d ' ')
+        local APP_USER_EMAIL="${CLIENT_APP_USER_EMAIL:-${email_prefix}@home2500.local}"
+
+        # 1. Detectar Profundidade do Layer (L)
+        local layer_depth=$(git_project_root_depth)        
+        local output_file="$AUTHENTIK_DIR/blueprints/home2500_${APP_NAME}--${APP_LAYER_DEPTH}--${APP_USER}--${APP_USER_ROLE}.yaml"
+
+        # 5. Hidratação (Mantendo explicitamente os APP_*)
+        # Aqui o 'blue_template_vars' recebe os teus mappings originais
+        blue_template_vars "$USER_TPL_FILE" "$output_file" \
+            "APP_NAME=$APP_NAME" \
+            "APP_LAYER_DEPTH=$APP_LAYER_DEPTH" \
+            "APP_USER=$APP_USER" \
+            "APP_USER_ROLE=$APP_USER_ROLE" \
+            "APP_USER_NAME=$APP_USER_NAME" \
+            "APP_USER_EMAIL=$APP_USER_EMAIL" \
+            "APP_USER_PATH=$APP_USER_PATH" || return 1
+            
+        # 6. Criação do Portal de Inspeção (Symlink fixo)
+         # 6. Criar Portal de Inspeção (Symlink para o VS Code)         
+        local inspect_link=$(__file_inspect_link $output_file)
+        # Log do Ficheiro de Saída (Clicável no VS Code)
+        LABEL=">>> USER HYDRA" \
+            USER_HYDRA_FILE="$inspect_link" \
+            require_single_yaml_file "inspect_link" || return 1
+
+        # 7. Aplicação Final
+        blue_apply "$output_file" || return 1
+
+        return 0
+    }
     #-------------------------------------------------------------------------------
     # @function _provision_db__requirements
     # @description Garante que a Database exista e que as credenciais de ADMIN
@@ -1649,15 +2022,13 @@ tool_stage_workflow() {
         if ! require_vars CLIENT_APP_DB_NAME 2> /dev/null; then
             # Intenção: DB está desativada por omissão de variável.
             core_log_info "💡 Base de Dados: Desativada (Opcional)."
-            core_log_info "   Para ativar, define: CLIENT_APP_DB_NAME=\"$CLIENT_APP_NAME\""
+            core_log_info "   Para ativar, define: APP_DB_NAME=\"$CLIENT_APP_NAME\""
             core_log_info "   No ficheiro: $(core_resolve_file "$CLIENT_APP_ENV_FILE")"
             
             # Opcional: Injetar no teu futuro JSON analítico que este stage foi "SKIPPED_BY_DESIGN"
             return 0 
         fi
             
-        unset OIDC_ID
-        unset OIDC_SECRET
         (          
             PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1
             # 2. Check de existência (previne re-provisionamento desnecessário)
@@ -1698,7 +2069,13 @@ tool_stage_workflow() {
     #              (gerando-os se necessário) e mapeia-os para a memória.
     #-------------------------------------------------------------------------------
     _provision_oidc__requirements() {
-        [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" != "oidc"* ]] && return 0
+         if [[ "$CLIENT_APP_BLUE_TEMPLATE_MODULE" != "oidc"* ]] ; then
+            # Intenção: DB está desativada por omissão de variável.
+            core_log_info "💡 OIDC id secrets not need to template mode $CLIENT_APP_BLUE_TEMPLATE_MODULE."
+            
+            # Opcional: Injetar no teu futuro JSON analítico que este stage foi "SKIPPED_BY_DESIGN"
+            return 0 
+        fi        
 
         unset OIDC_ID
         unset OIDC_SECRET
@@ -1748,48 +2125,28 @@ tool_stage_workflow() {
         fi
         deploy_secrets || return 1
     }
-
-    _build_image__requirements() {
-        local compose_file=$CLIENT_APP_COMPOSE_FILE
-        local container_name=$CLIENT_APP_CONTAINER_NAME
-        
-        core_log_info "Verificando requisitos de build para: $container_name"
-
-        # 1. Extrair o nome da imagem definida no compose para este serviço usando yq
-        local image_tag=$(yq ".services.${container_name}.image" "$compose_file")
-        
-        # 2. Verificar se a imagem já existe no Docker local
-        if [[ "$(docker images -q "$image_tag" 2> /dev/null)" == "" ]]; then
-            core_log_warning "Imagem $image_tag não encontrada. Build necessário."
-            return 0
-        fi
-
-        # 3. Verificar se existe uma secção 'build' definida
-        local has_build=$(yq ".services.${container_name} | has(\"build\")" "$compose_file")
-        
-        if [ "$has_build" == "true" ]; then
-            # Aqui podes adicionar lógica de hash (md5sum) do Dockerfile 
-            # para decidir se o build é obrigatório por alteração de ficheiro
-            core_log_info "Serviço possui definição de build. Verificando frescura..."
-            return 0
-        fi
-
-        core_log_info "Requisitos satisfeitos. Imagem atualizada."
-        return 0 # Build não necessário
-    }
     
+    
+
     ## by how, from previous stages should be provisioned required secrets:
     ## provision_db handle db role user pass secrets
     ## provision_oidc handle client id secret 
     ## deploy_secrets handle extra client secrets. ex: REDIS_PASSWORD is mapper from authentik
-    _compose__requirements() {
+    _hydrate_compose__requirements() {
         echo "📦 Iniciando containers via Compose..."
         require_files CLIENT_APP_COMPOSE_FILE || return 1
-        
+        # 1. Validação do Steward UID
+        # 1. Validação de Pertença ao Grupo 2500 (stewards)
+        # Verificamos se o GID atual ou qualquer grupo secundário é o 2500
+        if ! id -G | grep -q "$APP_GID"; then
+            core_log_error "Permissão Negada: O utilizador $(id -un) não pertence ao grupo 2500 (stewards)."
+            core_log_warn "Executa 'newgrp ${APP_GROUPS:-$APP_GID}' ou verifica a tua sessão."
+            return 1
+        fi
         (
             PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1            
     
-            _auto_provision() {
+            __provision_compose_() {
                 require_vars CLIENT_APP_NAME || return 1
                 
                 echo -e "\n🔍 [COMPOSE] Scanning for missing variables in: **$CLIENT_APP_NAME**" >&2
@@ -1799,8 +2156,7 @@ tool_stage_workflow() {
                 missing_vars=$(tool_compose_list_missing_vars)
 
                 if [[ -z "$missing_vars" ]]; then
-                    echo "✅ Environment is saturated. No missing variables detected." >&2
-                    return 0
+                    echo "✅ Environment is saturated. No missing variables detected." >&2               
                 fi
 
                 # Convert space-separated string to array for reliable counting
@@ -1816,9 +2172,7 @@ tool_stage_workflow() {
                     PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var_name" 2>/dev/null
                     local value="${!var_name}"
                     
-                    #show_vars var_name 
-                    #show_vars $var_name
-                    #show_vars value
+                    # ok it seams - show_vars var_name $var_name value
 
                     if [[ ! -z "$value" ]]; then   
                         echo -e "\e[32mOK\e[0m (len: ${#value})" >&2
@@ -1837,75 +2191,183 @@ tool_stage_workflow() {
                 || return 1
 
                 echo "✨ Auto-provisioning synchronization complete!" >&2
-            }          
-            _auto_provision || return 1
+            }   
+            __provision_compose_ || return 1
 
             _gen_compose() {
                 LABEL="<<< COMPOSE TPL" require_single_yaml_file CLIENT_APP_COMPOSE_FILE || return 1
+                # check path && test map ok.    show_vars CLIENT_APP_COMPOSE_HYDRA_FILE
+                docker compose config > $CLIENT_APP_COMPOSE_HYDRA_FILE
+                chmod 644 "$CLIENT_APP_COMPOSE_HYDRA_FILE"
 
-                # Prepare "mem" entry to preview docker compose fullfill ${model_var}
-                local compose_res="$RES_FOLDER/$(basename $CLIENT_APP_COMPOSE_FILE)"                
-                docker compose config > $compose_res
-                chmod 644 "$compose_res"
-                LABEL=">>> COMPOSE" require_single_yaml_file compose_res || return 1
+                local inspect_link=$(__file_inspect_link $output_file)
+                # Log do Ficheiro de Saída (Clicável no VS Code)
+                LABEL=">>> COMPOSE HYDRA_FILE" \
+                    USER_HYDRA_FILE="$inspect_link" \
+                    require_single_yaml_file "inspect_link" || return 1
+
+                ## make available file__file_inspect_link
+            
+                local compose_hydra_file_link=$(__file_inspect_link $CLIENT_APP_COMPOSE_HYDRA_FILE)                
+                LABEL=">>> COMPOSE HYDRA_FILE" require_single_yaml_file compose_hydra_file_link || return 1
             }
             _gen_compose || return 1
 
         ) || return 1
         return 0
     }
-
-    # 2. Camada Interna (Serviço a responder no Docker Network)
-    _running__requirements___fast() {
-        local container="$CLIENT_APP_CONTAINER_NAME"
+    _hydrate_compose__requirements() {
+        local STACK_NAME="${CLIENT_APP_NAME:-unknown}"
+        local REPORT_DIR="/run/user/1000/home2500/opencode/share/fix-files-oidc/L2_$(date +%s)"
         
-        # 1. Verificar se está a correr
-        if [[ $(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null) != "true" ]]; then
-            core_log_error "Contentor $container não está em execução."
+        echo "📦 Iniciando containers via Compose..."
+        require_files CLIENT_APP_COMPOSE_FILE || return 1
+
+        # 1. Validação de Grupo (Steward 2500)
+        if ! id -G | grep -q "$APP_GID"; then
+            core_log_error "Permissão Negada: $(id -un) não é do grupo 2500."
             return 1
         fi
 
-        # 2. Tentar obter o IP com retries (Race Condition protection)
-        local ip=""
-        for i in {1..5}; do
-            ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container")
-            [[ -n "$ip" ]] && break
-            sleep 1
-        done
+        # --- FUNÇÃO DE SINALIZAÇÃO (Para o OpenCode ler) ---
+        _signal_failure() {
+            local stage="$1"
+            local reason="$2"
+            mkdir -p "$REPORT_DIR"
+            echo "{\"stage\": \"$stage\", \"stack\": \"$STACK_NAME\", \"error\": \"$reason\"}" > "$REPORT_DIR/${stage}Fail--report-stack.json"
+            core_log_error "🚨 Sinalizador de falha criado em: $REPORT_DIR"
+        }
 
-        if [[ -z "$ip" ]]; then
-            core_log_error "IP não atribuído ao contentor $container."
+        # Usamos { ... } em vez de ( ... ) para evitar subshell e manter as variáveis
+        {
+            # 2. Resgate do Token do Vault
+            if ! VAULT_TOKEN=$(PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2>/dev/null); then
+                _signal_failure "VaultAuth" "Could not retrieve VAULT_TOKEN from MEM"
+                return 1
+            fi
+            export VAULT_TOKEN
+
+            __provision_compose_() {
+                local missing_vars=$(tool_compose_list_missing_vars)
+                local vars_array=($missing_vars)
+                
+                [[ -z "$missing_vars" ]] && return 0
+
+                for var_name in "${vars_array[@]}"; do
+                    # Tenta puxar do MEM
+                    if ! PROVIDER_SELECT="mem" core_secret_service_get "$CLIENT_APP_NAME/$var_name" >/dev/null 2>&1; then
+                        _signal_failure "DeploySecrets" "Variable $var_name missing in MEM"
+                        return 1
+                    fi
+                    
+                    # Validação de valor real (indirect expansion)
+                    if [[ -z "${!var_name}" ]]; then
+                        _signal_failure "DeploySecrets" "Variable $var_name is empty after pull"
+                        return 1
+                    fi
+                done
+
+                core_secret_export2_env_vars "$CLIENT_APP_NAME/$(basename $CLIENT_APP_SECRET_FILE)" "${vars_array[@]}" || return 1
+            }
+            __provision_compose_ || return 1
+
+            _gen_compose() {
+                # Gera o config e valida se o output não está vazio
+                if ! docker compose config > "$CLIENT_APP_COMPOSE_HYDRA_FILE" 2>/dev/null; then
+                    _signal_failure "HydrateCompose" "Docker compose config failed. Check syntax."
+                    return 1
+                fi
+                
+                chmod 644 "$CLIENT_APP_COMPOSE_HYDRA_FILE"
+                core_log_success "Hydra File: $(__file_inspect_link $CLIENT_APP_COMPOSE_HYDRA_FILE)"
+            }
+            _gen_compose || return 1
+
+        } || {
+            # Se qualquer parte do bloco { } falhar
             return 1
-        fi
-        
+        }
+
         return 0
     }
-    _running__requirements() {    
-        _running__requirements___fast || return 1
-        # Ensure dependencies are met
-        ## app_require_export_container_ip_port || return 1     
+    _build_image__requirements() {
+        local compose_file=$CLIENT_APP_COMPOSE_FILE
+        local container_name=$CLIENT_APP_CONTAINER_NAME
+        
+        core_log_info "Verificando requisitos de build para: $container_name"
 
-        local url=""
-        local max_retries=${CLIENT_APP_WAIT_RETRY:-2}
-        local attempt=0
+        (
+            PROVIDER_SELECT="mem" core_secret_service_get "vault/VAULT_TOKEN" 2> /dev/null || return 1                       
 
-        # Loop until the URL is successfully retrieved or retries run out
-        while [[ -z "$url" && $attempt -lt $max_retries ]]; do
-            url=$(core__container_name__url "$CLIENT_APP_CONTAINER_NAME")
-            
-            if [[ -z "$url" ]]; then
-                ((attempt++))
-                sleep 2
+            if ! require_files CLIENT_APP_COMPOSE_HYDRA_FILE; then
+                core_log_info "falta o ficheiro nao foi criado no stage compose"
+                return 1
             fi
-        done
 
-        # Final check: if we have a URL, wait for the HTTP service to be ready
-        if [[ -n "$url" ]]; then
-            wait4_http_url_ready "$url"
-        else
-            echo "Error: Could not resolve URL for $CLIENT_APP_CONTAINER_NAME" >&2
+            # 1. Extrair o nome da imagem definida no compose para este serviço usando yq
+            local image_tag=$(yq ".services.${container_name}.image" "$CLIENT_APP_COMPOSE_HYDRA_FILE")
+            
+            # 2. Verificar se a imagem já existe no Docker local
+            if [[ "$(docker images -q "$image_tag" 2> /dev/null)" == "" ]]; then
+                core_log_warn "Imagem $image_tag não encontrada. Build necessário."
+                return 1
+            fi
+
+            # 3. Verificar se existe uma secção 'build' definida
+            local has_build=$(yq ".services.${container_name} | has(\"build\")" "$CLIENT_APP_COMPOSE_HYDRA_FILE")
+            
+            # Sugestão para o teu @todo dentro da função:
+            if [ "$has_build" == "true" ]; then
+                local context_path=$(yq ".services.${container_name}.build.context" "$CLIENT_APP_COMPOSE_HYDRA_FILE")
+                local dockerfile_name=$(yq ".services.${container_name}.build.dockerfile // \"Dockerfile\"" "$CLIENT_APP_COMPOSE_HYDRA_FILE")
+                
+                # Gerar hash do Dockerfile + Contexto (apenas ficheiros críticos)
+                local current_hash=$(find "$context_path" -maxdepth 2 -type f -not -path '*/.*' -exec md5sum {} + | md5sum | cut -d" " -f1)
+                
+                # Comparar com um hash guardado em $CLIENT_APP_MEM_DIR
+                local hash_file="$res_folder/.${container_name}.build.hash"
+                
+                if [[ ! -f "$hash_file" ]] || [[ "$(cat "$hash_file")" != "$current_hash" ]]; then
+                    core_log_info "Alteração detectada no contexto de build ($container_name)."
+                    echo "$current_hash" > "$hash_file"
+                    return 1 # Força o build
+                fi
+            fi
+        )
+
+        core_log_info "Requisitos satisfeitos. Imagem atualizada."
+        return 0 # Build não necessário
+    }        
+
+    # 2. Camada Interna (Serviço a responder no Docker Network)
+    _running__requirements() {
+        # 1. Valida se as variáveis críticas do cliente existem
+        if ! require_vars CLIENT_APP_CONTAINER_NAME INTERNAL_DOMAIN; then
+            echo "[ERROR] Missing CLIENT_APP_CONTAINER_NAME or INTERNAL_DOMAIN in client env."
             return 1
         fi
+
+        echo " $(indent_flow $deepness) checking container: $CLIENT_APP_CONTAINER_NAME on $INTERNAL_DOMAIN"
+
+        # 2. Verifica se o container está a correr
+        local container_status
+        container_status=$(docker inspect -f '{{.State.Running}}' "$APP_CONTAINER_NAME" 2>/dev/null)
+
+        if [[ "$container_status" != "true" ]]; then
+            echo "[ERROR] Container $APP_CONTAINER_NAME is NOT running."
+            return 1
+        fi
+
+        # 3. Verifica se o container está na rede correta
+        local on_network
+        on_network=$(docker inspect "$APP_CONTAINER_NAME" -f "{{json .NetworkSettings.Networks}}" | grep -q "$INTERNAL_DOMAIN" && echo "true" || echo "false")
+
+        if [[ "$on_network" != "true" ]]; then
+            echo "[ERROR] Container $APP_CONTAINER_NAME is NOT attached to network $INTERNAL_DOMAIN."
+            return 1
+        fi
+
+        return 0
     }
     _name_register__requirements() {
         # Tenta resolver NS ou forçar atualização       
@@ -1933,7 +2395,6 @@ tool_stage_workflow() {
         ak_api_token_validate || return 1
         
         wait4_http_url_ready $AUTHENTIK_INTERNAL_URL || return 1
-        #require_http_status_ok 
         return 0
     }
 
@@ -1978,7 +2439,7 @@ tool_stage_workflow() {
                 fi
             done
             
-            local blue_file="$RES_FOLDER/$(basename $CLIENT_APP_BLUE_APPLY)"
+            local blue_file="$res_folder/$(basename $CLIENT_APP_BLUE_APPLY)"
 
             blue_template_vars \
                 $CLIENT_APP_BLUE_APPLY_TPL \
@@ -2088,7 +2549,6 @@ tool_stage_workflow() {
         
         local url="https://$CLIENT_APP_NS"
         wait4_http_url_ready $url || return 1
-        #require_http_status_ok url
     }
     
 
@@ -2116,76 +2576,86 @@ tool_stage_workflow() {
         on_complete || return 0
     }
 
-    ##### request stage flow - persistence planing
-    git_branch() {
-        local branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "no-branch")
-        echo "$branch"
-    }
-    generate_workflow_req_id() {        
-        local microtime=$(date +%s%N | cut -c1-13) # Timestamp com milissegundos
-        local path_hash=$(echo "$PWD" | md5sum | cut -c1-8)
-        
-        # Ex: fix-files-oidc_1712051234_a7b2c3d
-        #echo "$(sanitize_path_name "$branch")_${microtime}_${path_hash}"
-        echo "${path_hash}"
-    }
+    
 
-    #tool_report_stack__DRY2_analitical_json "TESTE" "HAHA"
-    # --- Loop de ExecuMissing important clição dos Stages ---
+    #tool_report_stack__DRY3_analitical_json "Estagio Teste" "resultado=ahaha"
+    # --- Loop de Execucao - Missing important clição dos Stages ---
     local handler_console_result
     local handler_function   
-    local branch="$(git_branch)"
-    require_vars branch
-    local req_id=$(generate_workflow_req_id) # git branch + a $(sanitize_path_name $unique)     
-    local SPOT_FOLDER="$CLIENT_APP_MEM_DIR/$branch/$req_id"
-
-    CLIENT_APP_MEM_DIR
-    local RES_FOLDER="$MEM_ROOT_DIR/$SPOT_FOLDER"
-    ! require_locations RES_FOLDER 2> /dev/null && {
-        mkdir -p "$RES_FOLDER"
-        chmod 700 "$RES_FOLDER"
-    }
-
     local res_file
     echo -n " $(indent_flow $deepness) workflow >> "
-    echo "$SPOT_FOLDER"
+    echo "$(core_transform_string "$CLIENT_APP_NAME") $spot_folder"
     for stage in "${stages[@]}"; do     
         handler_function="_${stage}__requirements"                
                 
         local _tool="${BASH_SOURCE[0]}"
+        echo ""
         LABEL="$(indent_flow $deepness) $(to_human_pascal ${stage}) handler:" require_single_script_function "_tool" "$handler_function"
 
         # Verifica se a função de stage existe antes de chamar
         if declare -f "$handler_function" > /dev/null; then
 
-            ## ficou bom  :))))) DEBUG=TRUE require_locations RES_FOLDER
-            local spot_file="$SPOT_FOLDER/stage-$stage.log"            
-            res_file="$MEM_ROOT_DIR/$spot_file"                                 
-            if ! "$handler_function"  > $res_file 2>&1; then
-                ## ERROR/ FAIL STAGE
-                handler_console_result=$(cat $res_file)
-                if ! __fail_stage__handler "$stage" "$handler_console_result"; then
-                    echo "
-                    -------------------- Recover"
-                    continue
-                else
-                    echo "
-                -------------------- Error"
+            ## ficou bom  :))))) DEBUG=TRUE require_locations res_folder
+            local spot_file="stage-$stage.log"            
+            log_file="$res_folder/$spot_file"   
+            
+            # make handler_function call respect interactive state pattern $stage_visible_pattern
+
+            # Verifica se o stage atual deve ser interativo
+            if [[ "_$stage" =~ ^_($stage_visible_pattern)$ ]]; then
+                # Executa direto no terminal para permitir input (KeePass/Pass)
+                echo -n "     $(indent_flow $deepness) >>> Interactivo "
+                if ! "$handler_function"; then
+                
+                    if ! __fail_stage__handler "$stage" "$handler_console_result"; then
+                        echo "
+                        -------------------- Recover"
+                        continue
+                    else
+                        echo "
+                        -------------------- Error"
+                        return 1
+                    fi    
                     return 1
-                fi                
+                fi
             else
-                ## SUCCESS STAGE
-                handler_console_result=$(cat $res_file)
-                __success_stage__handler "$stage" "$handler_console_result"   
-                continue
-            fi                        
+                # Executa em background/log para stages silenciosos                             
+                echo -n "     $(indent_flow $deepness) >>> background/log $log_file"
+                if ! "$handler_function"  > $log_file 2>&1; then
+                    ## ERROR/ FAIL STAGE
+                    handler_console_result=$(cat $log_file)
+                    if ! __fail_stage__handler "$stage" "$handler_console_result"; then
+                        echo "
+                        -------------------- Recover"
+                        continue
+                    else
+                        echo "
+                        -------------------- Error"
+                        return 1
+                    fi                
+                else
+                    ## SUCCESS STAGE
+                    handler_console_result=$(cat $log_file)
+                    __success_stage__handler "$stage" "$handler_console_result"   
+                    continue
+                fi       
+            fi                 
         else
+            # core analist + developer responsability 
+            # Maintain Project handling stages.
+            # Gather requirements to fullfill, the mission of the CORE
+            # implement the missing stage handler. Use same code patterns. 
             __missing__stage__handler
+            ## On missing__stage_handler, will trigger tool stage creation requirements research tools to deploy. 
+            ## Remember our client's are service Apps with diferent types of Provivion
+
             return 1  
         fi
     done
-    echo "$(indent_flow $deepness) << $SPOT_FOLDER"
-    ___on_complete__ "${stages[@]}"
+    echo "$(indent_flow $deepness) << $spot_folder"
+    local STAGES_STR="${stages[*]}"
+    echo "$(core_log_info "Workflow stages completed: ${*}")"
+    ___on_complete__ ""
     return 0
 }
 app_oidc_validate() {
@@ -2202,7 +2672,7 @@ app_oidc_validate() {
 app_up() {
     # 1. Pré-requisitos e Docker
     echo "📦 Iniciando containers via Compose..."
-    tool_stage_workflow "deploy_secrets" "compose" || return 1  
+    tool_stage_workflow "deploy_secrets" "hydrate_compose" || return 1  
     (
         
         if DEBUG=false require_files CLIENT_APP_SECRET_FILE; then
@@ -2257,12 +2727,16 @@ app_up() {
 }
 app_down() {
     (
+
         #docker compose down --remove-orphans
-        if DEBUG=false require_files CLIENT_APP_SECRET_FILE; then
+        if require_files CLIENT_APP_SECRET_FILE; then
             env $(grep -v '^#' $CLIENT_APP_SECRET_FILE | xargs) docker compose -f "$CLIENT_APP_COMPOSE_FILE" down --remove-orphans || return 1
         else            
             docker compose -f "$CLIENT_APP_COMPOSE_FILE" down --remove-orphans || return 1            
         fi    
+        require_locations CLIENT_APP_MEM_DIR && \
+            rm -rf $CLIENT_APP_MEM_DIR
+
         
     ) || return 1
 }
@@ -2367,7 +2841,16 @@ if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     # Opcional: só mostra a stack se estiver em modo debug
     [[ "$DEBUG" == "true" ]] && stack_trace
                 
-    tool_stage_workflow 
+    tool_stage_workflow \
+        "script" \
+        "owner_login" \
+        "provision_user" \
+        "provision_db" \
+        "provision_oidc" \
+        "provision_secrets" || return 1
+    tool_stage_workflow \
+        "user_login" \
+        "hydrate_compose" || return 1
     
     # Camada de Interatividade para o Vault
     if [[ "$TOOL_SKIP_INTERACTION" != "true" ]]; then

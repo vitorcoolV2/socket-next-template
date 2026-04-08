@@ -32,10 +32,9 @@ DEBUG=false require_vars "PUBLIC_SERVICES" "DOMAIN" "INTERNAL_DOMAIN"
 
 ## hard coded 4 now
 export PIHOLE_CONTAINER_NAME="pihole"
-export PIHOLE_DNS_IP="$(detect_active_ipv4)" ### NOT USED ANY MORE :) (PIHLO) "172.28.0.2"
+export PIHOLE_DNS_IP="$(detect_active__ipv4)" ### NOT USED ANY MORE :) (PIHLO) "172.28.0.2"
 export PIHOLE_URL="http://$PIHOLE_DNS_IP:8080"
 export PIHOLE_SPARK_DNS=("$PIHOLE_DNS_IP" "1.1.1.1" "8.8.8.8")
-
 
 DEBUG=false require_vars \
     "PUBLIC_SERVICES" "DOMAIN" "INTERNAL_DOMAIN" \
@@ -324,8 +323,8 @@ ph_api(){
         }
         _dns__expected_records_() {
             local resolver_name="$PIHOLE_CONTAINER_NAME.$INTERNAL_DOMAIN"
-            local resolver_ipv4="$(detect_active_ipv4)" 
-            local resolver_ipv6="$(detect_active_ipv6)" 
+            local resolver_ipv4="$(detect_active__ipv4)" 
+            local resolver_ipv6="$(detect_active__ipv6)" 
             # Combine the Public Proxy-based records and the Direct Internal container records
             jq -n \
                 --argjson public "$(core_desired_domain_names_json | jq -c .)" \
@@ -406,8 +405,8 @@ ph_api(){
         _dns__sync_() {        
             local expected_json=$(_dns__expected_records_)
             local asis_json=$(_dns__get_records_)
-            local ipv4_host=$(detect_active_ipv4)
-            local ipv6_host="$(detect_active_ipv6)"
+            local ipv4_host=$(detect_active__ipv4)
+            local ipv6_host="$(detect_active__ipv6)"
             
             # --- 1. Cálculo de Diferenças (Lógica Preservada e Eficiente) ---
             
@@ -675,10 +674,9 @@ ph() {
                 return 1
             fi
         }        
-
+        
         DEBUG=false require_containers_ready PIHOLE_CONTAINER_NAME || return 1
         #inst__api_ auth || return 2
-
         ##### OS INTEGRATION
         local cur_resolvers=($(os_resolvers get))
         if [[ ${#cur_resolvers[@]} -eq 1 ]] && [[  "${cur_resolvers[0]}" == "$PIHOLE_DNS_IP" ]] ; then
@@ -707,6 +705,7 @@ ph() {
 
         # 4. Check da API do Pi-hole (ph api auth)
         local api_error
+      
         # Capturamos a saída e verificamos o exit code simultaneamente
         if api_error=$(ph api auth 2>&1); then
             echo "✔ API: Authenticated" >&2

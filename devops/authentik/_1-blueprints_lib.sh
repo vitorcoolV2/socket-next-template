@@ -624,14 +624,20 @@ blue_delete() {
 }
 blue_apply() {
     require_locations AUTHENTIK_BLUE_DIR || return 1
-    local _file="$1"
+    local _raw_file="$1"
+    local blue_file
+    blue_file=$(realpath "$_raw_file" 2>/dev/null)
+    if [[ ! -f "$blue_file" ]]; then
+        core_log_error "blue_apply: Artefacto não encontrado: $_raw_file (Resolvido para: ${blue_file:-VAZIO})"
+        return 1
+    fi    
     local _enabled="${2:-true}"
-    local blue_dir_file="$AUTHENTIK_BLUE_DIR/$(basename "$_file")"
-    local _file_cli_relative=$(core_relative_path2 $_file)
-    require_files _file || return 1
+    local blue_dir_file="$AUTHENTIK_BLUE_DIR/$(basename "$blue_file")"
+    local _file_cli_relative=$(core_relative_path2 $blue_file)
+    
 
     (                
-        #require_files _file || return 1
+        
         cd $(realpath $AUTHENTIK_BLUE_DIR)        
         local entry 
         if entry=$(blue_file_valid "$blue_dir_file"); then            
@@ -842,19 +848,19 @@ if [[ ! -t 1 && ! -t 2 ]]; then
     # Podemos pular comandos visuais pesados como o stack_trace()
     BLUE_SKIP_INTERACTION=true
 fi
-echo "BLUE_SKIP_INTERACTION=$BLUE_SKIP_INTERACTION"
+#echo "BLUE_SKIP_INTERACTION=$BLUE_SKIP_INTERACTION"
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     # Opcional: Inicia core_load_requirements semnpre que em script esteja em mode source
     blue_load_requirements
 
     if [[ "$BLUE_SKIP_INTERACTION" != "true" ]]; then
-        ak_login
+        #ak_login
         
 
         # Sugestão de comandos após o source bem sucedido
         echo -e "\n📦 Authentik BLUE module loaded. client available commands:"
         echo -e "   \e[1;34mblue_<tab>\e[0m to list functions"
-        blue_fn_catalog
+        #blue_fn_catalog
         #list_functions "${BASH_SOURCE[0]}" "_blue_*";     
         #list_functions "${BASH_SOURCE[0]}" "blue_*";     
     else

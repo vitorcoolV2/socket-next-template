@@ -203,6 +203,7 @@ ak_wait4_instance() {
 }
 
 ak_api_token_validate() {
+    local user_name="$1"
     require_vars AUTHENTIK_INTERNAL_URL AUTHENTIK_CONTAINER_NAME || return 1
     
     if ! require_containers_ready "AUTHENTIK_CONTAINER_NAME"; then
@@ -280,6 +281,85 @@ ak_api_token_validate() {
         }
 
         # Executa a cadeia de sub-funções
+        _token__eval_me
+    )
+}
+ak_api_token_validate() {
+    local AUTHENTIK_API_TOKEN="$AUTHENTIK_API_TOKEN"
+    local target_user="$2" # Opcional: Se definido, o token TEM de pertencer a este user
+    require_vars AUTHENTIK_INTERNAL_URL AUTHENTIK_CONTAINER_NAME || return 1
+    
+    if ! require_containers_ready "AUTHENTIK_CONTAINER_NAME"; then
+        echo "❌ [AUTHENTIK] Erro: Instancia não está a correr." >&2
+        return 1
+    fi
+        
+    (        
+        PROVIDER_SELECT="mem" core_secret_service_get "authentik/AUTHENTIK_API_TOKEN" 2>/dev/null
+        
+        [[ -z "$AUTHENTIK_API_TOKEN" ]] && { echo "[AUTHENTIK] Erro: Token não fornecido." >&2; return 1; }
+        
+        local url="$AUTHENTIK_INTERNAL_URL/api/v3/core/users/me/"
+        # echo "🔍 Validando conta Authentik via $url..." >&2
+
+        # --- Sub-função 1: Fetch JSON ---
+        _token__authentik_me_json() {
+            local response
+            response=$(curl -k -s -L -H "Authorization: Bearer $AUTHENTIK_API_TOKEN" \
+                -H "Accept: application/json" \
+                --connect-timeout 5 "$url")
+
+            [[ -z "$response" ]] && return 1
+            
+            # Valida se a resposta é um erro de permissão/token
+            if echo "$response" | jq -e '.detail' >/dev/null 2>&1; then
+                local detail=$(echo "$response" | jq -r '.detail')
+                echo "⚠️ [AUTHENTIK] API: $detail" >&2
+                return 1
+            fi
+            echo "$response"
+        }
+
+        # --- Sub-função 2: Eval e Validação Strict ---
+        _token__eval_me() {
+            local me
+            me=$(_token__authentik_me_json) || return 1
+      
+            # Extração Atómica via JQ
+            local vars_to_eval
+            vars_to_eval=$(echo "$me" | jq -r '
+                .user | select(. != null) |
+                "api_username=" + (.username|@sh),
+                "is_active=" + (.is_active|tostring),
+                "is_superuser=" + (.is_superuser|tostring),
+                "api_email=" + (.email|@sh)
+            ' 2>/dev/null)
+
+            [[ -z "$vars_to_eval" ]] && return 1
+            eval "$vars_to_eval"
+
+            # --- [ FIX: VALIDAÇÃO DE USERNAME ] ---
+            # Se pedimos um user específico, validamos contra a API
+            if [[ -n "$target_user" ]]; then
+                if [[ "$target_user" != "$api_username" ]]; then
+                    echo "🚫 [CONFLICT] Token válido, mas pertence a '$api_username' (esperado: '$target_user')." >&2
+                    return 1
+                fi
+            fi
+
+            # Validação de Estado da Conta
+            if [[ "$is_active" != "true" ]]; then
+                echo "🚫 [AUTH] Conta '$api_username' está desativada." >&2
+                return 1
+            fi
+
+            local role="User"
+            [[ "$is_superuser" == "true" ]] && role="Superuser"
+
+            echo "✅ [AUTHENTIK] $role: $api_username ($api_email) - Token OK" >&2
+            return 0
+        }
+
         _token__eval_me
     )
 }
@@ -403,6 +483,74 @@ EOF
         return 0
     )
 }
+
+ak_api_token_generate() {
+    local user_name="${1:-$AUTHENTIK_ADMIN_USER}"
+    local intent="${2:-api}"
+    # O expiring está no bash mas não estava a ser usado no defaults do Django
+    local is_expiring="${3:-False}" 
+
+    require_vars "AUTHENTIK_ADMIN_USER" "AUTHENTIK_CONTAINER_NAME" || return 1
+    
+    # Early exit se já temos um válido (Performance boost 🚀)
+    ak_api_token_validate && return 0 
+
+    echo "🔄 Generating Authentik API Token (Idempotent Root Mode)..." >&2
+
+    local RAW_OUTPUT
+    RAW_OUTPUT=$(docker exec -i "$AUTHENTIK_CONTAINER_NAME" python3 manage.py shell <<EOF
+from authentik.core.models import Token, User
+from django.utils.crypto import get_random_string
+import sys
+
+try:
+    # 1. Busca o utilizador alvo
+    target_user = User.objects.filter(username="$user_name").first()
+    if not target_user:
+        print("FATAL: User $user_name not found")
+        sys.exit(1)
+
+    # 2. Update or Create (Atomic)
+    token_obj, created = Token.objects.update_or_create(
+        identifier="steward-automation-token",
+        user=target_user,
+        defaults={
+            "intent": "$intent",
+            "expiring": $is_expiring
+        }
+    )
+
+    # 3. Gerar nova chave (O Authentik encripta isto no save)
+    new_secret = get_random_string(60)
+    token_obj.key = new_secret
+    token_obj.save()
+    
+    print(f"RESULT_TOKEN:{new_secret}")
+except Exception as e:
+    print(f"FATAL: {e}")
+    sys.exit(1)
+EOF
+)
+
+    # Limpeza de caracteres ANSI e extração
+    local NEW_TOKEN
+    NEW_TOKEN=$(echo "$RAW_OUTPUT" | grep "RESULT_TOKEN:" | cut -d':' -f2 | tr -d '[:space:]' | tr -d '\r')
+
+    if [[ -z "$NEW_TOKEN" ]]; then
+        core_log_error "❌ Failed to capture token from Python Shell."
+        return 1
+    fi
+
+    # 4. Persistência no Secret Service do Steward
+    core_secret_service_put "authentik/AUTHENTIK_API_TOKEN" "$NEW_TOKEN" || return 1
+    
+    # Exporta para a sessão atual para uso imediato
+    export AUTHENTIK_API_TOKEN="$NEW_TOKEN"
+    
+    core_log_success "✅ Authentik API Token Refresh OK"
+    return 0
+}
+
 export -f ak_api_token_generate
 
 [[ " $* " == *" --renew-api "* ]] && ak_api_token_generate
@@ -528,13 +676,14 @@ ak_login() {
     else
         # Camada 2: Validação de Tokens (Apenas se houver TTY)
         if [[ -t 0 ]]; then
-            (
+            (                
+                kp test 2> /dev/null || kp close 2> /dev/null && kp open
                 if vault_validate_token && ak_api_token_validate; then
                     echo "✅ Authentik API Token is valid." >&2
                 else
                     echo "🔑 Attempting token recovery/generation..." >&2
                     ak_api_token_restore || \
-                    ak_api_token_generate || {
+                    ak_api_token_generate | core_stream_processor || {
                         echo "🛑 Manual action required: run 'ak_api_token_generate'" >&2
                         return 1
                     }
