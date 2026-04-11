@@ -1,17 +1,17 @@
 ## file: authentik/app/blueprints/APP_USER--ROLE.yaml
 ## tpl: authentik/app/blueprints/APP_USER--ROLE.yaml
-## yaml: authentik/blueprints/home2500_{{$APP_NAME}}--{{$APP_LAYER_DEPTH}}--{{$APP_USER}}--{{$APP_USER_ROLE}}.yaml
+## yaml: authentik/blueprints/home2500_{{$APP_NAME}}--{{$APP_LAYER_DEPTH}}--{{$APP_USER}}--{{$APP_COMPUTE_ROLE}}.yaml
 version: 1
 metadata:
-  name: Home2500 {{$APP_USER}} {{$APP_USER_ROLE}} 
-  slug: blueprint-home2500-{{$APP_NAME}}--user--{{$APP_USER}}-{{$APP_USER_ROLE}}
+  name: Home2500 {{$APP_USER}} {{$APP_COMPUTE_ROLE}} 
+  slug: blueprint-home2500-{{$APP_NAME}}--user--{{$APP_USER}}-{{$APP_COMPUTE_ROLE}}
   labels:
     Domain: 'home2500.local'
     blueprints.goauthentik.io/instantiate: 'true'
 
 entries:
   - model: authentik_core.user
-    id: user-{{$APP_USER}}-{{$APP_USER_ROLE}}
+    id: user-{{$APP_USER}}-{{$APP_COMPUTE_ROLE}}
     identifiers:
       username: '{{$APP_USER}}'
     attrs:
