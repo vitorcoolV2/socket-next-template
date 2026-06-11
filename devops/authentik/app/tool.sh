@@ -60,6 +60,7 @@ export CLIENT_APP_BLUEPRINT_SLUG="CLIENT_APP_NAME"
 ### LOAD CORE
 set +e
 #### lets require a service tool to deploy compose and expose as blue(oidc) authentik vault
+source $(realpath "$TOOL_DIR/../../tool/transform.sh") 
 source $(realpath "$TOOL_DIR/../../authentik/_1-blueprints_lib.sh") > /dev/null 2>&1 
 #source $(realpath "$TOOL_DIR/../../authentik/_0-authentik_lib.sh") #> /dev/null 2>&1 
 
@@ -889,7 +890,7 @@ app_required_env_vars() {
 
 app_names_sync() {
     # Garante a biblioteca do Pi-hole
-    declare -f ph_api >/dev/null || source $(core_resolve_file "pihole/_0.pihole_lib.sh") > /dev/null 2>&1
+    declare -f ph_api >/dev/null || source $(core_resolve_file "pihole/pihole_lib.sh") > /dev/null 2>&1
     echo "🌐 Configurando DNS no Pi-hole..." >&2
     
     # ph_api auth agora tem os 5 retries internos
@@ -924,7 +925,7 @@ app_up_names() {
         if ! TARGET_IP="$CLIENT_APP_SERVICE_IP" require_ns_resolve CLIENT_APP_INTERNAL_NS || \
             ! TARGET_IP="$APP_NS_IP" require_ns_resolve CLIENT_APP_NS $APP_NS_IP; then
             echo "🌐 Configurando DNS no Pi-hole para $CLIENT_APP_NAME..." >&2   
-            declare -f ph_api  >/dev/null || source $(core_resolve_file "pihole/_0.pihole_lib.sh") > /dev/null 2>&1
+            declare -f ph_api  >/dev/null || source $(core_resolve_file "pihole/pihole_lib.sh") > /dev/null 2>&1
  
             # Rotaciona senha e autentica (com seus retries internos)
             #ph api open || return 1
@@ -1279,7 +1280,7 @@ tool_renew_certs() {
 
     
     # 7. Permissions (Essencial para o conseguir ler)
-    sudo chown "$APP_UID:$APP_UID" $dir/*   # 1000 costuma ser o ID do user no docker
+    sudo chown "$CLIENT_APP_UID:$CLIENT_APP_UID" $dir/*   # 1000 costuma ser o ID do user no docker
     chmod 644 $dir/*.pem
     chmod 644 $dir/*.crt
     chmod 600 $dir/*.key
@@ -1287,6 +1288,7 @@ tool_renew_certs() {
     return 0
 }
 tool_renew_certs() {
+    ### @review for 
     require_vars DOMAIN CLIENT_APP_CERT_FOLDER CLIENT_APP_DIR CLIENT_APP_NS || return 1
     
     local dir=$(realpath -m "$CLIENT_APP_DIR/$CLIENT_APP_CERT_FOLDER")
@@ -1794,9 +1796,9 @@ tool_stage_workflow() {
         local proj_root_dir=$(git_project_root)
         
         # 1. Definição de Identidade (Host vs Steward)
-        local owner="${CLIENT_APP_UID_OWNER:-1000}"
-        local group="${CLIENT_APP_GID:-2500}"
-        local file_own="${owner}:${group}"
+        local _UID="${CLIENT_APP_UID:-1000}"
+        local _GID="${CLIENT_APP_GID:-2500}"
+        local file_own="${_UID}:${_GID}"
 
         show_vars proj_root_dir file_own
 
@@ -1805,14 +1807,17 @@ tool_stage_workflow() {
         sudo find $proj_root_dir -type d -exec chmod 750 {} +
         sudo find $proj_root_dir -type f -exec chmod 640 {} +
         # Aplica o grupo steward (2500) mesmo nas pastas de "fix" na RAM ou SSD
-        ## group 
-        sudo chown -R "$file_own" $proj_root_dir/devops/opencode/share/
-        sudo chmod -R 770 $proj_root_dir/devops/opencode/share/
+        ## group share/$CLIENT_APP_NAME >> using _COMPOSE_FILE,_CONTAINER_NAME user: prop value.
+        sudo chown -R "$file_own" $proj_root_dir/devops/opencode/share/$CLIENT_APP_NAME
+        sudo chmod -R 770 $proj_root_dir/devops/opencode/share/$CLIENT_APP_NAME
 
+        # _UID by _UID
         sudo chown -R "$file_own" $proj_root_dir/devops/authentik/blueprints/
-        sudo chmod -R 750 $proj_root_dir/devops/authentik/blueprints/
-
+        # restrict all 
+        sudo chmod -R 700 $proj_root_dir/devops/authentik/blueprints/
+        # expect read project Authentik blueprint of Home2500
         sudo chown -R "$file_own" $proj_root_dir/devops/authentik/blueprints/home2500_${CLIENT_APP_NAME}*
+        # Also can read and write _BLUE_APPLY _BLUE_CLEANUP
         sudo chmod -R 750 $proj_root_dir/devops/authentik/blueprints/home2500_${CLIENT_APP_NAME}*
         core_steward_list
     }
@@ -1820,9 +1825,9 @@ tool_stage_workflow() {
      # output folder: fs mem: rw: lets use speed mem. lets fly
     local res_folder="$CLIENT_APP_MEM_DIR/share/$(__generate_workflow_req_id)" ## this became a requirement, lets give use the mem
     # Owner: Vitor (1000) | Group: Steward (2500)
-    local owner=${CLIENT_APP_UID_OWNER:-$USER}
-    local group=${CLIENT_APP_GID:-:owner}
-    chown "$owner:$group" "$res_folder" 2>/dev/null
+    local _UID=${CLIENT_APP_UID:-$USER}
+    local _GID=${CLIENT_APP_GID:-:_UID}
+    chown "$_UID:$_GID" "$res_folder" 2>/dev/null
     chmod 770 "$res_folder" 2>/dev/null
     # --- [ FIX: Atomic Directory Provisioning ] ---
     if ! [[ -d "$res_folder" ]]; then
@@ -1844,7 +1849,7 @@ tool_stage_workflow() {
             core_log_error "❌ Falha crítica: Não foi possível criar o diretório $res_folder"
             return 1
         }
-        # Owner: Vitor (1000) | Group: Steward (2500)
+        # UID: Vitor (1000) | Group: Steward (2500)
         chown 1000:2500 "$res_folder" 2>/dev/null
         chmod 700 "$res_folder" 2>/dev/null
     fi
@@ -1860,8 +1865,8 @@ tool_stage_workflow() {
         local file_path="$1"
         local name="$(basename "$file_path")"
         
-        local owner="${CLIENT_APP_UID_OWNER:-1000}"
-        local group="${CLIENT_APP_GID:-2500}"
+        local _UID="${CLIENT_APP_UID:-1000}"
+        local _GID="${CLIENT_APP_GID:-2500}"
         
         # 1. Caminho Absoluto para o Sistema (Garante que o mkdir/ln funciona)
         # Usamos o PROJECT_ROOT para ancorar o DEVOPS_DIR independentemente do source
@@ -1886,14 +1891,14 @@ tool_stage_workflow() {
         # 4. Operações de Sistema
         if [[ -f "$file_path" ]]; then
             # Permissões no ficheiro real
-            chown "${owner}:${group}" "$file_path" 2>/dev/null
+            chown "${_UID}:${_GID}" "$file_path" 2>/dev/null
             chmod 644 "$file_path" 2>/dev/null
             
             # O truque do ln -sf:
             # ln -sf "ALVO_RELATIVO" "CAMINHO_ABSOLUTO_DO_LINK"
             ln -sf "$relative_to_file" "$inspect_link_path"
             
-            chown -h "${owner}:${group}" "$inspect_link_path" 2>/dev/null
+            chown -h "${_UID}:${_GID}" "$inspect_link_path" 2>/dev/null
             
             # Exporta para o log
             echo "$inspect_link_path"
@@ -1970,22 +1975,20 @@ tool_stage_workflow() {
         # 3. Preparação de Identidade (PascalCase|HuMan para o Email)
         local APP_NAME="$CLIENT_APP_NAME"
         local APP_USER="$CLIENT_APP_USER"
-        local APP_USER_ROLE="${CLIENT_APP_USER_ROLE:-developer}"
-        local _name="$(core_transform_string "${CLIENT_APP_USER}_CORE_$CLIENT_APP_UID" "HuMan")"
-        local APP_USER_NAME="${CLIENT_APP_USER_NAME:-$_name}"
-        local APP_USER_PATH="home2500/home-developers"
         # 1. Detectar Profundidade do Layer (L)
         local APP_LAYER_DEPTH="L$(git_project_root_depth)"
-        local output_file="$AUTHENTIK_DIR/blueprints/home2500_{{$APP_NAME}}--L{{APP_LAYER_DEETH}--{$APP_USER}--{$APP_USER_ROLE}.yaml"
-
-        
+        local APP_COMPUTE_ROLE="${CLIENT_APP_USER_ROLE:-developer}"
+        # Authentik
+        local _name="${APP_LAYER_DEPTH}_$(core_transform_string "${CLIENT_APP_USER}_CORE_$APP_COMPUTE_ROLE" "HuMan")"
+        local APP_USER_NAME="${CLIENT_APP_USER_NAME:-$_name}"
+        local APP_USER_PATH="home2500/home-developers/$CLIENT_APP_NAME"                
+        local output_file="$AUTHENTIK_DIR/blueprints/home2500_{{$APP_NAME}}--${APP_LAYER_DEPTH}--{$APP_USER}--{$APP_COMPUTE_ROLE}.yaml"
         
         local email_prefix=$(core_transform_string "${APP_USER_NAME}" "HuMan" | tr -d ' ')
         local APP_USER_EMAIL="${CLIENT_APP_USER_EMAIL:-${email_prefix}@home2500.local}"
-
         # 1. Detectar Profundidade do Layer (L)
         local layer_depth=$(git_project_root_depth)        
-        local output_file="$AUTHENTIK_DIR/blueprints/home2500_${APP_NAME}--${APP_LAYER_DEPTH}--${APP_USER}--${APP_USER_ROLE}.yaml"
+        local output_file="$AUTHENTIK_DIR/blueprints/home2500_${APP_NAME}--${APP_LAYER_DEPTH}--${APP_USER}--${APP_COMPUTE_ROLE}.yaml"
 
         # 5. Hidratação (Mantendo explicitamente os APP_*)
         # Aqui o 'blue_template_vars' recebe os teus mappings originais
@@ -1993,7 +1996,7 @@ tool_stage_workflow() {
             "APP_NAME=$APP_NAME" \
             "APP_LAYER_DEPTH=$APP_LAYER_DEPTH" \
             "APP_USER=$APP_USER" \
-            "APP_USER_ROLE=$APP_USER_ROLE" \
+            "APP_COMPUTE_ROLE=$APP_COMPUTE_ROLE" \
             "APP_USER_NAME=$APP_USER_NAME" \
             "APP_USER_EMAIL=$APP_USER_EMAIL" \
             "APP_USER_PATH=$APP_USER_PATH" || return 1
@@ -2748,7 +2751,7 @@ app_down_names() {
         # 2. Carregar Lib se necessário
         (
             cd $CLIENT_APP_DIR
-            source $(core_resolve_file "pihole/_0.pihole_lib.sh") > /dev/null 2>&1
+            source $(core_resolve_file "pihole/pihole_lib.sh") > /dev/null 2>&1
             ph_api password rotate        
             ph_api auth
             ph_dns_remove "$CLIENT_APP_INTERNAL_NS"

@@ -62,13 +62,12 @@ __docker_reset__clean() {
     docker network inspect $INTERNAL_DOMAIN >/dev/null 2>&1 && docker network rm $INTERNAL_DOMAIN >/dev/null 2>&1 || true
 
     docker network create \
-      --driver=bridge \
-      --subnet=172.28.0.0/16 \
-      --gateway=172.28.0.1 \
-      --attachable \
-      --internal=false \
-      --ip-range=172.28.0.0/16 \
-      $INTERNAL_DOMAIN >/dev/null 2>&1
+    --driver=bridge \
+    --subnet=172.28.0.0/16 \
+    --gateway=172.28.0.1 \
+    --internal=false \
+    --ip-range=172.28.0.0/16 \
+    $INTERNAL_DOMAIN >/dev/null 2>&1
 
     echo "Docker reset complete. $INTERNAL_DOMAIN has been recreated."
   }
@@ -86,7 +85,7 @@ __docker_reset__clean() {
 kp test && kp open
 kp ls /vault > /dev/null || exit 1
 ###### BOOT HARD CORE (PIHOLE + VAULT) - boot before authentik. 
-source $(core_resolve_file "pihole/_0.pihole_lib.sh")  
+source $(core_resolve_file "pihole/pihole_lib.sh")  
 ##ph api open
 if ! wait4_http_url_ready "$PIHOLE_URL/admin/" 3; then
   ph down && ph up && \

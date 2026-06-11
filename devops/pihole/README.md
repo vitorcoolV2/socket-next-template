@@ -11,7 +11,7 @@ Every service in the stack is accessible via `<service>.$DOMAIN`. The `ph_api dn
 Source the library:
 
 ```bash
-source devops/pihole/_0.pihole_lib.sh
+source devops/pihole/pihole_lib.sh
 
 ph_api open        # Open KeePass and restore password
 ph_api auth        # Authenticate to Pi-hole API

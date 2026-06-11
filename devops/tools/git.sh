@@ -7,7 +7,8 @@ set +e
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "❌ This is a library and should be sourced, not run directly."  >&2
-    return 1
+    echo "     Try: source ./$(realpath --relative-to="$PWD" "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+    return 1 2> /dev/null || exit 1
 fi
 
 #-------------------------------------------------------------------------------
@@ -31,12 +32,21 @@ git_project_root() {
     fi
     return 1
 }
-git_relative_path2() {
-    local the_file="$1"
+
+git_remote_root_url() {
+    git remote get-url origin
+}
+
+### do not handle outter workspace relative paths
+git_relative_path() {
+    local the_path="${1:-.}"
+    if ! the_path=$(realpath $the_path);then
+        return 1
+    fi
     (
         cd $(git_project_root)
         # Se o ficheiro não existir ou realpath falhar, mantém o original
-        realpath --relative-to="$PWD" "$the_file" 2>/dev/null || echo "$the_file"
+        realpath --relative-to="$PWD" "$the_path" 2>/dev/null || echo "$the_path"
     )
 }
 
@@ -65,4 +75,31 @@ git_project_root_depth() {
         depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
         echo $((depth + 1))
     fi
+}
+
+
+git_project_remote_owner() {
+    export REMOTE_URL=$(git config --get remote.origin.url)
+
+    # Extract username from HTTPS URL
+    if [[ $REMOTE_URL == *"https://github.com/"* ]]; then
+        export USERNAME=$(echo "$REMOTE_URL" | sed -n 's#.*/\([^/]*\)/.*#\1#p')
+        echo "GitHub Username: $USERNAME"
+    fi
+
+    # Extract username from SSH URL
+    if [[ $REMOTE_URL == *"git@github.com:"* ]]; then
+        export USERNAME=$(echo "$REMOTE_URL" | sed -n 's#git@github.com:\([^/]*\)/.*#\1#p')
+        echo "GitHub Username: $USERNAME"
+    fi
+
+    echo "Remote Repository Username: $USERNAME"
+
+    # Extract most recent commit author
+    AUTHOR=$(git log -1 --pretty=format:"%an <%ae>")
+    echo "Most Recent Commit Author: $AUTHOR"
+
+    # Extract all unique authors
+    echo "All Unique Authors:"
+    git log --pretty=format:"%an <%ae>" | sort | uniq
 }

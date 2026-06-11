@@ -5,7 +5,8 @@ set +e
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "❌ This is a library and should be sourced, not run directly."  >&2
-    return 1
+    echo "     Try: source ./$(realpath --relative-to="$PWD" "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+    return 1 2> /dev/null || exit 1
 fi
 
 export DEVOPS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -36,6 +37,8 @@ export REQ_STATUS_MISS="MISS "
 export REQ_STATUS_STOP="STOP "
 export REQ_STATUS_FAIL="FAIL "
 export REQ_STATUS_ERROR="ERROR "
+
+source ./tools/transform.sh
 
 require_vars() {
     local _type="var" 
@@ -2021,55 +2024,6 @@ _put_service_secret_path() {
 }
 
 
-core_transform_inject_env_file_vars() {
-    local env_file="${1:-".env"}"
-    local match_prefix="${2}" # diz ao regex: "comece no início da linha"
-    local replace_prefix="${3}"
-    # Substituí * por .* para funcionar corretamente no Regex do Bash
-    local match_prefix_exceptions="${4:-ENV.*}"
-
-    require_vars env_file || return 1    
-
-    if [[ ! -f "$env_file" ]]; then
-        echo "⚠️  [WARN] Ficheiro $env_file não encontrado." >&2
-        return 1
-    fi
-
-    echo -e "📦 Extraindo variáveis $(core_relative_path2 $env_file) 
-    (match:replace)=>($match_prefix -> $replace_prefix) ..." >&2
-
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ -z "$line" || "$line" =~ ^# ]] && continue
-
-        if [[ "$line" =~ ^"$match_prefix" ]]; then
-            local key="${line%%=*}"
-            local value="${line#*=}"
-
-            # Remove o prefixo para validar a exceção
-            local short_key="${key#$match_prefix}"
-            #show_vars key value  short_key
-            # Lógica de Exceção Corrigida
-            if [[ -n "$match_prefix_exceptions" ]]; then
-                if [[ "$short_key" =~ ^($match_prefix_exceptions)$ ]]; then
-                    echo "   🚫 [Skip] $key coincide com exceção." >&2
-                    continue
-                fi
-            fi
-
-            # Limpar aspas de forma eficiente
-            value="${value%\"}"
-            value="${value#\"}"
-            value="${value%\'}"
-            value="${value#\'}"
-
-            local new_key="${replace_prefix}${short_key}"
-            export "$new_key"="$value"
-            
-            echo "    [export $new_key len: (${#value})]" >&2
-        fi
-    done < "$env_file"
-}
-
 # Exemplo de uso com o teu transform_string:
 #cat lista_users.txt | core_stream_processor "core_transform_string \"\$line\" 'HuMan'"
 core_stream_processor() {
@@ -2083,207 +2037,13 @@ core_stream_processor() {
 }
 
 
-# Redutor de strings para o Dono da Casa
-core_transform_string() {
-    local str="$1"
-    local mode="${2:-pascal}"
-    
-    # Adicionamos "/" à lista de separadores: [-._:+ /]
-    case "$mode" in
-        pascal) 
-            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+|^)([a-z])/\U\2/g' ;;
-        
-        camel)  
-            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)([a-z])/\U\2/g' | sed -r 's/^([A-Z])/\L\1/' ;;
-        
-        human)  
-            # 1. Troca separadores por espaços
-            # 2. Capitaliza cada palavra
-            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g' | sed -r 's/(^| )([a-z])/\U\2/g' | sed 's/^ //;s/ $//' ;;
-        
-        kebab)
-            # 1. Transformar tudo o que é separador em espaço real
-            local space_separated=$(echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g')
-            local result=""
-            # 2. Capitalizar cada palavra individualmente
-            for word in $space_separated; do
-                result+="${word^} "
-            done
-            echo "${result% }" ;; # Remove o espaço final
-        
-        screaming)
-            echo "$str" | tr '[:lower:]' '[:upper:]' | sed -r 's/([-._:+ /]+)/_/g' | sed -r 's/^_|_$//g' ;;
-
-        path)
-            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/\//g' | sed -r 's/^\/|\/$//g' ;;
-            
-        snake)
-            echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/_/g' | sed -r 's/^_|_$//g' ;;
-    esac
-}
-core_transform_string() {
-    local str="$1"
-    local mode="${2:-pascal}"
-    
-    # Pré-processamento: Transformar todos os separadores [-._:+ /] em espaços
-    # e converter tudo para minúsculas para ter uma base limpa.
-    local clean=$(echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g' | sed 's/^ //;s/ $//')
-
-    case "$mode" in
-        # 1. human -> "a rolha do rato" (Tudo minúsculas)
-        human)
-            echo "$clean" ;;
-
-        # 2. Human -> "A rolha do rato" (Estilo Frase: só a primeira maiúscula)
-        Human)
-            echo "${clean^}" ;;            
-
-        # 3. HuMan -> "A Rolha Do Rato" (Estilo Título: todas as palavras maiúsculas)
-        HuMan)
-            local result=""
-            for word in $clean; do result+="${word^} "; done
-            echo "${result% }" ;;
-
-        # 4. HUMAN -> "GRITOS" (Estilo Frase: só a primeira maiúscula)
-        HUMAN)
-            echo "${clean^^}" ;;
-
-        # --- Outros Modos Mantidos ---
-        pascal) 
-            echo "$clean" | sed -r 's/ / /g' | sed -r 's/(^| )([a-z])/\U\2/g' | tr -d ' ' ;;
-        camel)  
-            local p=$(echo "$clean" | sed -r 's/(^| )([a-z])/\U\2/g' | tr -d ' ')
-            echo "${p,}" ;; # ${p,} força a primeira letra para minúscula
-        kebab)
-            echo "${clean// /-}" ;;
-        screaming)
-            local s="${clean// /_}"
-            echo "${s^^}" ;; # ${s^^} força tudo para maiúscula
-        snake)
-            echo "${clean// /_}" ;;
-        path)
-            echo "${clean// /\/}" ;;
-        # 10. flat   -> "rainhadobaralho" (Unique IDs/No delimiters)
-        flat)     echo "${clean// /}" ;;
-
-        # 11. initials -> "RDB" (Ícones de Stage/Avatares na UI)
-        initials) 
-            echo "$clean" | awk '{for(i=1;i<=NF;i++) printf toupper(substr($i,1,1))}'
-            echo "" ;;
-    esac
-}
-core_transform_string() {
-    local str="$1"
-    local mode="${2:-pascal}"
-    
-    # Base Limpa: Remove separadores e normaliza para minúsculas
-    local clean=$(echo "$str" | tr '[:upper:]' '[:lower:]' | sed -r 's/([-._:+ /]+)/ /g' | sed 's/^ //;s/ $//')
-
-    case "$mode" in
-        # --- Família Human (Semântica) ---
-        human)    echo "$clean" ;;                               # rainha do baralho
-        Human)    echo "${clean^}" ;;                            # Rainha do baralho
-        HuMan)    local res=""; for w in $clean; do res+="${w^} "; done; echo "${res% }" ;; # Rainha Do Baralho
-        HUMAN)    echo "${clean^^}" ;;                           # RAINHA DO BARALHO
-
-        # --- Família Code (Sintaxe) ---
-        pascal)   local res=""; for w in $clean; do res+="${w^}"; done; echo "$res" ;;      # RainhaDoBaralho
-        camel)    local res=""; for w in $clean; do res+="${w^}"; done; echo "${res,}" ;;   # rainhaDoBaralho
-        flat)     echo "${clean// /}" ;;                         # rainhadobaralho
-        
-        # --- Família System (Infra) ---
-        kebab)    echo "${clean// /-}" ;;                        # rainha-do-baralho
-        snake)    echo "${clean// /_}" ;;                        # rainha_do_baralho
-        screaming) echo "${clean// /_}" | tr '[:lower:]' '[:upper:]' ;; # RAINHA_DO_BARALHO
-        path)     echo "${clean// /\/}" ;;                       # rainha/do/baralho
-        
-        # --- Família UI (Visual) ---
-        initials) echo "$clean" | awk '{for(i=1;i<=NF;i++) printf toupper(substr($i,1,1))}'; echo "" ;;
-    esac
-}
-# ---------------------------------------------------------
-# 🛠️ String Transformation Shortcuts (The Steward's Tools)
-# ---------------------------------------------------------
-
-# provision_db -> provisionDb (Para JSON/JS)
-to_camel_case() {
-    core_transform_string "$1" "camel"
-}
-
-# provision_db -> ProvisionDb (Para Classes/Tipos)
-to_pascal_case() {
-    core_transform_string "$1" "pascal"
-}
-
-# provision_db -> Provision Db (Para Logs/UI)
-to_human_pascal() {
-    core_transform_string "$1" "human"
-}
-
-# provision_db -> provision-db (Para K8s/Docker)
-to_kebab_case() {
-    core_transform_string "$1" "kebab"
-}
-
-# provision_db -> PROVISION_DB (Para .env/Secrets)
-to_screaming_snake() {
-    core_transform_string "$1" "screaming"
-}
-
-# provision_db -> provision/db (Para Pastas/Namespaces)
-to_path_case() {
-    core_transform_string "$1" "path"
-}
-
-# provision_db -> provision_db (Slug Standard)
-to_snake_case() {
-    core_transform_string "$1" "snake"
-}
-
-test__string_transformation() {
-    # Executando o Loop de Transformação
-    echo "--- 📂 TESTE DE TRANSFORMAÇÃO DE PATH ($PWD) ---"
-
-    for mode in pascal camel \
-        human HuMan Human HUMAN \
-        kebab screaming \
-        path snake flat initials; do
-        result=$(core_transform_string "$PWD" "$mode")
-        printf "%-12s | %s\n" "$mode" "$result"
-    done
-}
-
 # Testes do Steward:
 # "fix-files-oidc"         -> "Fix Files Oidc"
 # "tool.report.stack"      -> "Tool Report Stack"
 # "opencode:runtime-v2.7"  -> "Opencode Runtime V2 7"
 
 
-# 1. Higieniza nomes de caminhos (Permite barras '/' mas remove caracteres perigosos)
-sanitize_path_name() {
-    local input="$1"
-    # Remove espaços, remove caracteres especiais exceto '/' '.' '-' '_'
-    # Converte tudo o que não seja permitido para '_'
-    echo "${input//[^a-zA-Z0-9./_-]/_}" | sed 's|//*|/|g'
-}
 
-# 2. Higieniza nomes de bases de dados / identificadores SQL
-# Normalmente DBs só aceitam letras, números e underscores
-sanitize_db_name() {
-    local input="$1"
-    # Remove espaços e converte tudo o que não for alfanumérico ou underscore para '_'
-    # Força minúsculas (bom para consistência em DBs)
-    echo "${input//[^a-zA-Z0-9_]/_}" | tr '[:upper:]' '[:lower:]'
-}
-
-# 3. Refinamento do teu sanitize_var_name (evitar que comece com números se necessário)
-sanitize_var_name() {
-    local var_name=$1
-    # 1. Transforma pontos e traços em underscores
-    # 2. Remove caracteres não alfanuméricos residuais
-    echo "$var_name" | sed 's/[.-]/_/g' | sed 's/[^a-zA-Z0-9_]//g' 
-}
-# path: devops/opencode/lib/interactive.sh
 
 ask() {
     local question="$1"
@@ -2533,31 +2293,42 @@ core_project_permissions_guard() {
     fi
 }
 #-------------------------------------------------------------------------------
-# @function core_project_files_visible
+# @function project_resources_visible
 # @description Filtra a realidade pelo .gitignore
 #-------------------------------------------------------------------------------
-core_project_files_visible() {
-    local target_dir="${1:-.}"
+
+project_resources_visible() {
+    local target="${1:-.}"
     local mode="${2:-flat}"
     
-    # Git-only: se não está no git (ou não é ignorado), não existe para o Steward
+    # Get both files AND directories from git
     local raw_list
-    raw_list=$(git ls-files --others --cached --exclude-standard "$target_dir" 2>/dev/null)
-
+    
+    # Get all tracked and untracked items (files and directories)
+    raw_list=$(git ls-files --others --cached --exclude-standard "$target" 2>/dev/null)
+    
+    # Also include directories that have content
+    local directories=$(git ls-files --others --cached --exclude-standard "$target" 2>/dev/null | \
+        sed 's|/[^/]*$||' | sort -u)
+    
+    # Combine files and directories
+    raw_list=$(echo -e "$raw_list\n$directories" | sort -u | grep -v '^$')
+    
     if [[ "$mode" == "tree" ]]; then
-        echo "📂 $target_dir"
+        echo "📂 $target"
         echo "$raw_list" | sed -e 's/[^\/]*\//  │/g' -e 's/│\([^│]\)/┣━━ \1/' -e 's/┣━━ \([^│]*\)$/┗━━ \1/'
     else
         echo "$raw_list"
     fi
 }
 
+## fast
 core_project_files_permissions_json() {
-    local target_dir="${1:-.}"
+    local target="${1:-.}"
     local resources
     
     # Obtemos a lista de ficheiros (visíveis/trackeáveis)
-    resources=$(core_project_files_visible "$target_dir" "flat")
+    resources=$(project_resources_visible "$target" "flat")
 
     # 2. Abrimos um subshell para capturar todo o output do loop
     (
@@ -2566,13 +2337,30 @@ core_project_files_permissions_json() {
 
             # Extração robusta com stat
             # Usamos o 'jo' para criar o objeto individual (flat)
-            stat -c "%a %U %G %F" "$resource" | {
+            stat -c "%a %U %G %F" "$resource" 2>/dev/null | {
                 read -r perms owner group type
-                jo resource="$resource" p="$perms" u="$owner" g="$group" t="$type"
+                
+                # split success/error to data
+                if ! output=$(jo resource="$resource" \
+                    p="$perms" \
+                    u="$owner" \
+                    g="$group" \
+                    t="$type" 2>&1); then
+                    
+                    # Error case
+                    jo resource="$resource" \
+                        error="Failed to process: $resource" \
+                        tool="stat" \
+                        args="read perms owner group type"
+                else
+                    # Success case
+                    echo "$output"
+                fi
             }
         done <<< "$resources"
     ) | jq -s -c .
 }
+
 
 require_search_file() {
     local ref=${1}
@@ -2728,62 +2516,6 @@ core_branch() {
 core_root_depth() {
     git_project_root_depth $DEVOPS_DIR
 }
-#-------------------------------------------------------------------------------
-# @function git_project_root_depth
-# @description Calcula a profundidade (L) do PWD em relação à raiz do Git
-#-------------------------------------------------------------------------------
-git_project_root_depth() {
-    local root_dir
-    root_dir=$(git rev-parse --show-toplevel 2>/dev/null)
-    
-    if [[ -z "$root_dir" ]]; then
-        echo "0" # Se não for Git, assume Root (L0)
-        return
-    fi
-
-    # Calcula a distância: remove a root do PWD e conta as barras /
-    local relative_path="${PWD#$root_dir}"
-    relative_path="${relative_path#/}" # Remove barra inicial se existir
-    
-    if [[ -z "$relative_path" ]]; then
-        echo "0"
-    else
-        # Conta o número de pastas no caminho relativo
-        local depth
-        depth=$(echo "$relative_path" | tr -cd '/' | wc -c)
-        echo $((depth + 1))
-    fi
-}
-#-------------------------------------------------------------------------------
-# @function git_project_root
-# @description Localiza a raiz do projeto (onde está o .git)
-#-------------------------------------------------------------------------------
-git_project_root() {
-    local root
-    root=$(git rev-parse --show-toplevel 2>/dev/null)
-    
-    if [[ -n "$root" ]]; then
-        echo "$root"
-        return 0
-    else
-        # Se falhar (ex: dentro de um submodule ou erro de perm), tenta subir manualmente
-        local curr="$PWD"
-        while [[ "$curr" != "/" ]]; do
-            [[ -d "$curr/.git" ]] && echo "$curr" && return 0
-            curr=$(dirname "$curr")
-        done
-    fi
-    return 1
-}
-git_relative_path2() {
-    local the_file="$1"
-    (
-        cd $(git_project_root)
-        # Se o ficheiro não existir ou realpath falhar, mantém o original
-        realpath --relative-to="$PWD" "$the_file" 2>/dev/null || echo "$the_file"
-    )
-}
-
 
 
 ####  CONTEXT EXEC TOOL 
@@ -3043,7 +2775,8 @@ core_load_requirements() {
     ## export devops .env vars
     require_locations DEVOPS_DIR || return 1
     require_files DEVOPS_ENV_FILE || return 1
-    core_transform_inject_env_file_vars "$DEVOPS_ENV_FILE"
+    source $DEVOPS_DIR/tools/transform.sh && \
+        core_transform_inject_env_file_vars "$DEVOPS_ENV_FILE"
 
     desired_domain_names_generate() {
         require_vars DOMAIN PUBLIC_SERVICES_LIST

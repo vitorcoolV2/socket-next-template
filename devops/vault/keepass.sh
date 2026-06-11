@@ -13,7 +13,6 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     return 1 2> /dev/null || exit 1
 fi
 
-
 ### import CORE && validate dependency context
 
 _dir="$(dirname "${BASH_SOURCE[0]}")"
@@ -22,7 +21,19 @@ source  "$_dir/../core.sh" > /dev/null 2>&1
 export RUNTIME_ROOT_DIR="/run/user/$UID/home2500"
 require_vars RUNTIME_ROOT_DIR  || return 1 
 
-require_vars KP_DB || return 1
+_tool="keepassxc-cli"
+if ! command -v "$_tool" &> /dev/null; then
+    echo "
+        Missing \"$_tool\".
+        echo "Error: Missing \"$_tool\"."    
+        echo "Install it from: https://keepassxc.org/download/"
+
+        After install, run again.
+    "; 
+    return 1;
+fi    
+
+require_vars KP_DB || { echo "missing KP_DB var"; return 1; }
 
 wrapper_client_key() {
     local KPID="$$"
@@ -277,7 +288,7 @@ kp() {
                 DEBUG="$debug" require_vars KP_OPEN_POLICY \
                                             KP_DB \
                                             KP_KEY \
-                                            KP_PASS_FILE || return 1                                                                                 
+                                            KP_PASS_FILE || { echo "export *UNDEF* vars"; return 1; }
             }            
             (
                 if DEBUG="$debug" && ! require_vars KP_KEY && require_files KP_KEY; then

@@ -45,3 +45,69 @@ detect_active_connection() {
     >&2 echo "🌐 Detected active connection profile: $connection"
     echo "$connection"  # Only the connection profile name is printed to stdout
 }
+
+
+enable_pihole() {
+
+    # 3. Se o ficheiro for gerido pelo systemd-resolved
+    sudo systemctl stop systemd-resolved
+    sudo systemctl disable systemd-resolved
+    sudo systemctl start systemd-resolved
+    sudo systemctl enable systemd-resolved
+    sudo rm -f /etc/resolv.conf
+    sudo tee /etc/resolv.conf << 'EOF'
+nameserver 127.0.0.1
+EOF
+
+    # 4. Testar novamente
+    nslookup pihole
+    dig pihole
+    nslookup pihole.lan
+    dig pihole.lan
+    
+    nslookup caddy
+    dig caddy
+    nslookup caddy.lan
+    dig caddy.lan
+    sudo systemctl status systemd-resolved
+}
+
+
+disable_pihole() {
+    # 2. Se o sistema não está a usar 127.0.0.1, corrigir
+    sudo systemctl stop systemd-resolved
+    sudo systemctl disable systemd-resolved
+    sudo systemctl start systemd-resolved
+    sudo systemctl enable systemd-resolved
+
+    sudo tee /etc/resolv.conf << 'EOF'
+nameserver 8.8.8.8
+nameserver 1.1.1.1
+EOF
+
+    nslookup google.com
+    dig google.com
+
+    nslookup pihole
+    dig pihole
+    nslookup pihole.lan
+    dig pihole.lan
+}
+
+
+test___pihole_inner_dns() {
+    # 1. Verificar se o container está realmente a correr
+    podman ps | grep pihole
+
+    # 2. Verificar se o serviço systemd está ativo
+    systemctl --user status pihole
+
+    # 3. Ver logs do container
+    podman logs pihole 2>&1 | tail -30
+
+    # 4. Testar DNS dentro do container
+    podman exec pihole dig google.com
+
+    # 5. Testar se o pihole está a escutar
+    podman exec pihole netstat -tlnp | grep 53
+}

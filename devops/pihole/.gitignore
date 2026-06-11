@@ -1,0 +1,13 @@
+swarm.*.key
+config/
+data/
+p2p-
+
+*.sh
+!pihole_lib.sh
+!unbound.sh
+!examples.sh
+!build.sh
+!setup_*.sh
+
+@env_

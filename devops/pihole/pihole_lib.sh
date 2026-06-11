@@ -1,7 +1,7 @@
 #!/bin/bash
-# Filename: ../../devops/pihole/./_0.pihole_lib.sh
+# Filename: ../../devops/pihole/./pihole_lib.sh
 
-# Top of _0.pihole_lib.sh
+# Top of pihole_lib.sh
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "❌ This is a library and should be sourced, not run directly." >&2
     return 1
@@ -32,9 +32,9 @@ DEBUG=false require_vars "PUBLIC_SERVICES" "DOMAIN" "INTERNAL_DOMAIN"
 
 ## hard coded 4 now
 export PIHOLE_CONTAINER_NAME="pihole"
-export PIHOLE_DNS_IP="$(detect_active__ipv4)" ### NOT USED ANY MORE :) (PIHLO) "172.28.0.2"
+export PIHOLE_DNS_IP="$(detect_active__ipv4)" ### NOT USED ANY MORE :) (PIHLO) "172.20.0.2"
 export PIHOLE_URL="http://$PIHOLE_DNS_IP:8080"
-export PIHOLE_SPARK_DNS=("$PIHOLE_DNS_IP" "1.1.1.1" "8.8.8.8")
+export PIHOLE_SPARK_DNS=("1.1.1.1" "8.8.8.8")
 
 DEBUG=false require_vars \
     "PUBLIC_SERVICES" "DOMAIN" "INTERNAL_DOMAIN" \
@@ -592,6 +592,7 @@ os_resolvers() {
     __handler_run "_${cmd}__nameservers_" "${args[@]}" 
 }
 
+
 ph() {
     local cmd="$1" # test(), password(disable|rotate|restore), auth()
     cmd="${cmd##*(_)}"         
@@ -615,8 +616,11 @@ ph() {
 
     inst__down_() {
         (
-            cd $PIHOLE_DIR
+            cd $PIHOLE_DIR            
             docker compose down --remove-orphans             
+            get_ftl__real_PID 
+            ps -ax | grep pihole-FTL
+            kill $(get_ftl__real_PID)
             inst__disable_          
         )
     }
@@ -631,16 +635,37 @@ ph() {
     }
 
     inst__enable_() {
+        libvirt_dns_default__ip() {
+            # Verifica se o comando 'virsh' está disponível
+            if ! command -v virsh &> /dev/null; then
+                return 1
+            fi
+
+            # Extrai o IP da rede padrão
+            local ip
+            ip=$(sudo virsh net-dumpxml default 2>/dev/null | grep -oP "(?<=<ip address=[\"'])[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+")
+
+            # Verifica se o IP foi encontrado
+            if [[ -z "$ip" ]]; then
+                return 1
+            fi
+
+            # Retorna o IP
+            echo "$ip"
+            return 0
+        }
         # 1. Obter resolvers atuais como um array
         # Usamos parênteses para forçar a saída num array bash
+        local dns_ip=$(libvirt_dns_default__ip)
+        ###local unbound_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' unbound)
         local cur_resolvers=($(os_resolvers get))
         
         # 2. Lógica de Verificação:
         # Condição A: O primeiro resolver NÃO é o IP do Pi-hole
         # Condição B: Existe mais do que um resolver (queremos exclusividade)
-        if [[ "${cur_resolvers[0]}" != "$PIHOLE_DNS_IP" ]] || [[ ${#cur_resolvers[@]} -ne 1 ]]; then
-            echo "Updating system resolvers to point exclusively to Pi-hole ($PIHOLE_DNS_IP)..."
-            os_resolvers set "$PIHOLE_DNS_IP"
+        if [[ "${cur_resolvers[0]}" != "$dns_ip" ]] || [[ ${#cur_resolvers[@]} -ne 1 ]]; then
+            echo "Updating system resolvers to point exclusively to ip ($dns_ip)..."
+            os_resolvers set "$dns_ip"
         else
             echo "✅ System resolvers are already optimized: ${cur_resolvers[0]}"
         fi       
@@ -651,7 +676,7 @@ ph() {
         os_resolvers set "${PIHOLE_SPARK_DNS[@]}"
     }
 
-    inst__health_() {
+    inst__health___replace_for_other_more_informed_entity() {
         _validate_docker_resolver_ip() {
             local _RRIP="$1"   # ref resolver ip
             local _RIP="${!_RRIP}" # resolver ip
@@ -673,7 +698,27 @@ ph() {
                 >&2 echo "❌ Error: PIHOLE_DNS_IP ($PIHOLE_DNS_IP) not found in $daemon_file dns list."
                 return 1
             fi
+        }
+        _validate_podman_resolver_ip() {
+            local _RRIP="$1"   # ref resolver ip
+            local _RIP="${!_RRIP}" # resolver ip
+            local resolv_conf="/etc/resolv.conf"
+
+            # Verifica se o arquivo existe e pode ser lido
+            if [ ! -r "$resolv_conf" ]; then
+                >&2 echo "❌ Error: Cannot read $resolv_conf. Check permissions or if file exists."
+                return 1
+            fi
+
+            # Verifica se o IP do resolvedor está presente no /etc/resolv.conf
+            if grep -q "nameserver $_RIP" "$resolv_conf"; then
+                return 0
+            else
+                >&2 echo "❌ Error: PIHOLE_DNS_IP ($_RIP) not found in $resolv_conf nameserver list."
+                return 1
+            fi
         }        
+        local oci_provider=$(container_provider)
         
         DEBUG=false require_containers_ready PIHOLE_CONTAINER_NAME || return 1
         #inst__api_ auth || return 2
@@ -686,7 +731,7 @@ ph() {
         fi 
 
         ##### DOCKER INTEGRATION
-        if _validate_docker_resolver_ip PIHOLE_DNS_IP; then
+        if _validate_${oci_provider}_resolver_ip PIHOLE_DNS_IP; then
             echo "✔ pihole $PIHOLE_DNS_IP is set as docker dns resolver" >&2
         else
             echo "WARN: pihole $PIHOLE_DNS_IP is not the docker dns resolver" >&2
@@ -718,6 +763,111 @@ ph() {
         
     }
 
+    inst__provider_() {
+        _validate_resolver_ip() {
+            local resolver_file="$1"  # Caminho do arquivo de configuração
+            local resolver_ip="$2"    # IP do resolvedor
+            local method="$3"         # Método de validação (jq ou grep)
+
+            if [ ! -r "$resolver_file" ]; then
+                >&2 echo "❌ Error: Cannot read $resolver_file. Check permissions or if file exists."
+                return 1
+            fi
+
+            case "$method" in
+                jq)
+                    if jq -e --arg ip "$resolver_ip" 'any(.dns[]; . == $ip)' "$resolver_file" > /dev/null 2>&1; then
+                        return 0
+                    else
+                        >&2 echo "❌ Error: Resolver IP ($resolver_ip) not found in $resolver_file dns list."
+                        return 1
+                    fi
+                    ;;
+                grep)
+                    if grep -q "nameserver $resolver_ip" "$resolver_file"; then
+                        return 0
+                    else
+                        >&2 echo "❌ Error: Resolver IP ($resolver_ip) not found in $resolver_file nameserver list."
+                        return 1
+                    fi
+                    ;;
+                *)
+                    >&2 echo "❌ Error: Unsupported validation method ($method)."
+                    return 1
+                    ;;
+            esac
+        }
+
+        
+        # Detecta o provedor de contêineres
+        local oci_provider=$(container_provider)
+        if [ "$oci_provider" == "unsupported" ]; then
+            >&2 echo "❌ Error: Unsupported container provider detected."
+            return 1
+        fi
+
+        ##### OCI PROVIDER INTEGRATION. I know is not module oriented yet, is case oriented with my convertion study.
+        case "$oci_provider" in
+            docker)
+                if _validate_resolver_ip "/etc/docker/daemon.json" "$PIHOLE_DNS_IP" "jq"; then
+                    echo "✔ pihole $PIHOLE_DNS_IP is set as docker dns resolver" >&2
+                else
+                    echo "WARN: pihole $PIHOLE_DNS_IP is not the docker dns resolver" >&2
+                fi
+                ;;
+            podman)
+                if _validate_resolver_ip "/etc/resolv.conf" "$PIHOLE_DNS_IP" "grep"; then
+                    echo "✔ pihole $PIHOLE_DNS_IP is set as podman dns resolver" >&2
+                else
+                    echo "WARN: pihole $PIHOLE_DNS_IP is not the podman dns resolver" >&2
+                fi
+                ;;
+            *)
+                >&2 echo "❌ Error: Unsupported OCI provider ($oci_provider)."
+                return 1
+                ;;
+        esac
+    }
+
+    inst__health_() {
+        # Função genérica para validar o resolvedor DNS
+        
+        # Verifica se os contêineres estão prontos
+        DEBUG=false require_containers_ready PIHOLE_CONTAINER_NAME || {
+            >&2 echo "❌ Error: Required containers are not ready."
+            return 1
+        }
+
+        ##### OS INTEGRATION
+        local cur_resolvers=($(os_resolvers get))
+        if [[ ${#cur_resolvers[@]} -eq 1 ]] && [[ "${cur_resolvers[0]}" == "$PIHOLE_DNS_IP" ]]; then
+            echo "✔ pihole $PIHOLE_DNS_IP is set as host dns resolver" >&2
+        else
+            echo "WARN: pihole $PIHOLE_DNS_IP is not the host dns resolver" >&2
+        fi
+
+
+        ##### END INTEGRATION
+
+        # 3. Check do KeePass (kp)
+        local terror
+        if ! terror=$(kp test 2>&1); then
+            echo "❌ Error (KeePass): $terror" >&2
+            return 1
+        fi
+        echo "✔ KeePass: PASS" >&2
+
+        # 4. Check da API do Pi-hole (ph api auth)
+        local api_error
+        if api_error=$(ph api auth 2>&1); then
+            echo "✔ API: Authenticated" >&2
+            return 0
+        else
+            echo "❌ Error (Pi-hole API): $api_error" >&2
+            return 1
+        fi
+    }
+
     inst__api_() {
         local action="$1" # test(), password(disable|rotate|restore), auth()          
         shift
@@ -730,12 +880,35 @@ ph() {
         ph_api "${action}" "${argsx[@]}"       
     }
 
+    # seams to works root full, not root less
+    inst__renice_() {
+        local _PID
+        if _PID=$(get_ftl__real_PID "pihole-FTL"); then
+            echo "FTL PID: $_PID"
+            
+            # Tenta com sudo (rootful) ou sem (rootless)
+            if command -v sudo &>/dev/null && sudo -n true 2>/dev/null; then
+                sudo renice -n -10 -p "$_PID" 2>/dev/null || \
+                    echo "⚠️  renice falhou mesmo com sudo (rootless?)"
+            else
+                renice -n -10 -p "$_PID" 2>/dev/null || \
+                    echo "⚠️  renice falhou - CAP_SYS_NICE necessário"
+            fi
+            
+            # Mostra o nice atual
+            ps -o pid,ni,comm -p "$_PID" 2>/dev/null
+        else
+            echo "❌ pihole-FTL não encontrado"
+            return 1
+        fi
+    }
     require_functions \
         inst__health_ \
         inst__enable_ \
         inst__disable_ \
         inst__reboot_ \
         inst__up_ \
+        inst__renice_ \
         inst__api_ \
         inst__down_ || return 1
 
@@ -748,8 +921,6 @@ ph() {
     __handler_run "inst__${cmd}_" "${args[@]}" 
 }
 
-
-
 ph_test() {
     local traefik_ip="$(docker_app_network_proxy_ip)"
     local _DIR_NAME="backup"
@@ -758,7 +929,7 @@ ph_test() {
     if ph_api auth; then
         echo "Session Active."
         # Corrected: Adding the IP addresses
-        #ph_api dns add "$traefik_ip" "$_DIR_NAME.home2500.local"
+        #ph_api dns add "$traefik_ip" "$_DIR_NAME.local"
         #ph_clear_dns_records
         ph_pi dns get_records 
         ph_api logout
@@ -768,12 +939,154 @@ ph_test() {
     fi
 }
 
-ph_test_os_integration() {    
+
+
+container_provider() {
+    local provider="unknown"
+    local exit_code=0
+
+    # Verifica se o Docker está instalado e em execução (não um alias para Podman)
+    if command -v docker >/dev/null 2>&1 && ! alias docker >/dev/null 2>&1; then
+        provider="docker"        
+        exit_code=0
+    # Verifica se o Podman está instalado e em execução
+    elif command -v podman >/dev/null 2>&1 && ! alias podman >/dev/null 2>&1; then
+        provider="podman"
+        exit_code=0
+    else
+        # Caso nenhum provedor conhecido seja detectado
+        provider="unsupported"
+        return 1
+    fi
+
+    if $provider info | grep "$provider" >/dev/null 2>&1; then
+        echo "Detected container provider: $provider" >&2
+        echo $provider
+        return $exit_code
+    fi
+    
+    return 1
+}
+ph_os_integration() {    
+    container_provider || return 1
+
+    #    install_chrony_if_not_present_ || return 1
+   
+    os_ntp_sync || return 1
     ph disable || return 1
     ph enable || return 1    
 }
 
 
+install_chrony_if_not_present_() {
+    # Verifica se chrony já está instalado
+    if ! command -v chronyd >/dev/null; then
+        echo "chrony is not installed. Proceeding with installation..."
+
+        # Detecta o gerenciador de pacotes e instala chrony
+        if command -v apt >/dev/null; then
+            echo "Using apt to install chrony..."
+            if ! apt install chrony -y 2>/dev/null; then
+                echo "Failed to install chrony using apt. Superuser privileges may be required."
+                echo "Please run the following commands manually:"
+                echo "  sudo apt install chrony"
+                return 1
+            fi
+        elif command -v dnf >/dev/null; then
+            echo "Using dnf to install chrony..."
+            if ! dnf install chrony -y 2>/dev/null; then
+                echo "Failed to install chrony using dnf. Superuser privileges may be required."
+                echo "Please run the following commands manually:"
+                echo "  sudo dnf install chrony"
+                return 1
+            fi
+        elif command -v pacman >/dev/null; then
+            echo "Using pacman to install chrony..."
+            if ! pacman -S chrony --noconfirm 2>/dev/null; then
+                echo "Failed to install chrony using pacman. Superuser privileges may be required."
+                echo "Please run the following commands manually:"
+                echo "  sudo pacman -S chrony"
+                return 1
+            fi
+        elif command -v zypper >/dev/null; then
+            echo "Using zypper to install chrony..."
+            if ! zypper install chrony -y 2>/dev/null; then
+                echo "Failed to install chrony using zypper. Superuser privileges may be required."
+                echo "Please run the following commands manually:"
+                echo "  sudo zypper install chrony"
+                return 1
+            fi
+        else
+            echo "Package manager not found. Please install chrony manually."
+            return 1
+        fi
+
+        echo "chrony installed successfully."
+    else
+        echo "chrony is already installed. Skipping installation."
+    fi
+
+    # Verifica se o serviço chronyd está habilitado e iniciado
+    if ! systemctl is-enabled chronyd >/dev/null 2>&1; then
+        echo "Enabling chronyd service..."
+        if ! systemctl enable chronyd 2>/dev/null; then
+            echo "Failed to enable chronyd. Superuser privileges may be required."
+            echo "Please run the following command manually:"
+            echo "  sudo systemctl enable chronyd"
+            return 1
+        fi
+    fi
+
+    if ! systemctl is-active chronyd >/dev/null 2>&1; then
+        echo "Starting chronyd service..."
+        if ! systemctl start chronyd 2>/dev/null; then
+            echo "Failed to start chronyd. Superuser privileges may be required."
+            echo "Please run the following command manually:"
+            echo "  sudo systemctl start chronyd"
+            return 1
+        fi
+    fi
+
+    echo "chrony is installed, enabled, and running successfully."
+    return 0
+}
+## integration of NTP sync (for a user (1000), running rootless pods in sync). 
+## very IMPORTANT to dns DATA generation/*DATA TIME nature rules. 
+os_ntp_sync() {
+    # Verifica se o Docker está em modo rootless
+    # Verifica se o sistema já está sincronizado via NTP
+    if command -v timedatectl >/dev/null && timedatectl show | grep -q "NTPSynchronized=yes"; then
+        echo "Host clock is already synchronized via NTP."
+        return 0
+    fi
+
+    # Tenta habilitar NTP sem sudo, se possível
+    if command -v timedatectl >/dev/null; then
+        if timedatectl set-ntp true 2>/dev/null; then
+            echo "NTP synchronization enabled successfully."
+            return 0
+        else
+            echo "Failed to enable NTP synchronization. Superuser privileges may be required."
+        fi
+    fi
+
+}
+
+get_ftl__real_PID() {
+    local name="${1:-pihole-FTL}"  # The name of the process to search for (e.g., "pihole-FTL")
+    
+    # Use pgrep to find the PID of the actual process (not the grep or shell wrapper)
+    local real_pid=$(pgrep -f "/usr/bin/${name} no-daemon" | tail -n 1)
+
+    # Check if a PID was found
+    if [ -n "$real_pid" ]; then
+        echo "$real_pid"
+        return 0
+    else
+        echo "Error: No running process found for '$name'." >&2
+        return 1
+    fi
+}
 
 ph_sort_weights() {
     local rules_json
@@ -819,12 +1132,170 @@ ph_fn_catalog() {
     core_fn_catalog "${BASH_SOURCE[0]}" "ph_sort_weights" 
 }
 
+container_provider_json() {
+    local provider="unknown"
+    local socket_path=""
+    local socket_type="unknown"
+    local mode="unknown"
+    local docker_host="${DOCKER_HOST:-not set}"
+    local caps_nice_works=false
+    local sock_accessible=false
+    
+    # Processa DOCKER_HOST
+    if [[ -n "$DOCKER_HOST" ]]; then
+        socket_path="${DOCKER_HOST#unix://}"
+        socket_path="${socket_path#tcp://}"
+        socket_path="${socket_path#ssh://}"
+        socket_path="${socket_path#http://}"
+        socket_path="${socket_path#https://}"
+        socket_path="${socket_path%%\?*}"
+        
+        if [[ "$DOCKER_HOST" == unix://* ]]; then
+            socket_type="unix"
+            if [[ -S "$socket_path" ]]; then
+                sock_accessible=true
+                
+                # ⭐ PRIMEIRO: Detecta provider pelo PATH do socket
+                case "$socket_path" in
+                    *podman*) provider="podman" ;;
+                    *docker*) provider="docker" ;;
+                esac
+                
+                # ⭐ SEGUNDO: Confirma via API (opcional, só refina)
+                local info_json
+                if info_json=$(curl -s --max-time 2 --unix-socket "$socket_path" http://v1.41/info 2>/dev/null); then
+                    if echo "$info_json" | grep -qi podman; then
+                        provider="podman"
+                    elif echo "$info_json" | grep -qi docker; then
+                        # Só muda para docker se NÃO for socket podman
+                        [[ "$socket_path" != *podman* ]] && provider="docker"
+                    fi
+                fi
+            fi
+        elif [[ "$DOCKER_HOST" == tcp://* ]] || [[ "$DOCKER_HOST" == ssh://* ]]; then
+            socket_type="remote"
+            provider="remote"
+        fi
+    else
+        docker_host="not set"
+        # ⭐ Detecta sockets padrão - prioridade ao socket real
+        if [[ -S "/run/user/${UID}/podman/podman.sock" ]]; then
+            socket_path="/run/user/${UID}/podman/podman.sock"
+            socket_type="unix"
+            provider="podman"
+            sock_accessible=true
+        elif [[ -S "/run/podman/podman.sock" ]]; then
+            socket_path="/run/podman/podman.sock"
+            socket_type="unix"
+            provider="podman"
+            sock_accessible=true
+        elif [[ -S "/var/run/docker.sock" ]]; then
+            socket_path="/var/run/docker.sock"
+            socket_type="unix"
+            provider="docker"
+            sock_accessible=true
+        fi
+    fi
+    
+    # ⭐ Detecta modo baseado no SOCKET primeiro!
+    if [[ "$socket_path" == /run/user/* ]]; then
+        mode="rootless"
+    elif [[ "$socket_path" == /run/podman/* ]] && [[ "$socket_path" != /run/user/* ]]; then
+        mode="rootful"
+    elif [[ "$provider" == "podman" ]] && command -v podman &>/dev/null; then
+        # Fallback para podman info
+        if podman info 2>/dev/null | grep -qi "rootless: true"; then
+            mode="rootless"
+        else
+            mode="rootful"
+        fi
+    elif [[ "$provider" == "docker" ]]; then
+        mode="rootful"
+    elif [[ "$provider" == "remote" ]]; then
+        mode="remote"
+    fi
+    
+    # Determina CAP_SYS_NICE
+    case "$provider:$mode" in
+        podman:rootless) caps_nice_works=false ;;
+        podman:rootful)  caps_nice_works=true ;;
+        docker:*)        caps_nice_works=true ;;
+        remote:*)        caps_nice_works=true ;;
+        *)               caps_nice_works=false ;;
+    esac
+    
+    # ⭐ Detecta que comando o utilizador está realmente a usar
+    local user_command=""
+    local alias_info=""
+    
+    if alias docker 2>/dev/null | grep -q podman; then
+        alias_info="docker→podman"
+        user_command="podman (via docker alias)"
+    elif command -v docker &>/dev/null; then
+        user_command="docker"
+    elif command -v podman &>/dev/null; then
+        user_command="podman"
+    fi
+    
+    # Constrói JSON
+    jq -n \
+        --arg provider "$provider" \
+        --arg user_command "$user_command" \
+        --arg alias_info "$alias_info" \
+        --arg docker_host "$docker_host" \
+        --arg socket_path "$socket_path" \
+        --arg socket_type "$socket_type" \
+        --arg mode "$mode" \
+        --argjson sock_accessible "$sock_accessible" \
+        --argjson caps_nice_works "$caps_nice_works" \
+        '{
+            provider: $provider,
+            user_command: $user_command,
+            aliases: $alias_info,
+            docker_host: $docker_host,
+            socket: {
+                path: $socket_path,
+                type: $socket_type,
+                accessible: $sock_accessible
+            },
+            mode: $mode,
+            capabilities: {
+                CAP_SYS_NICE_works: $caps_nice_works
+            }
+        }'
+}
+print_json___ident_bash_style() {
+    local json_input="$1"
 
+    [ -z "$json_input" ] && json_input=$(cat)
+
+    echo "$json_input" | jq -r '
+        def flatten(prefix):
+            to_entries[] |
+            if .value | type == "object" then
+                # Constrói o novo prefixo com o nome do campo atual
+                (. as $parent | .value | flatten(if prefix == "" then $parent.key else prefix + "." + $parent.key end))
+            elif .value | type == "array" then
+                (. as $parent | .value | to_entries[] |
+                flatten(if prefix == "" then ($parent.key + "[" + (.key | tostring) + "]") else prefix + "." + $parent.key + "[" + (.key | tostring) + "]" end))
+            else
+                "\(if prefix == "" then .key else prefix + "." + .key end)=\(.value | tostring | @sh)"
+            end
+        ;
+        
+        flatten("")
+    ' | while IFS='=' read -r path value; do
+        indent_level=$(echo "$path" | tr -cd '.' | wc -c)
+        indent_spaces=$((indent_level * 2))
+        printf "%${indent_spaces}s%s=%s\n" "" "$path" "$value"
+    done
+}
 if [[ "${BASH_SOURCE[0]}" != "$0" ]]; then
     #stack_trace
-
-    echo "" 2>&1
-    ph health
+    echo ""
+    #container_provider_json | print_json___ident_bash_style
+    echo ""
+    #ph health
     #ph api open
 
 fi

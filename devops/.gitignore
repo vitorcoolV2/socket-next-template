@@ -9,6 +9,9 @@ session-ses_*.md
 
 secrets*
 
+# ignore all virtual envs generater by devops/tools/podman-install.sh
+.Devops*
+
 # DEVOPS CORE containers - pihole,vault,authentik,traefik
 vault/config/certs/*.key
 pihole/etc-pihole/*
@@ -38,3 +41,5 @@ opencode/share/*
 files/data/**/*
 files/config/ocis.yaml
 ocis.yaml
+
+

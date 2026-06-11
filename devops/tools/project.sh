@@ -7,168 +7,15 @@ set +e
 
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     echo "❌ This is a library and should be sourced, not run directly."  >&2
-    return 1
+    echo "     Try: source ./$(realpath --relative-to="$PWD" "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")"
+    return 1 2> /dev/null || exit 1
 fi
 
 _CUR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . $_CUR_DIR/git.sh
 
 
-project_resources_visible() {
-    local target_dir="${1:-.}"
-    local recursive="${2:-true}"
-    local mode="${3:-flat}"
 
-    # 1. Normalize the path to avoid ".." confusion
-    local abs_target=$(realpath "$target_dir" 2>/dev/null)
-    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-    
-    local raw_list=""
-
-    if [[ -n "$repo_root" ]]; then
-        # 2. Get files relative to repo root, filtered by the target directory
-        # We use --full-name to get consistent paths from the root
-        local files=$(git ls-files --cached --others --exclude-standard --full-name "$abs_target" 2>/dev/null)
-        
-        # 3. Use python or perl for path manipulation if available for accuracy, 
-        # but here is a pure bash/sed approach:
-        # Get the path of the target relative to the repo root to strip it
-        local rel_to_root=$(realpath --relative-to="$repo_root" "$abs_target")
-        
-        if [[ "$rel_to_root" == "." ]]; then
-            raw_list="$files"
-        else
-            # Strip the prefix and the leading slash
-            raw_list=$(echo "$files" | sed "s|^$rel_to_root/||")
-        fi
-
-        # Handle Directory entries
-        local dirs=$(echo "$raw_list" | grep '/' | sed 's|/[^/]*$||' | sort -u)
-        raw_list=$(echo -e "$raw_list\n$dirs" | sort -u | grep -v '^$')
-
-        if [[ "$recursive" == "false" ]]; then
-            # Filter to show only items that do not contain a forward slash
-            raw_list=$(echo "$raw_list" | grep -v '/')
-        fi
-    else
-        # Fallback for non-git directories
-        local max_depth=""
-        [[ "$recursive" == "false" ]] && max_depth="-maxdepth 1"
-        raw_list=$(find "$abs_target" -mindepth 1 $max_depth -printf "%P\n" 2>/dev/null | sort -u)
-    fi
-
-    # 4. Output Formatting
-    if [[ "$mode" == "tree" ]]; then
-        echo "📂 $target_dir"
-        echo "$raw_list" | sed -e 's|[^/]*/|  │ |g' -e 's|│ \([^/]*\)$|└── \1|'
-    else
-        echo "$raw_list"
-    fi    
-}
-project_resources_visible() {
-    local target_dir="${1:-.}"  # Diretório alvo (padrão: ".")
-    local recursive="${2:-true}"  # Recursividade (padrão: true)
-    local mode="${3:-flat}"  # Modo de saída (padrão: "flat")
-
-    # 1. Normalizar o caminho para evitar confusões com ".."
-    local abs_target=$(realpath "$target_dir" 2>/dev/null || echo "$target_dir")
-    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-
-    local raw_list=""
-
-    if [[ -n "$repo_root" ]]; then
-        # 2. Obter arquivos visíveis no Git, filtrados pelo diretório alvo
-        local files=$(git ls-files --cached --others --exclude-standard --full-name "$abs_target" 2>/dev/null)
-
-        # 3. Remover o prefixo do repositório para obter caminhos relativos ao diretório alvo
-        local rel_to_root=$(realpath --relative-to="$repo_root" "$abs_target" 2>/dev/null || echo "")
-        
-        if [[ -z "$rel_to_root" || "$rel_to_root" == "." ]]; then
-            raw_list="$files"
-        else
-            # Remover o prefixo do diretório alvo
-            raw_list=$(echo "$files" | sed -E "s|^$rel_to_root/||")
-        fi
-
-        # Adicionar diretórios aos resultados
-        local dirs=$(echo "$raw_list" | grep '/' | sed 's|/[^/]*$||' | sort -u)
-        raw_list=$(echo -e "$raw_list\n$dirs" | sort -u | grep -v '^$')
-
-        # Filtrar por recursividade
-        if [[ "$recursive" == "false" ]]; then
-            raw_list=$(echo "$raw_list" | grep -v '/')
-        fi
-    else
-        # Fallback para diretórios não-Git
-        local max_depth=""
-        [[ "$recursive" == "false" ]] && max_depth="-maxdepth 1"
-        raw_list=$(find "$abs_target" -mindepth 1 $max_depth -printf "%P\n" 2>/dev/null | sort -u)
-    fi
-
-    # 4. Formatar a saída
-    if [[ "$mode" == "tree" ]]; then
-        echo "📂 $target_dir"
-        echo "$raw_list" | sed -e 's|[^/]*/|  │ |g' -e 's|│ \([^/]*\)$|└── \1|'
-    else
-        echo "$raw_list"
-    fi
-}
-project_resources_visible() {
-    local target="${1:-.}"  # Diretório ou arquivo alvo (padrão: ".")
-    local recursive="${2:-true}"  # Recursividade (padrão: true)
-    local mode="${3:-flat}"  # Modo de saída (padrão: "flat")
-
-    # 1. Normalizar o caminho para evitar confusões com ".."
-    local abs_target=$(realpath "$target" 2>/dev/null || echo "$target")
-    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-
-    # Verificar se o alvo é um arquivo
-    if [[ -f "$abs_target" ]]; then
-        # Se for um arquivo, exibir apenas ele
-        echo "$(basename "$abs_target")"
-        return
-    fi
-
-    # Continuar com o comportamento padrão para diretórios
-    local raw_list=""
-
-    if [[ -n "$repo_root" ]]; then
-        # 2. Obter arquivos visíveis no Git, filtrados pelo diretório alvo
-        local files=$(git ls-files --cached --others --exclude-standard --full-name "$abs_target" 2>/dev/null)
-
-        # 3. Remover o prefixo do repositório para obter caminhos relativos ao diretório alvo
-        local rel_to_root=$(realpath --relative-to="$repo_root" "$abs_target" 2>/dev/null || echo "")
-        
-        if [[ -z "$rel_to_root" || "$rel_to_root" == "." ]]; then
-            raw_list="$files"
-        else
-            # Remover o prefixo do diretório alvo
-            raw_list=$(echo "$files" | sed -E "s|^$rel_to_root/||")
-        fi
-
-        # Adicionar diretórios aos resultados
-        local dirs=$(echo "$raw_list" | grep '/' | sed 's|/[^/]*$||' | sort -u)
-        raw_list=$(echo -e "$raw_list\n$dirs" | sort -u | grep -v '^$')
-
-        # Filtrar por recursividade
-        if [[ "$recursive" == "false" ]]; then
-            raw_list=$(echo "$raw_list" | grep -v '/')
-        fi
-    else
-        # Fallback para diretórios não-Git
-        local max_depth=""
-        [[ "$recursive" == "false" ]] && max_depth="-maxdepth 1"
-        raw_list=$(find "$abs_target" -mindepth 1 $max_depth -printf "%P\n" 2>/dev/null | sort -u)
-    fi
-
-    # 4. Formatar a saída
-    if [[ "$mode" == "tree" ]]; then
-        echo "📂 $target"
-        echo "$raw_list" | sed -e 's|[^/]*/|  │ |g' -e 's|│ \([^/]*\)$|└── \1|'
-    else
-        echo "$raw_list"
-    fi
-}
 project_resources_visible() {
     local target="${1:-.}"  # Diretório ou arquivo alvo (padrão: ".")
     local recursive="${2:-true}"  # Recursividade (padrão: true)
@@ -249,7 +96,7 @@ project_resources_visible() {
 #   #          temp.log
 #   #          (empty if none found)s
 ###############################################################################
-## to be digested in data clues. Yes i do not not what on result. But this Delta all auther misses
+## to be digested in data clues. Yes i do not not what on result. But this Delta all author misses
 ## we digest | stream _delta_analysis__out_of_project_scope with other function
 ## count , like in SQL 
 project_delta_analisis__out_of_scope_paths_json() {
@@ -492,7 +339,7 @@ project_permissions_base_json_podes_apage_este() {
         printf '[%s]\n' "$(IFS=,; echo "${results[*]}")" | jq .
     fi
 }
-project_permissions_base_json2() {
+project_permissions_base_json() {
     local target_dir="${1:-.}"
     local recursive="${2:-true}"
     
@@ -641,174 +488,6 @@ project_permissions_asis_json() {
     echo "$enriched_json" | jq .
 }
 
-
-project_permissions_tracker() {
-    local target="${1:-.}"
-    local recursive="$2:-true"
-    local expected_uid="${2:-2501}"
-    local expected_gid="${3:-2500}"
-    local expected_perms="${4:-750}"
-   
-    local asis=$(project_permissions_asis_json "$target" "$recursive")
-    
-    # Meditate: receive asis, transform to tracker
-    echo $asis | jq \
-        --arg eu "$expected_uid" \
-        --arg eg "$expected_gid" \
-        --arg ep "$expected_perms" \
-        --arg tf "$target" '
-        
-        # Mindfulness: accept current state
-        def current: {
-            uid: .owner.uid,
-            gid: .group.gid,
-            perms: .permissions.octal,
-            owner: .owner.name,
-            group: .group.name
-        };
-        
-        # Clarity: define expected state
-        def expected: {
-            uid: ($eu | tonumber),
-            gid: ($eg | tonumber),
-            perms: $ep
-        };
-        
-        # Awareness: notice differences
-        def differences($c; $e): {
-            uid: ($c.uid != $e.uid),
-            gid: ($c.gid != $e.gid),
-            perms: ($c.perms != $e.perms)
-        };
-        
-        # Action: what needs to change
-        def fix_commands($t; $e): {
-            chown: ("sudo chown " + ($e.uid | tostring) + ":" + ($e.gid | tostring) + " \"" + $t + "\""),
-            chmod: ("sudo chmod " + $e.perms + " \"" + $t + "\"")
-        };
-        
-        # Wisdom: is there work to do?
-        def needs_fix($d): ($d.uid or $d.gid or $d.perms);
-        
-        # Result: the observed truth
-        {
-            target: $tf,
-            expected: expected,
-            current: current,
-            diff: differences(current; expected),
-            needs_fix: needs_fix(differences(current; expected)),
-            fix_commands: fix_commands($tf; expected)
-        }
-    ' 
-}
-project_permissions_tracker() {
-    local target_dir="${1:-.}"
-    local recursive="${2:-true}"
-
-    # Generate base JSON
-    local json_output
-    json_output=$(project_permissions_base_json "$target_dir" "$recursive") || {
-        echo "ERROR: Failed to generate base JSON" >&2
-        return 1
-    }
-
-    # Check if the output is a valid JSON array
-    if ! echo "$json_output" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        echo "ERROR: Invalid JSON output from base function" >&2
-        echo "DEBUG: Base output was: $json_output" >&2
-        return 1
-    fi
-
-    # Process each resource in the array
-    echo "$json_output" | jq -c '.[]' | while IFS= read -r resource_json; do
-        local resource=$(echo "$resource_json" | jq -r '.resource // empty')
-        local owner=$(echo "$resource_json" | jq -r '.owner.name // empty')
-        local group=$(echo "$resource_json" | jq -r '.group.name // empty')
-        local permissions=$(echo "$resource_json" | jq -r '.permissions.octal // empty')
-
-        # Skip resources with missing fields
-        [[ -z "$resource" || -z "$owner" || -z "$group" || -z "$permissions" ]] && continue
-
-        # Print or process the resource information
-        echo "Resource: $resource"
-        echo "Owner: $owner"
-        echo "Group: $group"
-        echo "Permissions: $permissions"
-        echo "-----------------------------"
-    done
-}
-
-project_permissions_tracker() {
-    local target="${1:-.}"
-    local recursive="${2:-true}"
-    local expected_uid="${3:-2501}"
-    local expected_gid="${4:-2500}"
-    local expected_perms="${5:-750}"
-
-    # Generate base JSON
-    local asis
-    asis=$(project_permissions_asis_json "$target" "$recursive") || {
-        echo "ERROR: Failed to generate base JSON" >&2
-        return 1
-    }
-
-    # Check if the output is a valid JSON array
-    if ! echo "$asis" | jq -e 'type == "array"' >/dev/null 2>&1; then
-        echo "ERROR: Invalid JSON output from base function" >&2
-        echo "DEBUG: Base output was: $asis" >&2
-        return 1
-    fi
-
-    # Process each resource in the array
-    echo "$asis" | jq -c --arg eu "$expected_uid" \
-        --arg eg "$expected_gid" \
-        --arg ep "$expected_perms" '
-        
-        # Mindfulness: accept current state
-        def current: {
-            uid: .owner.uid,
-            gid: .group.gid,
-            perms: .permissions.octal,
-            owner: .owner.name,
-            group: .group.name,
-            resource: .resource
-        };
-        
-        # Clarity: define expected state
-        def expected: {
-            uid: ($eu | tonumber),
-            gid: ($eg | tonumber),
-            perms: $ep
-        };
-        
-        # Awareness: notice differences
-        def differences($c; $e): {
-            uid: ($c.uid != $e.uid),
-            gid: ($c.gid != $e.gid),
-            perms: ($c.perms != $e.perms)
-        };
-        
-        # Action: what needs to change
-        def fix_commands($r; $e): {
-            chown: ("sudo chown " + ($e.uid | tostring) + ":" + ($e.gid | tostring) + " \"" + $r + "\""),
-            chmod: ("sudo chmod " + $e.perms + " \"" + $r + "\"")
-        };
-        
-        # Wisdom: is there work to do?
-        def needs_fix($d): ($d.uid or $d.gid or $d.perms);
-        
-        # Iterate over each resource
-        .[] | {
-            target: .resource,
-            expected: expected,
-            current: current,
-            diff: differences(current; expected),
-            needs_fix: needs_fix(differences(current; expected)),
-            fix_commands: fix_commands(.resource; expected)
-        }
-    '
-}
-
 project_permissions_tracker() {
     local target="${1:-.}"
     local recursive="${2:-true}"
@@ -916,3 +595,4 @@ project_delegate_execute() {
     
     echo -e "\nOwner: $(stat -c '%U' "$target")"
 }
+
