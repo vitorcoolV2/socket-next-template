@@ -62,13 +62,13 @@ EOF
     # 4. Testar novamente
     nslookup pihole
     dig pihole
-    nslookup pihole.lan
-    dig pihole.lan
+    nslookup pihole.local
+    dig pihole.local
     
     nslookup caddy
     dig caddy
-    nslookup caddy.lan
-    dig caddy.lan
+    nslookup caddy.local
+    dig caddy.local
     sudo systemctl status systemd-resolved
 }
 
@@ -90,8 +90,8 @@ EOF
 
     nslookup pihole
     dig pihole
-    nslookup pihole.lan
-    dig pihole.lan
+    nslookup pihole.local
+    dig pihole.local
 }
 
 

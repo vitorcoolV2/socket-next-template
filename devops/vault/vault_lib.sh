@@ -21,7 +21,7 @@ vault_config_requirements() {
     export VAULT_CONTAINER_NAME="vault"
     export VAULT_CONTAINER_IP="172.28.0.6"
 
-    export VAULT_PKI_CN="${VAULT_PKI_CN,-"home2500.lan"}"
+    export VAULT_PKI_CN="${VAULT_PKI_CN,-"home2500.local"}"
     export VAULT_ROOT_CA_NAME="${VAULT_ROOT_CA_NAME,"root-home2500"}"
 
 
@@ -708,7 +708,7 @@ path "pki_int/roles/home-server-role" { capabilities = ["create", "read", "updat
 # Permite listar as roles para validação
 path "pki_int/roles" { capabilities = ["list"] }
 
-# --- 4. EMISSÃO DE CERTIFICADOS (Traefik proxy service 4 home2500.lan ) ---
+# --- 4. EMISSÃO DE CERTIFICADOS (Traefik proxy service 4 home2500.local ) ---
 path "pki_int/issue/home-server-role" { capabilities = ["create", "update"] }
 path "pki_int/sign/home-server-role" { capabilities = ["create", "update"] }
 
